@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from cyroid.config import get_settings
 from cyroid.api.auth import router as auth_router
+from cyroid.api.templates import router as templates_router
 
 settings = get_settings()
 
@@ -23,6 +24,7 @@ app.add_middleware(
 
 # Include routers
 app.include_router(auth_router, prefix="/api/v1")
+app.include_router(templates_router, prefix="/api/v1")
 
 
 @app.get("/health")
