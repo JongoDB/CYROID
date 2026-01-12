@@ -2,9 +2,15 @@
 from cyroid.schemas.user import UserBase, UserCreate, UserUpdate, UserResponse
 from cyroid.schemas.auth import LoginRequest, TokenResponse
 from cyroid.schemas.template import VMTemplateBase, VMTemplateCreate, VMTemplateUpdate, VMTemplateResponse
+from cyroid.schemas.network import NetworkBase, NetworkCreate, NetworkUpdate, NetworkResponse
+from cyroid.schemas.vm import VMBase, VMCreate, VMUpdate, VMResponse
+from cyroid.schemas.range import RangeBase, RangeCreate, RangeUpdate, RangeResponse, RangeDetailResponse
 
 __all__ = [
     "UserBase", "UserCreate", "UserUpdate", "UserResponse",
     "LoginRequest", "TokenResponse",
     "VMTemplateBase", "VMTemplateCreate", "VMTemplateUpdate", "VMTemplateResponse",
+    "NetworkBase", "NetworkCreate", "NetworkUpdate", "NetworkResponse",
+    "VMBase", "VMCreate", "VMUpdate", "VMResponse",
+    "RangeBase", "RangeCreate", "RangeUpdate", "RangeResponse", "RangeDetailResponse",
 ]
