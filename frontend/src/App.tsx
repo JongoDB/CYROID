@@ -1,20 +1,42 @@
 // frontend/src/App.tsx
 import { Routes, Route } from 'react-router-dom'
+import { useEffect } from 'react'
+import { useAuthStore } from './stores/authStore'
+import Login from './pages/Login'
+import Register from './pages/Register'
+import Dashboard from './pages/Dashboard'
+import ProtectedRoute from './components/common/ProtectedRoute'
+import Layout from './components/layout/Layout'
 
 function App() {
+  const { checkAuth, token } = useAuthStore()
+
+  useEffect(() => {
+    if (token) {
+      checkAuth()
+    }
+  }, [])
+
   return (
-    <div className="min-h-screen">
-      <Routes>
-        <Route path="/" element={
-          <div className="flex items-center justify-center min-h-screen">
-            <div className="text-center">
-              <h1 className="text-4xl font-bold text-primary-600">CYROID</h1>
-              <p className="mt-2 text-gray-600">Cyber Range Orchestrator In Docker</p>
-            </div>
-          </div>
-        } />
-      </Routes>
-    </div>
+    <Routes>
+      <Route path="/login" element={<Login />} />
+      <Route path="/register" element={<Register />} />
+      <Route
+        path="/*"
+        element={
+          <ProtectedRoute>
+            <Layout>
+              <Routes>
+                <Route path="/" element={<Dashboard />} />
+                <Route path="/templates" element={<div>Templates - Coming Soon</div>} />
+                <Route path="/ranges" element={<div>Ranges - Coming Soon</div>} />
+                <Route path="/artifacts" element={<div>Artifacts - Coming Soon</div>} />
+              </Routes>
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+    </Routes>
   )
 }
 
