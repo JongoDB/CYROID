@@ -10,7 +10,10 @@ from cyroid.models.range import Range, RangeStatus
 from cyroid.models.network import Network, IsolationLevel
 from cyroid.models.vm import VM, VMStatus
 from cyroid.models.template import VMTemplate
-from cyroid.schemas.range import RangeCreate, RangeUpdate, RangeResponse, RangeDetailResponse
+from cyroid.schemas.range import (
+    RangeCreate, RangeUpdate, RangeResponse, RangeDetailResponse,
+    RangeTemplateExport, RangeTemplateImport, NetworkTemplateData, VMTemplateData
+)
 
 logger = logging.getLogger(__name__)
 
@@ -335,3 +338,187 @@ def teardown_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
         )
 
     return range_obj
+
+
+@router.get("/{range_id}/export", response_model=RangeTemplateExport)
+def export_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
+    """Export a range as a reusable template."""
+    range_obj = db.query(Range).filter(Range.id == range_id).first()
+    if not range_obj:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Range not found",
+        )
+
+    # Get networks
+    networks = db.query(Network).filter(Network.range_id == range_id).all()
+    network_data = [
+        NetworkTemplateData(
+            name=n.name,
+            subnet=n.subnet,
+            gateway=n.gateway,
+            isolation_level=n.isolation_level.value,
+        )
+        for n in networks
+    ]
+
+    # Build network name lookup
+    network_lookup = {n.id: n.name for n in networks}
+
+    # Get VMs with their template names
+    vms = db.query(VM).filter(VM.range_id == range_id).all()
+    vm_data = []
+    for vm in vms:
+        template = db.query(VMTemplate).filter(VMTemplate.id == vm.template_id).first()
+        vm_data.append(
+            VMTemplateData(
+                hostname=vm.hostname,
+                ip_address=vm.ip_address,
+                network_name=network_lookup.get(vm.network_id, "unknown"),
+                template_name=template.name if template else "unknown",
+                cpu=vm.cpu,
+                ram_mb=vm.ram_mb,
+                disk_gb=vm.disk_gb,
+                position_x=vm.position_x,
+                position_y=vm.position_y,
+            )
+        )
+
+    return RangeTemplateExport(
+        version="1.0",
+        name=range_obj.name,
+        description=range_obj.description,
+        networks=network_data,
+        vms=vm_data,
+    )
+
+
+@router.post("/import", response_model=RangeDetailResponse, status_code=status.HTTP_201_CREATED)
+def import_range(
+    import_data: RangeTemplateImport,
+    db: DBSession,
+    current_user: CurrentUser,
+):
+    """Import a range from a template."""
+    template = import_data.template
+    range_name = import_data.name_override or template.name
+
+    # Create range
+    range_obj = Range(
+        name=range_name,
+        description=template.description,
+        created_by=current_user.id,
+    )
+    db.add(range_obj)
+    db.commit()
+    db.refresh(range_obj)
+
+    # Create networks and build lookup
+    network_lookup = {}
+    for net_data in template.networks:
+        network = Network(
+            range_id=range_obj.id,
+            name=net_data.name,
+            subnet=net_data.subnet,
+            gateway=net_data.gateway,
+            isolation_level=IsolationLevel(net_data.isolation_level),
+        )
+        db.add(network)
+        db.commit()
+        db.refresh(network)
+        network_lookup[net_data.name] = network.id
+
+    # Create VMs
+    for vm_data in template.vms:
+        # Find network by name
+        network_id = network_lookup.get(vm_data.network_name)
+        if not network_id:
+            logger.warning(f"Network '{vm_data.network_name}' not found for VM '{vm_data.hostname}'")
+            continue
+
+        # Find template by name
+        vm_template = db.query(VMTemplate).filter(VMTemplate.name == vm_data.template_name).first()
+        if not vm_template:
+            logger.warning(f"VM template '{vm_data.template_name}' not found for VM '{vm_data.hostname}'")
+            continue
+
+        vm = VM(
+            range_id=range_obj.id,
+            network_id=network_id,
+            template_id=vm_template.id,
+            hostname=vm_data.hostname,
+            ip_address=vm_data.ip_address,
+            cpu=vm_data.cpu,
+            ram_mb=vm_data.ram_mb,
+            disk_gb=vm_data.disk_gb,
+            position_x=vm_data.position_x,
+            position_y=vm_data.position_y,
+        )
+        db.add(vm)
+        db.commit()
+
+    db.refresh(range_obj)
+    return range_obj
+
+
+@router.post("/{range_id}/clone", response_model=RangeDetailResponse, status_code=status.HTTP_201_CREATED)
+def clone_range(
+    range_id: UUID,
+    db: DBSession,
+    current_user: CurrentUser,
+    new_name: str = None,
+):
+    """Clone a range with all its networks and VMs."""
+    range_obj = db.query(Range).filter(Range.id == range_id).first()
+    if not range_obj:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Range not found",
+        )
+
+    # Create cloned range
+    cloned_range = Range(
+        name=new_name or f"{range_obj.name} (Copy)",
+        description=range_obj.description,
+        created_by=current_user.id,
+    )
+    db.add(cloned_range)
+    db.commit()
+    db.refresh(cloned_range)
+
+    # Clone networks and build ID mapping
+    old_to_new_network = {}
+    networks = db.query(Network).filter(Network.range_id == range_id).all()
+    for network in networks:
+        cloned_network = Network(
+            range_id=cloned_range.id,
+            name=network.name,
+            subnet=network.subnet,
+            gateway=network.gateway,
+            isolation_level=network.isolation_level,
+        )
+        db.add(cloned_network)
+        db.commit()
+        db.refresh(cloned_network)
+        old_to_new_network[network.id] = cloned_network.id
+
+    # Clone VMs
+    vms = db.query(VM).filter(VM.range_id == range_id).all()
+    for vm in vms:
+        cloned_vm = VM(
+            range_id=cloned_range.id,
+            network_id=old_to_new_network.get(vm.network_id),
+            template_id=vm.template_id,
+            hostname=vm.hostname,
+            ip_address=vm.ip_address,
+            cpu=vm.cpu,
+            ram_mb=vm.ram_mb,
+            disk_gb=vm.disk_gb,
+            position_x=vm.position_x,
+            position_y=vm.position_y,
+        )
+        db.add(cloned_vm)
+        db.commit()
+
+    db.refresh(cloned_range)
+    return cloned_range

@@ -47,3 +47,40 @@ from cyroid.schemas.network import NetworkResponse
 from cyroid.schemas.vm import VMResponse
 
 RangeDetailResponse.model_rebuild()
+
+
+# Range Template Export/Import schemas
+class NetworkTemplateData(BaseModel):
+    """Network data for range template."""
+    name: str
+    subnet: str
+    gateway: Optional[str] = None
+    isolation_level: str = "complete"
+
+
+class VMTemplateData(BaseModel):
+    """VM data for range template."""
+    hostname: str
+    ip_address: str
+    network_name: str  # Reference to network by name
+    template_name: str  # Reference to VM template by name
+    cpu: int
+    ram_mb: int
+    disk_gb: int
+    position_x: int = 0
+    position_y: int = 0
+
+
+class RangeTemplateExport(BaseModel):
+    """Full range template for export/import."""
+    version: str = "1.0"
+    name: str
+    description: Optional[str] = None
+    networks: List[NetworkTemplateData] = []
+    vms: List[VMTemplateData] = []
+
+
+class RangeTemplateImport(BaseModel):
+    """Import a range from template."""
+    template: RangeTemplateExport
+    name_override: Optional[str] = None  # Override range name
