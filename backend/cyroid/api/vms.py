@@ -1,6 +1,7 @@
 # backend/cyroid/api/vms.py
 from typing import List
 from uuid import UUID
+import logging
 
 from fastapi import APIRouter, HTTPException, status
 
@@ -11,7 +12,15 @@ from cyroid.models.network import Network
 from cyroid.models.template import VMTemplate
 from cyroid.schemas.vm import VMCreate, VMUpdate, VMResponse
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/vms", tags=["VMs"])
+
+
+def get_docker_service():
+    """Lazy import to avoid Docker connection issues during testing."""
+    from cyroid.services.docker_service import get_docker_service as _get_docker_service
+    return _get_docker_service()
 
 
 @router.get("", response_model=List[VMResponse])
@@ -132,6 +141,14 @@ def delete_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
             detail="VM not found",
         )
 
+    # Remove container if it exists
+    if vm.container_id:
+        try:
+            docker = get_docker_service()
+            docker.remove_container(vm.container_id, force=True)
+        except Exception as e:
+            logger.warning(f"Failed to remove container for VM {vm_id}: {e}")
+
     db.delete(vm)
     db.commit()
 
@@ -154,9 +171,77 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
 
     vm.status = VMStatus.CREATING
     db.commit()
-    db.refresh(vm)
 
-    # TODO: Trigger async start task via Dramatiq
+    try:
+        docker = get_docker_service()
+
+        # Get network and template info
+        network = db.query(Network).filter(Network.id == vm.network_id).first()
+        template = db.query(VMTemplate).filter(VMTemplate.id == vm.template_id).first()
+
+        if not network or not network.docker_network_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Network not provisioned",
+            )
+
+        # Container already exists - just start it
+        if vm.container_id:
+            docker.start_container(vm.container_id)
+        else:
+            # Create new container
+            labels = {
+                "cyroid.range_id": str(vm.range_id),
+                "cyroid.vm_id": str(vm.id),
+                "cyroid.hostname": vm.hostname,
+            }
+
+            if template.os_type == "windows":
+                container_id = docker.create_windows_container(
+                    name=f"cyroid-{vm.hostname}-{str(vm.id)[:8]}",
+                    network_id=network.docker_network_id,
+                    ip_address=vm.ip_address,
+                    cpu_limit=vm.cpu,
+                    memory_limit_mb=vm.ram_mb,
+                    disk_size_gb=vm.disk_gb,
+                    labels=labels,
+                )
+            else:
+                container_id = docker.create_container(
+                    name=f"cyroid-{vm.hostname}-{str(vm.id)[:8]}",
+                    image=template.base_image,
+                    network_id=network.docker_network_id,
+                    ip_address=vm.ip_address,
+                    cpu_limit=vm.cpu,
+                    memory_limit_mb=vm.ram_mb,
+                    hostname=vm.hostname,
+                    labels=labels,
+                )
+
+            vm.container_id = container_id
+            docker.start_container(container_id)
+
+            # Run config script if present
+            if template.config_script:
+                try:
+                    docker.exec_command(container_id, template.config_script)
+                except Exception as e:
+                    logger.warning(f"Config script failed for VM {vm_id}: {e}")
+
+        vm.status = VMStatus.RUNNING
+        db.commit()
+        db.refresh(vm)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to start VM {vm_id}: {e}")
+        vm.status = VMStatus.ERROR
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to start VM: {str(e)}",
+        )
 
     return vm
 
@@ -177,11 +262,21 @@ def stop_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
             detail=f"Cannot stop VM in {vm.status} status",
         )
 
-    vm.status = VMStatus.STOPPED
-    db.commit()
-    db.refresh(vm)
+    try:
+        if vm.container_id:
+            docker = get_docker_service()
+            docker.stop_container(vm.container_id)
 
-    # TODO: Trigger async stop task via Dramatiq
+        vm.status = VMStatus.STOPPED
+        db.commit()
+        db.refresh(vm)
+
+    except Exception as e:
+        logger.error(f"Failed to stop VM {vm_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to stop VM: {str(e)}",
+        )
 
     return vm
 
@@ -202,10 +297,22 @@ def restart_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
             detail=f"Cannot restart VM in {vm.status} status",
         )
 
-    vm.status = VMStatus.CREATING
-    db.commit()
-    db.refresh(vm)
+    try:
+        if vm.container_id:
+            docker = get_docker_service()
+            docker.restart_container(vm.container_id)
 
-    # TODO: Trigger async restart task via Dramatiq
+        vm.status = VMStatus.RUNNING
+        db.commit()
+        db.refresh(vm)
+
+    except Exception as e:
+        logger.error(f"Failed to restart VM {vm_id}: {e}")
+        vm.status = VMStatus.ERROR
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to restart VM: {str(e)}",
+        )
 
     return vm

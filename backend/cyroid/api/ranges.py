@@ -1,14 +1,26 @@
 # backend/cyroid/api/ranges.py
 from typing import List
 from uuid import UUID
+import logging
 
 from fastapi import APIRouter, HTTPException, status
 
 from cyroid.api.deps import DBSession, CurrentUser
 from cyroid.models.range import Range, RangeStatus
+from cyroid.models.network import Network, IsolationLevel
+from cyroid.models.vm import VM, VMStatus
+from cyroid.models.template import VMTemplate
 from cyroid.schemas.range import RangeCreate, RangeUpdate, RangeResponse, RangeDetailResponse
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/ranges", tags=["Ranges"])
+
+
+def get_docker_service():
+    """Lazy import to avoid Docker connection issues during testing."""
+    from cyroid.services.docker_service import get_docker_service as _get_docker_service
+    return _get_docker_service()
 
 
 @router.get("", response_model=List[RangeResponse])
@@ -72,13 +84,20 @@ def delete_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
             detail="Range not found",
         )
 
+    # Cleanup Docker resources before deleting
+    try:
+        docker = get_docker_service()
+        docker.cleanup_range(str(range_id))
+    except Exception as e:
+        logger.warning(f"Failed to cleanup Docker resources for range {range_id}: {e}")
+
     db.delete(range_obj)
     db.commit()
 
 
 @router.post("/{range_id}/deploy", response_model=RangeResponse)
 def deploy_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
-    """Start deploying a range - creates Docker networks and VMs"""
+    """Deploy a range - creates Docker networks and starts all VMs"""
     range_obj = db.query(Range).filter(Range.id == range_id).first()
     if not range_obj:
         raise HTTPException(
@@ -94,9 +113,96 @@ def deploy_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
 
     range_obj.status = RangeStatus.DEPLOYING
     db.commit()
-    db.refresh(range_obj)
 
-    # TODO: Trigger async deployment task via Dramatiq
+    try:
+        docker = get_docker_service()
+
+        # Step 1: Provision all networks
+        networks = db.query(Network).filter(Network.range_id == range_id).all()
+        for network in networks:
+            if not network.docker_network_id:
+                internal = network.isolation_level in [IsolationLevel.COMPLETE, IsolationLevel.CONTROLLED]
+                docker_network_id = docker.create_network(
+                    name=f"cyroid-{network.name}-{str(network.id)[:8]}",
+                    subnet=network.subnet,
+                    gateway=network.gateway,
+                    internal=internal,
+                    labels={
+                        "cyroid.range_id": str(range_id),
+                        "cyroid.network_id": str(network.id),
+                    }
+                )
+                network.docker_network_id = docker_network_id
+                db.commit()
+
+        # Step 2: Create and start all VMs
+        vms = db.query(VM).filter(VM.range_id == range_id).all()
+        for vm in vms:
+            if vm.container_id:
+                # Container exists, just start it
+                docker.start_container(vm.container_id)
+            else:
+                # Create new container
+                network = db.query(Network).filter(Network.id == vm.network_id).first()
+                template = db.query(VMTemplate).filter(VMTemplate.id == vm.template_id).first()
+
+                if not network or not network.docker_network_id:
+                    logger.warning(f"Skipping VM {vm.id}: network not provisioned")
+                    continue
+
+                labels = {
+                    "cyroid.range_id": str(range_id),
+                    "cyroid.vm_id": str(vm.id),
+                    "cyroid.hostname": vm.hostname,
+                }
+
+                if template.os_type == "windows":
+                    container_id = docker.create_windows_container(
+                        name=f"cyroid-{vm.hostname}-{str(vm.id)[:8]}",
+                        network_id=network.docker_network_id,
+                        ip_address=vm.ip_address,
+                        cpu_limit=vm.cpu,
+                        memory_limit_mb=vm.ram_mb,
+                        disk_size_gb=vm.disk_gb,
+                        labels=labels,
+                    )
+                else:
+                    container_id = docker.create_container(
+                        name=f"cyroid-{vm.hostname}-{str(vm.id)[:8]}",
+                        image=template.base_image,
+                        network_id=network.docker_network_id,
+                        ip_address=vm.ip_address,
+                        cpu_limit=vm.cpu,
+                        memory_limit_mb=vm.ram_mb,
+                        hostname=vm.hostname,
+                        labels=labels,
+                    )
+
+                vm.container_id = container_id
+                docker.start_container(container_id)
+
+                # Run config script if present
+                if template.config_script:
+                    try:
+                        docker.exec_command(container_id, template.config_script)
+                    except Exception as e:
+                        logger.warning(f"Config script failed for VM {vm.id}: {e}")
+
+            vm.status = VMStatus.RUNNING
+            db.commit()
+
+        range_obj.status = RangeStatus.RUNNING
+        db.commit()
+        db.refresh(range_obj)
+
+    except Exception as e:
+        logger.error(f"Failed to deploy range {range_id}: {e}")
+        range_obj.status = RangeStatus.ERROR
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to deploy range: {str(e)}",
+        )
 
     return range_obj
 
@@ -117,11 +223,26 @@ def start_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
             detail=f"Cannot start range in {range_obj.status} status",
         )
 
-    range_obj.status = RangeStatus.RUNNING
-    db.commit()
-    db.refresh(range_obj)
+    try:
+        docker = get_docker_service()
 
-    # TODO: Trigger async start task via Dramatiq
+        vms = db.query(VM).filter(VM.range_id == range_id).all()
+        for vm in vms:
+            if vm.container_id:
+                docker.start_container(vm.container_id)
+                vm.status = VMStatus.RUNNING
+                db.commit()
+
+        range_obj.status = RangeStatus.RUNNING
+        db.commit()
+        db.refresh(range_obj)
+
+    except Exception as e:
+        logger.error(f"Failed to start range {range_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to start range: {str(e)}",
+        )
 
     return range_obj
 
@@ -142,11 +263,26 @@ def stop_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
             detail=f"Cannot stop range in {range_obj.status} status",
         )
 
-    range_obj.status = RangeStatus.STOPPED
-    db.commit()
-    db.refresh(range_obj)
+    try:
+        docker = get_docker_service()
 
-    # TODO: Trigger async stop task via Dramatiq
+        vms = db.query(VM).filter(VM.range_id == range_id).all()
+        for vm in vms:
+            if vm.container_id:
+                docker.stop_container(vm.container_id)
+                vm.status = VMStatus.STOPPED
+                db.commit()
+
+        range_obj.status = RangeStatus.STOPPED
+        db.commit()
+        db.refresh(range_obj)
+
+    except Exception as e:
+        logger.error(f"Failed to stop range {range_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to stop range: {str(e)}",
+        )
 
     return range_obj
 
@@ -167,10 +303,35 @@ def teardown_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
             detail="Cannot teardown range while deploying",
         )
 
-    range_obj.status = RangeStatus.DRAFT
-    db.commit()
-    db.refresh(range_obj)
+    try:
+        docker = get_docker_service()
 
-    # TODO: Trigger async teardown task via Dramatiq
+        # Step 1: Remove all VM containers
+        vms = db.query(VM).filter(VM.range_id == range_id).all()
+        for vm in vms:
+            if vm.container_id:
+                docker.remove_container(vm.container_id, force=True)
+                vm.container_id = None
+                vm.status = VMStatus.PENDING
+                db.commit()
+
+        # Step 2: Remove all Docker networks
+        networks = db.query(Network).filter(Network.range_id == range_id).all()
+        for network in networks:
+            if network.docker_network_id:
+                docker.delete_network(network.docker_network_id)
+                network.docker_network_id = None
+                db.commit()
+
+        range_obj.status = RangeStatus.DRAFT
+        db.commit()
+        db.refresh(range_obj)
+
+    except Exception as e:
+        logger.error(f"Failed to teardown range {range_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to teardown range: {str(e)}",
+        )
 
     return range_obj

@@ -34,7 +34,7 @@ def test_range(client, auth_headers):
 
 @pytest.fixture
 def test_network(client, auth_headers, test_range):
-    """Create a test network"""
+    """Create and provision a test network"""
     response = client.post(
         "/api/v1/networks",
         headers=auth_headers,
@@ -45,6 +45,11 @@ def test_network(client, auth_headers, test_range):
             "gateway": "172.16.1.1",
         },
     )
+    network = response.json()
+    # Provision the network so VMs can be started
+    client.post(f"/api/v1/networks/{network['id']}/provision", headers=auth_headers)
+    # Re-fetch to get the updated docker_network_id
+    response = client.get(f"/api/v1/networks/{network['id']}", headers=auth_headers)
     return response.json()
 
 
@@ -292,4 +297,4 @@ def test_start_vm(client, auth_headers, test_range, test_network, test_template)
     response = client.post(f"/api/v1/vms/{vm_id}/start", headers=auth_headers)
 
     assert response.status_code == 200
-    assert response.json()["status"] == "creating"
+    assert response.json()["status"] == "running"

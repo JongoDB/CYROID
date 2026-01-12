@@ -118,11 +118,11 @@ def test_deploy_range(client, auth_headers):
     )
     range_id = create_response.json()["id"]
 
-    # Deploy it
+    # Deploy it (synchronous - completes immediately with mocked Docker)
     response = client.post(f"/api/v1/ranges/{range_id}/deploy", headers=auth_headers)
 
     assert response.status_code == 200
-    assert response.json()["status"] == "deploying"
+    assert response.json()["status"] == "running"
 
 
 def test_stop_running_range(client, auth_headers):
@@ -134,13 +134,13 @@ def test_stop_running_range(client, auth_headers):
     )
     range_id = create_response.json()["id"]
 
-    # Deploy it
+    # Deploy it (now completes synchronously)
     client.post(f"/api/v1/ranges/{range_id}/deploy", headers=auth_headers)
 
-    # For test purposes, manually set to running (normally async task would do this)
-    # We can't stop a deploying range, so this test checks the error case
+    # Stop the running range
     response = client.post(f"/api/v1/ranges/{range_id}/stop", headers=auth_headers)
-    assert response.status_code == 400  # Can't stop deploying range
+    assert response.status_code == 200
+    assert response.json()["status"] == "stopped"
 
 
 def test_teardown_range(client, auth_headers):
