@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Skill(superpowers:brainstorming)",
+      "Bash(git init:*)",
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nAdd CYROID MVP design document\n\n- Define project scope \\(Phases 1-3\\)\n- Document tech stack decisions \\(FastAPI, React, Dramatiq, Traefik\\)\n- Design plugin architecture for future extensibility\n- Specify data models and API structure\n- Outline UI/UX for visual network builder\n- Establish testing strategy \\(unit, integration, E2E\\)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git config:*)"
+    ]
+  }
+}
