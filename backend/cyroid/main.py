@@ -9,6 +9,7 @@ from cyroid.api.ranges import router as ranges_router
 from cyroid.api.networks import router as networks_router
 from cyroid.api.vms import router as vms_router
 from cyroid.api.websocket import router as websocket_router
+from cyroid.api.artifacts import router as artifacts_router
 
 settings = get_settings()
 
@@ -33,6 +34,7 @@ app.include_router(ranges_router, prefix="/api/v1")
 app.include_router(networks_router, prefix="/api/v1")
 app.include_router(vms_router, prefix="/api/v1")
 app.include_router(websocket_router, prefix="/api/v1")
+app.include_router(artifacts_router, prefix="/api/v1")
 
 
 @app.get("/health")
