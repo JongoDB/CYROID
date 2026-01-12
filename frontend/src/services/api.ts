@@ -68,4 +68,90 @@ export const authApi = {
     api.get<User>('/auth/me'),
 }
 
+// Templates API
+import type { VMTemplate, Range, Network, VM } from '../types'
+
+export interface VMTemplateCreate {
+  name: string
+  description?: string
+  os_type: 'windows' | 'linux'
+  os_variant: string
+  base_image: string
+  default_cpu?: number
+  default_ram_mb?: number
+  default_disk_gb?: number
+  config_script?: string
+  tags?: string[]
+}
+
+export const templatesApi = {
+  list: () => api.get<VMTemplate[]>('/templates'),
+  get: (id: string) => api.get<VMTemplate>(`/templates/${id}`),
+  create: (data: VMTemplateCreate) => api.post<VMTemplate>('/templates', data),
+  update: (id: string, data: Partial<VMTemplateCreate>) => api.put<VMTemplate>(`/templates/${id}`, data),
+  delete: (id: string) => api.delete(`/templates/${id}`),
+  clone: (id: string) => api.post<VMTemplate>(`/templates/${id}/clone`),
+}
+
+// Ranges API
+export interface RangeCreate {
+  name: string
+  description?: string
+}
+
+export const rangesApi = {
+  list: () => api.get<Range[]>('/ranges'),
+  get: (id: string) => api.get<Range>(`/ranges/${id}`),
+  create: (data: RangeCreate) => api.post<Range>('/ranges', data),
+  update: (id: string, data: Partial<RangeCreate>) => api.put<Range>(`/ranges/${id}`, data),
+  delete: (id: string) => api.delete(`/ranges/${id}`),
+  deploy: (id: string) => api.post<Range>(`/ranges/${id}/deploy`),
+  start: (id: string) => api.post<Range>(`/ranges/${id}/start`),
+  stop: (id: string) => api.post<Range>(`/ranges/${id}/stop`),
+  teardown: (id: string) => api.post<Range>(`/ranges/${id}/teardown`),
+}
+
+// Networks API
+export interface NetworkCreate {
+  range_id: string
+  name: string
+  subnet: string
+  gateway: string
+  dns_servers?: string
+  isolation_level?: 'complete' | 'controlled' | 'open'
+}
+
+export const networksApi = {
+  list: (rangeId: string) => api.get<Network[]>(`/networks?range_id=${rangeId}`),
+  get: (id: string) => api.get<Network>(`/networks/${id}`),
+  create: (data: NetworkCreate) => api.post<Network>('/networks', data),
+  update: (id: string, data: Partial<NetworkCreate>) => api.put<Network>(`/networks/${id}`, data),
+  delete: (id: string) => api.delete(`/networks/${id}`),
+}
+
+// VMs API
+export interface VMCreate {
+  range_id: string
+  network_id: string
+  template_id: string
+  hostname: string
+  ip_address: string
+  cpu: number
+  ram_mb: number
+  disk_gb: number
+  position_x?: number
+  position_y?: number
+}
+
+export const vmsApi = {
+  list: (rangeId: string) => api.get<VM[]>(`/vms?range_id=${rangeId}`),
+  get: (id: string) => api.get<VM>(`/vms/${id}`),
+  create: (data: VMCreate) => api.post<VM>('/vms', data),
+  update: (id: string, data: Partial<VMCreate>) => api.put<VM>(`/vms/${id}`, data),
+  delete: (id: string) => api.delete(`/vms/${id}`),
+  start: (id: string) => api.post<VM>(`/vms/${id}/start`),
+  stop: (id: string) => api.post<VM>(`/vms/${id}/stop`),
+  restart: (id: string) => api.post<VM>(`/vms/${id}/restart`),
+}
+
 export default api

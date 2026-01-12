@@ -5,6 +5,9 @@ import { useAuthStore } from './stores/authStore'
 import Login from './pages/Login'
 import Register from './pages/Register'
 import Dashboard from './pages/Dashboard'
+import Templates from './pages/Templates'
+import Ranges from './pages/Ranges'
+import RangeDetail from './pages/RangeDetail'
 import ProtectedRoute from './components/common/ProtectedRoute'
 import Layout from './components/layout/Layout'
 
@@ -28,8 +31,9 @@ function App() {
             <Layout>
               <Routes>
                 <Route path="/" element={<Dashboard />} />
-                <Route path="/templates" element={<div>Templates - Coming Soon</div>} />
-                <Route path="/ranges" element={<div>Ranges - Coming Soon</div>} />
+                <Route path="/templates" element={<Templates />} />
+                <Route path="/ranges" element={<Ranges />} />
+                <Route path="/ranges/:id" element={<RangeDetail />} />
                 <Route path="/artifacts" element={<div>Artifacts - Coming Soon</div>} />
               </Routes>
             </Layout>

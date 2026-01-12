@@ -1,8 +1,46 @@
 // frontend/src/pages/Dashboard.tsx
+import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useAuthStore } from '../stores/authStore'
+import { rangesApi, templatesApi } from '../services/api'
+import type { Range, VMTemplate } from '../types'
+import { Network, Server, Plus, Loader2 } from 'lucide-react'
 
 export default function Dashboard() {
   const { user } = useAuthStore()
+  const [ranges, setRanges] = useState<Range[]>([])
+  const [templates, setTemplates] = useState<VMTemplate[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const [rangesRes, templatesRes] = await Promise.all([
+          rangesApi.list(),
+          templatesApi.list()
+        ])
+        setRanges(rangesRes.data)
+        setTemplates(templatesRes.data)
+      } catch (error) {
+        console.error('Failed to fetch dashboard data:', error)
+      } finally {
+        setLoading(false)
+      }
+    }
+    fetchData()
+  }, [])
+
+  const runningVMs = ranges.reduce((count, range) => {
+    return count + (range.vms?.filter(vm => vm.status === 'running').length || 0)
+  }, 0)
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="h-8 w-8 animate-spin text-primary-600" />
+      </div>
+    )
+  }
 
   return (
     <div>
@@ -18,15 +56,13 @@ export default function Dashboard() {
             <div className="flex items-center">
               <div className="flex-shrink-0">
                 <div className="rounded-md bg-primary-100 p-3">
-                  <svg className="h-6 w-6 text-primary-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2" />
-                  </svg>
+                  <Network className="h-6 w-6 text-primary-600" />
                 </div>
               </div>
               <div className="ml-5 w-0 flex-1">
                 <dl>
                   <dt className="text-sm font-medium text-gray-500 truncate">Total Ranges</dt>
-                  <dd className="text-2xl font-semibold text-gray-900">0</dd>
+                  <dd className="text-2xl font-semibold text-gray-900">{ranges.length}</dd>
                 </dl>
               </div>
             </div>
@@ -46,7 +82,7 @@ export default function Dashboard() {
               <div className="ml-5 w-0 flex-1">
                 <dl>
                   <dt className="text-sm font-medium text-gray-500 truncate">Running VMs</dt>
-                  <dd className="text-2xl font-semibold text-gray-900">0</dd>
+                  <dd className="text-2xl font-semibold text-gray-900">{runningVMs}</dd>
                 </dl>
               </div>
             </div>
@@ -58,15 +94,13 @@ export default function Dashboard() {
             <div className="flex items-center">
               <div className="flex-shrink-0">
                 <div className="rounded-md bg-purple-100 p-3">
-                  <svg className="h-6 w-6 text-purple-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2 1 3 3 3h10c2 0 3-1 3-3V7c0-2-1-3-3-3H7C5 4 4 5 4 7z" />
-                  </svg>
+                  <Server className="h-6 w-6 text-purple-600" />
                 </div>
               </div>
               <div className="ml-5 w-0 flex-1">
                 <dl>
                   <dt className="text-sm font-medium text-gray-500 truncate">Templates</dt>
-                  <dd className="text-2xl font-semibold text-gray-900">0</dd>
+                  <dd className="text-2xl font-semibold text-gray-900">{templates.length}</dd>
                 </dl>
               </div>
             </div>
@@ -77,15 +111,13 @@ export default function Dashboard() {
       <div className="mt-8">
         <h2 className="text-lg font-medium text-gray-900">Quick Actions</h2>
         <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <a
-            href="/ranges"
+          <Link
+            to="/ranges"
             className="relative rounded-lg border border-gray-300 bg-white px-6 py-5 shadow-sm flex items-center space-x-3 hover:border-gray-400 focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-primary-500"
           >
             <div className="flex-shrink-0">
               <div className="rounded-md bg-primary-100 p-3">
-                <svg className="h-6 w-6 text-primary-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-                </svg>
+                <Plus className="h-6 w-6 text-primary-600" />
               </div>
             </div>
             <div className="flex-1 min-w-0">
@@ -93,17 +125,15 @@ export default function Dashboard() {
               <p className="text-sm font-medium text-gray-900">Create New Range</p>
               <p className="text-sm text-gray-500">Set up a new cyber training environment</p>
             </div>
-          </a>
+          </Link>
 
-          <a
-            href="/templates"
+          <Link
+            to="/templates"
             className="relative rounded-lg border border-gray-300 bg-white px-6 py-5 shadow-sm flex items-center space-x-3 hover:border-gray-400 focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-primary-500"
           >
             <div className="flex-shrink-0">
               <div className="rounded-md bg-purple-100 p-3">
-                <svg className="h-6 w-6 text-purple-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                </svg>
+                <Server className="h-6 w-6 text-purple-600" />
               </div>
             </div>
             <div className="flex-1 min-w-0">
@@ -111,9 +141,48 @@ export default function Dashboard() {
               <p className="text-sm font-medium text-gray-900">Browse Templates</p>
               <p className="text-sm text-gray-500">View available VM templates</p>
             </div>
-          </a>
+          </Link>
         </div>
       </div>
+
+      {/* Recent Ranges */}
+      {ranges.length > 0 && (
+        <div className="mt-8">
+          <h2 className="text-lg font-medium text-gray-900">Recent Ranges</h2>
+          <div className="mt-4 bg-white shadow overflow-hidden sm:rounded-md">
+            <ul className="divide-y divide-gray-200">
+              {ranges.slice(0, 5).map((range) => (
+                <li key={range.id}>
+                  <Link to={`/ranges/${range.id}`} className="block hover:bg-gray-50">
+                    <div className="px-4 py-4 sm:px-6">
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm font-medium text-primary-600 truncate">{range.name}</p>
+                        <div className="ml-2 flex-shrink-0 flex">
+                          <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
+                            range.status === 'running' ? 'bg-green-100 text-green-800' :
+                            range.status === 'stopped' ? 'bg-gray-100 text-gray-800' :
+                            range.status === 'error' ? 'bg-red-100 text-red-800' :
+                            'bg-yellow-100 text-yellow-800'
+                          }`}>
+                            {range.status}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="mt-2 sm:flex sm:justify-between">
+                        <div className="sm:flex">
+                          <p className="text-sm text-gray-500">
+                            {range.description || 'No description'}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
