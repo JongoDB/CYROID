@@ -4,7 +4,7 @@ import dramatiq
 import logging
 from uuid import UUID
 
-from cyroid.database import SessionLocal
+from cyroid.database import get_session_local
 from cyroid.models.range import Range, RangeStatus
 from cyroid.models.network import Network, IsolationLevel
 from cyroid.models.vm import VM, VMStatus
@@ -21,7 +21,7 @@ def deploy_range_task(range_id: str):
     """
     logger.info(f"Starting async deployment for range {range_id}")
 
-    db = SessionLocal()
+    db = get_session_local()()
     try:
         from cyroid.services.docker_service import get_docker_service
         docker = get_docker_service()
@@ -136,7 +136,7 @@ def teardown_range_task(range_id: str):
     """
     logger.info(f"Starting async teardown for range {range_id}")
 
-    db = SessionLocal()
+    db = get_session_local()()
     try:
         from cyroid.services.docker_service import get_docker_service
         docker = get_docker_service()

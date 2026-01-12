@@ -4,7 +4,7 @@ import dramatiq
 import logging
 from uuid import UUID
 
-from cyroid.database import SessionLocal
+from cyroid.database import get_session_local
 from cyroid.models.vm import VM, VMStatus
 from cyroid.models.network import Network
 from cyroid.models.template import VMTemplate
@@ -17,7 +17,7 @@ def start_vm_task(vm_id: str):
     """Async task to start a VM."""
     logger.info(f"Starting async VM start for {vm_id}")
 
-    db = SessionLocal()
+    db = get_session_local()()
     try:
         from cyroid.services.docker_service import get_docker_service
         docker = get_docker_service()
@@ -98,7 +98,7 @@ def stop_vm_task(vm_id: str):
     """Async task to stop a VM."""
     logger.info(f"Starting async VM stop for {vm_id}")
 
-    db = SessionLocal()
+    db = get_session_local()()
     try:
         from cyroid.services.docker_service import get_docker_service
         docker = get_docker_service()
@@ -126,7 +126,7 @@ def restart_vm_task(vm_id: str):
     """Async task to restart a VM."""
     logger.info(f"Starting async VM restart for {vm_id}")
 
-    db = SessionLocal()
+    db = get_session_local()()
     try:
         from cyroid.services.docker_service import get_docker_service
         docker = get_docker_service()

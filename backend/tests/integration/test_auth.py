@@ -128,4 +128,4 @@ def test_get_current_user(client):
 
 def test_get_current_user_no_token(client):
     response = client.get("/api/v1/auth/me")
-    assert response.status_code == 401  # No credentials provided
+    assert response.status_code == 403  # No credentials provided (HTTPBearer returns 403)
