@@ -295,12 +295,41 @@ export const connectionsApi = {
 // Cache API
 import type { CachedImage, ISOCacheStatus, GoldenImagesStatus, CacheStats, RecommendedImages, WindowsVersionsResponse, LinuxVersionsResponse, LinuxISODownloadResponse, LinuxISODownloadStatus, CustomISOList, CustomISODownloadResponse, CustomISOStatusResponse, ISOUploadResponse, WindowsISODownloadResponse, WindowsISODownloadStatus, AllSnapshotsStatus, SnapshotResponse } from '../types'
 
+export interface DockerPullStatus {
+  status: 'pulling' | 'completed' | 'failed' | 'cancelled' | 'not_found' | 'already_cached' | 'already_pulling'
+  image?: string
+  progress_percent?: number
+  layers_total?: number
+  layers_completed?: number
+  error?: string
+  image_id?: string
+  size_bytes?: number
+  message?: string
+}
+
+export interface DockerPullResponse {
+  status: string
+  image: string
+  message: string
+  image_id?: string
+}
+
 export const cacheApi = {
   // Docker images
   listImages: () => api.get<CachedImage[]>('/cache/images'),
   cacheImage: (image: string) => api.post<CachedImage>('/cache/images', { image }),
   cacheBatchImages: (images: string[]) => api.post<{ status: string; message: string }>('/cache/images/batch', images),
   removeImage: (imageId: string) => api.delete(`/cache/images/${encodeURIComponent(imageId)}`),
+
+  // Docker image pull with progress tracking
+  pullImage: (image: string) =>
+    api.post<DockerPullResponse>('/cache/images/pull', { image }),
+  getPullStatus: (imageKey: string) =>
+    api.get<DockerPullStatus>(`/cache/images/pull/${encodeURIComponent(imageKey)}/status`),
+  cancelPull: (imageKey: string) =>
+    api.post(`/cache/images/pull/${encodeURIComponent(imageKey)}/cancel`),
+  getActivePulls: () =>
+    api.get<{ pulls: DockerPullStatus[] }>('/cache/images/pulls/active'),
 
   // Windows versions (auto-downloaded by dockur/windows)
   getWindowsVersions: () => api.get<WindowsVersionsResponse>('/cache/windows-versions'),

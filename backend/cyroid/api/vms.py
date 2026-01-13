@@ -3,7 +3,7 @@ from typing import List
 from uuid import UUID
 import logging
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, Request
 
 from cyroid.api.deps import DBSession, CurrentUser
 from cyroid.models.vm import VM, VMStatus
@@ -194,11 +194,60 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
             docker.start_container(vm.container_id)
         else:
             # Create new container
+            vm_id_short = str(vm.id)[:8]
             labels = {
                 "cyroid.range_id": str(vm.range_id),
                 "cyroid.vm_id": str(vm.id),
                 "cyroid.hostname": vm.hostname,
             }
+
+            # Add traefik labels for VNC web console routing
+            # This allows accessing VNC at /vnc/{vm_id} through traefik
+            display_type = vm.display_type or "desktop"
+            if display_type == "desktop":
+                # Determine VNC port and scheme based on image type
+                base_image = template.base_image or ""
+                if base_image.startswith("iso:") or template.os_type == OSType.WINDOWS:
+                    # qemus/qemu and dockur/windows use port 8006 over HTTP
+                    vnc_port = "8006"
+                    vnc_scheme = "http"
+                elif "kasmweb/" in base_image or "kasm" in base_image.lower():
+                    # KasmVNC containers use port 6901 over HTTPS
+                    vnc_port = "6901"
+                    vnc_scheme = "https"
+                else:
+                    # Default to 6901/HTTPS for other desktop containers
+                    vnc_port = "6901"
+                    vnc_scheme = "https"
+
+                router_name = f"vnc-{vm_id_short}"
+                middlewares = [f"vnc-strip-{vm_id_short}"]
+
+                labels.update({
+                    "traefik.enable": "true",
+                    "traefik.docker.network": "traefik-routing",  # Use traefik-routing network
+                    f"traefik.http.routers.{router_name}.rule": f"PathPrefix(`/vnc/{vm.id}`)",
+                    f"traefik.http.routers.{router_name}.entrypoints": "web",
+                    f"traefik.http.services.{router_name}.loadbalancer.server.port": vnc_port,
+                    f"traefik.http.services.{router_name}.loadbalancer.server.scheme": vnc_scheme,
+                    f"traefik.http.middlewares.vnc-strip-{vm_id_short}.stripprefix.prefixes": f"/vnc/{vm.id}",
+                })
+
+                # Use insecure transport for HTTPS backends (self-signed certs)
+                if vnc_scheme == "https":
+                    labels[f"traefik.http.services.{router_name}.loadbalancer.serversTransport"] = "insecure-transport@file"
+
+                # For KasmVNC containers, inject Basic Auth header to auto-login
+                if "kasmweb/" in base_image or "kasm" in base_image.lower():
+                    import base64
+                    # Default KasmVNC credentials
+                    auth_string = base64.b64encode(b"kasm_user:vncpassword").decode()
+                    auth_middleware = f"vnc-auth-{vm_id_short}"
+                    labels[f"traefik.http.middlewares.{auth_middleware}.headers.customrequestheaders.Authorization"] = f"Basic {auth_string}"
+                    middlewares.append(auth_middleware)
+
+                # Set all middlewares
+                labels[f"traefik.http.routers.{router_name}.middlewares"] = ",".join(middlewares)
 
             if template.os_type == OSType.WINDOWS:
                 settings = get_settings()
@@ -409,7 +458,7 @@ def get_vm_stats(vm_id: UUID, db: DBSession, current_user: CurrentUser):
 
 
 @router.get("/{vm_id}/vnc-info")
-def get_vm_vnc_info(vm_id: UUID, db: DBSession, current_user: CurrentUser):
+def get_vm_vnc_info(vm_id: UUID, db: DBSession, current_user: CurrentUser, request: Request):
     """Get VNC console connection info for a VM"""
     vm = db.query(VM).filter(VM.id == vm_id).first()
     if not vm:
@@ -430,33 +479,27 @@ def get_vm_vnc_info(vm_id: UUID, db: DBSession, current_user: CurrentUser):
             detail="VM has no running container",
         )
 
+    # Check if display_type supports VNC console
+    display_type = vm.display_type or "desktop"
+    if display_type != "desktop":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="VM is in server mode (no VNC console available)",
+        )
+
     try:
-        docker = get_docker_service()
-        container = docker.client.containers.get(vm.container_id)
+        # VNC is proxied through traefik at /vnc/{vm_id}
+        # The traefik labels on the container route requests to port 8006
+        vnc_path = f"/vnc/{vm.id}"
 
-        # Get IP from the first network the container is attached to
-        networks = container.attrs.get("NetworkSettings", {}).get("Networks", {})
-        container_ip = None
-        for network_name, network_config in networks.items():
-            container_ip = network_config.get("IPAddress")
-            if container_ip:
-                break
-
-        if not container_ip:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Could not determine container IP",
-            )
-
-        # VNC web console port (noVNC)
-        vnc_port = 8006
-
+        # Return the path - frontend will construct full URL using browser hostname
+        # This avoids issues with Docker internal hostnames in the Host header
         return {
             "vm_id": str(vm.id),
             "hostname": vm.hostname,
-            "ip": container_ip,
-            "port": vnc_port,
-            "url": f"http://{container_ip}:{vnc_port}",
+            "path": vnc_path,
+            "traefik_port": 80,
+            "method": "traefik_proxy",
         }
     except HTTPException:
         raise

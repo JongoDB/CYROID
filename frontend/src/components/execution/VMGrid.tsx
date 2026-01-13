@@ -96,8 +96,8 @@ export function VMGrid({ vms, onRefresh, onOpenConsole }: Props) {
               <p>IP: {vm.ip_address}</p>
               {vm.status === 'running' && stats ? (
                 <>
-                  <div className="flex items-center gap-1">
-                    <Cpu className="w-3 h-3" title="CPU Usage" />
+                  <div className="flex items-center gap-1" title="CPU Usage">
+                    <Cpu className="w-3 h-3" />
                     <span>{stats.cpu_percent.toFixed(1)}%</span>
                     <div className="flex-1 bg-gray-200 rounded h-1.5">
                       <div
@@ -106,8 +106,8 @@ export function VMGrid({ vms, onRefresh, onOpenConsole }: Props) {
                       />
                     </div>
                   </div>
-                  <div className="flex items-center gap-1">
-                    <HardDrive className="w-3 h-3" title="Memory Usage" />
+                  <div className="flex items-center gap-1" title="Memory Usage">
+                    <HardDrive className="w-3 h-3" />
                     <span>{stats.memory_percent.toFixed(1)}%</span>
                     <div className="flex-1 bg-gray-200 rounded h-1.5">
                       <div

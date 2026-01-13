@@ -1,0 +1,6 @@
+# Traefik dynamic configuration for VNC proxy
+http:
+  serversTransports:
+    # Transport for KasmVNC containers with self-signed certs
+    insecure-transport:
+      insecureSkipVerify: true

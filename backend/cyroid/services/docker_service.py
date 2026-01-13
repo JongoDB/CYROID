@@ -111,9 +111,34 @@ class DockerService:
             }
         except NotFound:
             return None
-    
+
+    def _connect_to_traefik_network(self, container_id: str) -> None:
+        """
+        Connect a container to the traefik-routing network for VNC proxy support.
+        This allows traefik to route requests to VMs regardless of their primary network.
+        """
+        traefik_network_name = "traefik-routing"
+        try:
+            # Try to get or create the traefik-routing network
+            try:
+                traefik_network = self.client.networks.get(traefik_network_name)
+            except NotFound:
+                # Create the network if it doesn't exist (e.g., if running outside docker-compose)
+                logger.info(f"Creating {traefik_network_name} network for traefik routing")
+                traefik_network = self.client.networks.create(
+                    traefik_network_name,
+                    driver="bridge"
+                )
+
+            # Connect the container to the traefik network
+            traefik_network.connect(container_id)
+            logger.info(f"Connected container {container_id[:12]} to {traefik_network_name}")
+        except APIError as e:
+            # Log but don't fail - VNC routing is optional functionality
+            logger.warning(f"Failed to connect container to traefik network: {e}")
+
     # Container Operations (Linux VMs)
-    
+
     def create_container(
         self,
         name: str,
@@ -149,20 +174,26 @@ class DockerService:
         """
         # Pull image if not present
         self._ensure_image(image)
-        
-        # Get network for attachment
+
+        # Get Range network for attachment (will be connected after creation)
         try:
-            network = self.client.networks.get(network_id)
+            range_network = self.client.networks.get(network_id)
         except NotFound:
             raise ValueError(f"Network not found: {network_id}")
-        
-        # Create networking config with static IP
+
+        # Get or create traefik-routing network (primary for VNC proxy)
+        traefik_network_name = "traefik-routing"
+        try:
+            traefik_network = self.client.networks.get(traefik_network_name)
+        except NotFound:
+            logger.info(f"Creating {traefik_network_name} network for traefik routing")
+            traefik_network = self.client.networks.create(traefik_network_name, driver="bridge")
+
+        # Create on traefik-routing first (so traefik uses this IP for routing)
         networking_config = self.client.api.create_networking_config({
-            network.name: self.client.api.create_endpoint_config(
-                ipv4_address=ip_address
-            )
+            traefik_network.name: self.client.api.create_endpoint_config()
         })
-        
+
         # Create container
         try:
             container = self.client.api.create_container(
@@ -185,11 +216,16 @@ class DockerService:
             )
             container_id = container["Id"]
             logger.info(f"Created container: {name} ({container_id[:12]})")
+
+            # Connect to Range network with static IP
+            range_network.connect(container_id, ipv4_address=ip_address)
+            logger.info(f"Connected container to {range_network.name} with IP {ip_address}")
+
             return container_id
         except APIError as e:
             logger.error(f"Failed to create container {name}: {e}")
             raise
-    
+
     def create_windows_container(
         self,
         name: str,
@@ -437,11 +473,15 @@ class DockerService:
             )
             container_id = container["Id"]
             logger.info(f"Created Windows container: {name} ({container_id[:12]})")
+
+            # Connect to traefik network for VNC proxy routing
+            self._connect_to_traefik_network(container_id)
+
             return container_id
         except APIError as e:
             logger.error(f"Failed to create Windows container {name}: {e}")
             raise
-    
+
     def create_linux_vm_container(
         self,
         name: str,
@@ -653,6 +693,10 @@ class DockerService:
             )
             container_id = container["Id"]
             logger.info(f"Created Linux VM container: {name} ({container_id[:12]})")
+
+            # Connect to traefik network for VNC proxy routing
+            self._connect_to_traefik_network(container_id)
+
             return container_id
         except APIError as e:
             logger.error(f"Failed to create Linux VM container {name}: {e}")

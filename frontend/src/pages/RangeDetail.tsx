@@ -68,6 +68,7 @@ export default function RangeDetail() {
     manual_install: false
   })
   const [showWindowsOptions, setShowWindowsOptions] = useState(false)
+  const [showLinuxISOOptions, setShowLinuxISOOptions] = useState(false)
 
   // Console modal state
   const [consoleVm, setConsoleVm] = useState<VM | null>(null)
@@ -202,6 +203,16 @@ export default function RangeDetail() {
         vmData.manual_install = vmForm.manual_install || false
       }
 
+      // Add Linux ISO-specific settings
+      if (showLinuxISOOptions) {
+        vmData.display_type = vmForm.display_type || 'desktop'
+        if (vmForm.iso_url) vmData.iso_url = vmForm.iso_url
+        if (vmForm.disk2_gb) vmData.disk2_gb = vmForm.disk2_gb
+        if (vmForm.disk3_gb) vmData.disk3_gb = vmForm.disk3_gb
+        vmData.enable_shared_folder = vmForm.enable_shared_folder || false
+        vmData.enable_global_shared = vmForm.enable_global_shared || false
+      }
+
       await vmsApi.create(vmData)
       setShowVmModal(false)
       setVmForm({
@@ -215,6 +226,7 @@ export default function RangeDetail() {
         language: null, keyboard: null, region: null, manual_install: false
       })
       setShowWindowsOptions(false)
+      setShowLinuxISOOptions(false)
       fetchData()
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to create VM')
@@ -579,14 +591,17 @@ export default function RangeDetail() {
                     onChange={(e) => {
                       const template = templates.find(t => t.id === e.target.value)
                       const isWindows = template?.os_type === 'windows'
+                      const isLinuxISO = template?.os_type === 'linux' && template?.base_image?.startsWith('iso:')
                       setShowWindowsOptions(isWindows)
+                      setShowLinuxISOOptions(isLinuxISO)
                       setVmForm({
                         ...vmForm,
                         template_id: e.target.value,
                         cpu: template?.default_cpu || (isWindows ? 4 : 2),
                         ram_mb: template?.default_ram_mb || (isWindows ? 8192 : 2048),
                         disk_gb: template?.default_disk_gb || (isWindows ? 64 : 20),
-                        windows_version: isWindows ? template?.os_variant || '11' : ''
+                        windows_version: isWindows ? template?.os_variant || '11' : '',
+                        display_type: 'desktop'
                       })
                     }}
                     className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
@@ -905,6 +920,94 @@ export default function RangeDetail() {
                         </p>
                       </div>
                     </details>
+                  </div>
+                )}
+
+                {/* Linux ISO-specific options */}
+                {showLinuxISOOptions && (
+                  <div className="border-t pt-4 space-y-4">
+                    <h4 className="text-sm font-medium text-gray-900 flex items-center">
+                      <Server className="h-4 w-4 mr-2 text-orange-500" />
+                      Linux VM Settings
+                    </h4>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Environment Type</label>
+                      <select
+                        value={vmForm.display_type}
+                        onChange={(e) => setVmForm({ ...vmForm, display_type: e.target.value as 'desktop' | 'server' })}
+                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                      >
+                        <option value="desktop">Desktop (VNC/Web Console)</option>
+                        <option value="server">Server (Headless)</option>
+                      </select>
+                      <p className="mt-1 text-xs text-gray-500">
+                        {vmForm.display_type === 'desktop'
+                          ? 'Desktop mode provides VNC web console access on port 8006'
+                          : 'Server mode is headless, no GUI - use SSH to connect'}
+                      </p>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Custom ISO URL (optional)</label>
+                      <input
+                        type="url"
+                        value={vmForm.iso_url}
+                        onChange={(e) => setVmForm({ ...vmForm, iso_url: e.target.value })}
+                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                        placeholder="https://example.com/custom-linux.iso"
+                      />
+                      <p className="mt-1 text-xs text-gray-500">Overrides the template's default ISO</p>
+                    </div>
+                    {/* Shared Folders */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Shared Folders</label>
+                      <label className="flex items-center">
+                        <input
+                          type="checkbox"
+                          checked={vmForm.enable_shared_folder || false}
+                          onChange={(e) => setVmForm({ ...vmForm, enable_shared_folder: e.target.checked })}
+                          className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
+                        />
+                        <span className="ml-2 text-sm text-gray-700">Enable per-VM shared folder (/shared)</span>
+                      </label>
+                      <label className="flex items-center mt-2">
+                        <input
+                          type="checkbox"
+                          checked={vmForm.enable_global_shared || false}
+                          onChange={(e) => setVmForm({ ...vmForm, enable_global_shared: e.target.checked })}
+                          className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
+                        />
+                        <span className="ml-2 text-sm text-gray-700">Mount global shared folder (/global, read-only)</span>
+                      </label>
+                    </div>
+                    {/* Additional Storage */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Additional Disks (optional)</label>
+                      <div className="grid grid-cols-2 gap-4 mt-1">
+                        <div>
+                          <input
+                            type="number"
+                            min={1}
+                            max={1000}
+                            value={vmForm.disk2_gb || ''}
+                            onChange={(e) => setVmForm({ ...vmForm, disk2_gb: e.target.value ? parseInt(e.target.value) : null })}
+                            className="block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                            placeholder="2nd Disk (GB)"
+                          />
+                        </div>
+                        <div>
+                          <input
+                            type="number"
+                            min={1}
+                            max={1000}
+                            value={vmForm.disk3_gb || ''}
+                            onChange={(e) => setVmForm({ ...vmForm, disk3_gb: e.target.value ? parseInt(e.target.value) : null })}
+                            className="block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                            placeholder="3rd Disk (GB)"
+                          />
+                        </div>
+                      </div>
+                      <p className="mt-1 text-xs text-gray-500">Additional virtual disks for the VM</p>
+                    </div>
                   </div>
                 )}
 

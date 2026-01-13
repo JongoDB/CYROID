@@ -11,8 +11,10 @@ interface VncConsoleProps {
 }
 
 interface VncInfo {
-  ip: string
-  port: number
+  url: string
+  path: string
+  hostname: string
+  traefik_port: number
 }
 
 export function VncConsole({ vmId, vmHostname, token, onClose }: VncConsoleProps) {
@@ -20,9 +22,10 @@ export function VncConsole({ vmId, vmHostname, token, onClose }: VncConsoleProps
   const [error, setError] = useState<string | null>(null)
   const [vncInfo, setVncInfo] = useState<VncInfo | null>(null)
   const [loading, setLoading] = useState(true)
+  const [iframeKey, setIframeKey] = useState(0)
 
   useEffect(() => {
-    // Fetch VM info to get container IP
+    // Fetch VM info to get VNC proxy URL
     const fetchVmInfo = async () => {
       try {
         const response = await fetch(`/api/v1/vms/${vmId}/vnc-info`, {
@@ -32,11 +35,27 @@ export function VncConsole({ vmId, vmHostname, token, onClose }: VncConsoleProps
         })
 
         if (!response.ok) {
-          throw new Error('Failed to get VNC info')
+          const data = await response.json().catch(() => ({}))
+          throw new Error(data.detail || 'Failed to get VNC info')
         }
 
         const data = await response.json()
-        setVncInfo({ ip: data.ip, port: data.port })
+        // Build URL using browser's hostname (not the Docker internal hostname)
+        const browserHostname = window.location.hostname
+        const traefikPort = data.traefik_port || 80
+
+        // Build VNC URL with proper WebSocket path for KasmVNC
+        // The 'path' parameter tells the client where to connect for WebSocket
+        // We need to include the full path so WebSocket connects to the correct proxied endpoint
+        const wsPath = `${data.path}/`.replace(/^\//, '') // Remove leading slash for path param
+        const vncUrl = `http://${browserHostname}:${traefikPort}${data.path}/?autoconnect=1&resize=scale&path=${wsPath}`
+
+        setVncInfo({
+          url: vncUrl,
+          path: data.path,
+          hostname: data.hostname,
+          traefik_port: traefikPort,
+        })
         setLoading(false)
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to connect')
@@ -53,17 +72,15 @@ export function VncConsole({ vmId, vmHostname, token, onClose }: VncConsoleProps
 
   const openInNewTab = () => {
     if (vncInfo) {
-      window.open(`http://${vncInfo.ip}:${vncInfo.port}`, '_blank')
+      window.open(vncInfo.url, '_blank')
     }
   }
 
   const reload = () => {
     setLoading(true)
     setError(null)
-    // Force iframe reload by toggling vncInfo
-    const currentInfo = vncInfo
-    setVncInfo(null)
-    setTimeout(() => setVncInfo(currentInfo), 100)
+    // Force iframe reload by incrementing key
+    setIframeKey(prev => prev + 1)
     setLoading(false)
   }
 
@@ -88,7 +105,7 @@ export function VncConsole({ vmId, vmHostname, token, onClose }: VncConsoleProps
             {vmHostname}
           </span>
           <span className="text-xs text-gray-400">
-            {loading ? 'Loading...' : error ? 'Error' : 'Connected'}
+            {loading ? 'Loading...' : error ? 'Error' : 'Connected via Traefik'}
           </span>
           {error && (
             <span className="text-xs text-red-400 ml-2">{error}</span>
@@ -145,8 +162,11 @@ export function VncConsole({ vmId, vmHostname, token, onClose }: VncConsoleProps
 
         {error && !loading && (
           <div className="absolute inset-0 flex items-center justify-center">
-            <div className="text-center">
+            <div className="text-center max-w-md px-4">
               <p className="text-red-400 mb-2">{error}</p>
+              <p className="text-gray-500 text-sm mb-4">
+                Make sure the VM is running and traefik is properly configured.
+              </p>
               <button
                 onClick={reload}
                 className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
@@ -159,10 +179,11 @@ export function VncConsole({ vmId, vmHostname, token, onClose }: VncConsoleProps
 
         {vncInfo && !error && (
           <iframe
-            src={`http://${vncInfo.ip}:${vncInfo.port}`}
+            key={iframeKey}
+            src={vncInfo.url}
             className="w-full h-full border-0"
             title={`Console: ${vmHostname}`}
-            sandbox="allow-scripts allow-same-origin allow-forms"
+            sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
           />
         )}
       </div>

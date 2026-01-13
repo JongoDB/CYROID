@@ -1,12 +1,13 @@
 // frontend/src/pages/ImageCache.tsx
 import { useState, useEffect, useRef } from 'react'
-import { cacheApi } from '../services/api'
+import { cacheApi, DockerPullStatus } from '../services/api'
 import { useAuthStore } from '../stores/authStore'
 import type {
   CachedImage,
   AllSnapshotsStatus,
   CacheStats,
   RecommendedImages,
+  RecommendedImage,
   WindowsVersionsResponse,
   WindowsVersion,
   WindowsISODownloadStatus,
@@ -78,6 +79,8 @@ export default function ImageCache() {
   const [linuxDownloadStatus, setLinuxDownloadStatus] = useState<Record<string, LinuxISODownloadStatus>>({})
   // Download state for tracking Custom ISO downloads
   const [customISODownloadStatus, setCustomISODownloadStatus] = useState<Record<string, CustomISOStatusResponse>>({})
+  // Pull state for tracking Docker image pulls
+  const [dockerPullStatus, setDockerPullStatus] = useState<Record<string, DockerPullStatus>>({})
 
   const loadData = async () => {
     setLoading(true)
@@ -107,7 +110,7 @@ export default function ImageCache() {
   }
 
   // Store polling intervals so we can clear them
-  const pollingIntervalsRef = useRef<Record<string, NodeJS.Timeout>>({})
+  const pollingIntervalsRef = useRef<Record<string, ReturnType<typeof setInterval>>>({})
 
   // Check for active downloads on mount and restore polling
   const checkActiveDownloads = async () => {
@@ -167,6 +170,20 @@ export default function ImageCache() {
           // Ignore errors for individual status checks
         }
       }
+    }
+
+    // Check active Docker pulls
+    try {
+      const activePullsRes = await cacheApi.getActivePulls()
+      for (const pull of activePullsRes.data.pulls) {
+        if (pull.image) {
+          const imageKey = pull.image.replace(/\//g, '_').replace(/:/g, '_')
+          setDockerPullStatus(prev => ({ ...prev, [imageKey]: pull }))
+          startDockerPullPolling(imageKey, pull.image)
+        }
+      }
+    } catch {
+      // Ignore errors for active pull check
     }
   }
 
@@ -288,6 +305,98 @@ export default function ImageCache() {
     }, 2000)
 
     pollingIntervalsRef.current[`custom-${filename}`] = pollInterval
+  }
+
+  const startDockerPullPolling = (imageKey: string, imageName: string) => {
+    // Clear any existing interval for this image
+    if (pollingIntervalsRef.current[`docker-${imageKey}`]) {
+      clearInterval(pollingIntervalsRef.current[`docker-${imageKey}`])
+    }
+
+    const pollInterval = setInterval(async () => {
+      try {
+        const statusRes = await cacheApi.getPullStatus(imageKey)
+        setDockerPullStatus(prev => ({ ...prev, [imageKey]: statusRes.data }))
+
+        if (statusRes.data.status === 'completed' || statusRes.data.status === 'failed' || statusRes.data.status === 'cancelled') {
+          clearInterval(pollInterval)
+          delete pollingIntervalsRef.current[`docker-${imageKey}`]
+
+          if (statusRes.data.status === 'completed') {
+            setSuccess(`Pulled Docker image: ${imageName}`)
+            await loadData()
+          } else if (statusRes.data.status === 'failed' && statusRes.data.error) {
+            setError(`Pull failed: ${statusRes.data.error}`)
+          }
+
+          // Clear pull status after a delay
+          setTimeout(() => {
+            setDockerPullStatus(prev => {
+              const newStatus = { ...prev }
+              delete newStatus[imageKey]
+              return newStatus
+            })
+          }, 5000)
+        }
+      } catch {
+        clearInterval(pollInterval)
+        delete pollingIntervalsRef.current[`docker-${imageKey}`]
+      }
+    }, 1000) // Poll every second for Docker pulls (they can be fast)
+
+    pollingIntervalsRef.current[`docker-${imageKey}`] = pollInterval
+  }
+
+  const handlePullDockerImage = async (image: string) => {
+    const imageKey = image.replace(/\//g, '_').replace(/:/g, '_')
+    setActionLoading(`pull-${imageKey}`)
+    setError(null)
+
+    try {
+      const res = await cacheApi.pullImage(image)
+
+      if (res.data.status === 'already_cached') {
+        setSuccess(`${image} is already cached`)
+        setActionLoading(null)
+        return
+      }
+
+      if (res.data.status === 'already_pulling') {
+        setSuccess(`${image} is already being pulled`)
+        setActionLoading(null)
+        return
+      }
+
+      // Start polling for pull status
+      setDockerPullStatus(prev => ({
+        ...prev,
+        [imageKey]: { status: 'pulling', image, progress_percent: 0 }
+      }))
+      startDockerPullPolling(imageKey, image)
+      setSuccess(`Started pulling ${image}`)
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Failed to start pull')
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
+  const handleCancelDockerPull = async (imageKey: string) => {
+    setActionLoading(`cancel-docker-${imageKey}`)
+    setError(null)
+    try {
+      await cacheApi.cancelPull(imageKey)
+      setSuccess(`Cancelled pull`)
+      setDockerPullStatus(prev => {
+        const newStatus = { ...prev }
+        delete newStatus[imageKey]
+        return newStatus
+      })
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Failed to cancel pull')
+    } finally {
+      setActionLoading(null)
+    }
   }
 
   useEffect(() => {
@@ -881,91 +990,116 @@ export default function ImageCache() {
       )}
 
       {/* Docker Images Tab */}
-      {activeTab === 'docker' && (
+      {activeTab === 'docker' && recommended && (
         <div className="space-y-6">
           <div className="flex justify-between items-center">
-            <h3 className="text-lg font-medium text-gray-900">Cached Docker Images</h3>
+            <div>
+              <h3 className="text-lg font-medium text-gray-900">Docker Images</h3>
+              <p className="text-sm text-gray-500">
+                {images.length} images cached
+              </p>
+            </div>
             {isAdmin && (
               <button
                 onClick={() => setShowCacheModal(true)}
                 className="inline-flex items-center px-3 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 text-sm"
               >
                 <Plus className="h-4 w-4 mr-2" />
-                Cache Image
+                Custom Image
               </button>
             )}
           </div>
 
-          {/* Desktop Images (with GUI/VNC/RDP) */}
-          {categorizedImages.desktop.length > 0 && (
-            <div className="bg-white shadow rounded-lg overflow-hidden">
-              <div className="px-6 py-4 border-b border-gray-200 bg-blue-50">
-                <h4 className="text-sm font-medium text-blue-800 flex items-center">
-                  <Monitor className="h-4 w-4 mr-2" />
-                  Desktop ({categorizedImages.desktop.length})
-                </h4>
-                <p className="text-xs text-blue-600 mt-1">Images with GUI desktop environment (VNC/RDP/Web)</p>
+          {/* Info */}
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+            <div className="flex">
+              <Info className="h-5 w-5 text-blue-500 mt-0.5 mr-3" />
+              <div>
+                <h4 className="text-sm font-medium text-blue-800">Docker Image Cache</h4>
+                <p className="mt-1 text-sm text-blue-700">
+                  Recommended images for cyber range operations. Cached images deploy instantly without network download.
+                </p>
               </div>
-              <ImageTable images={categorizedImages.desktop} onRemove={handleRemoveImage} actionLoading={actionLoading} isAdmin={isAdmin} />
             </div>
+          </div>
+
+          {/* Desktop Images Section */}
+          <DockerImageSection
+            title="Desktop"
+            description="Images with GUI desktop environment (VNC/RDP/Web)"
+            images={recommended.desktop}
+            cachedImages={images}
+            icon={Monitor}
+            colorClass="blue"
+            onPull={handlePullDockerImage}
+            onRemove={handleRemoveImage}
+            onCancel={handleCancelDockerPull}
+            pullStatus={dockerPullStatus}
+            actionLoading={actionLoading}
+            isAdmin={isAdmin}
+          />
+
+          {/* Workstation Images Section */}
+          {recommended.workstation && recommended.workstation.length > 0 && (
+            <DockerImageSection
+              title="Workstation"
+              description="Base OS images for workstation use (CLI)"
+              images={recommended.workstation}
+              cachedImages={images}
+              icon={Terminal}
+              colorClass="cyan"
+              onPull={handlePullDockerImage}
+              onRemove={handleRemoveImage}
+              onCancel={handleCancelDockerPull}
+              pullStatus={dockerPullStatus}
+              actionLoading={actionLoading}
+              isAdmin={isAdmin}
+            />
           )}
 
-          {/* Workstation Images (base OS) */}
-          {categorizedImages.workstation.length > 0 && (
-            <div className="bg-white shadow rounded-lg overflow-hidden">
-              <div className="px-6 py-4 border-b border-gray-200 bg-cyan-50">
-                <h4 className="text-sm font-medium text-cyan-800 flex items-center">
-                  <Terminal className="h-4 w-4 mr-2" />
-                  Workstation ({categorizedImages.workstation.length})
-                </h4>
-                <p className="text-xs text-cyan-600 mt-1">Base OS images for workstation use (CLI)</p>
-              </div>
-              <ImageTable images={categorizedImages.workstation} onRemove={handleRemoveImage} actionLoading={actionLoading} isAdmin={isAdmin} />
-            </div>
-          )}
+          {/* Server Images Section */}
+          <DockerImageSection
+            title="Server"
+            description="Headless server and infrastructure images"
+            images={recommended.server}
+            cachedImages={images}
+            icon={Server}
+            colorClass="purple"
+            onPull={handlePullDockerImage}
+            onRemove={handleRemoveImage}
+            onCancel={handleCancelDockerPull}
+            pullStatus={dockerPullStatus}
+            actionLoading={actionLoading}
+            isAdmin={isAdmin}
+          />
 
-          {/* Server Images */}
-          {categorizedImages.server.length > 0 && (
-            <div className="bg-white shadow rounded-lg overflow-hidden">
-              <div className="px-6 py-4 border-b border-gray-200 bg-purple-50">
-                <h4 className="text-sm font-medium text-purple-800 flex items-center">
-                  <Server className="h-4 w-4 mr-2" />
-                  Server ({categorizedImages.server.length})
-                </h4>
-              </div>
-              <ImageTable images={categorizedImages.server} onRemove={handleRemoveImage} actionLoading={actionLoading} isAdmin={isAdmin} />
-            </div>
-          )}
+          {/* Services Images Section */}
+          <DockerImageSection
+            title="Services"
+            description="Purpose-built service containers (databases, web servers, etc.)"
+            images={recommended.services}
+            cachedImages={images}
+            icon={Database}
+            colorClass="green"
+            onPull={handlePullDockerImage}
+            onRemove={handleRemoveImage}
+            onCancel={handleCancelDockerPull}
+            pullStatus={dockerPullStatus}
+            actionLoading={actionLoading}
+            isAdmin={isAdmin}
+          />
 
-          {/* Service Images */}
-          {categorizedImages.services.length > 0 && (
-            <div className="bg-white shadow rounded-lg overflow-hidden">
-              <div className="px-6 py-4 border-b border-gray-200 bg-green-50">
-                <h4 className="text-sm font-medium text-green-800 flex items-center">
-                  <Database className="h-4 w-4 mr-2" />
-                  Services ({categorizedImages.services.length})
-                </h4>
-              </div>
-              <ImageTable images={categorizedImages.services} onRemove={handleRemoveImage} actionLoading={actionLoading} isAdmin={isAdmin} />
-            </div>
-          )}
-
-          {/* Other Images */}
+          {/* Other Cached Images (not in recommended list) */}
           {categorizedImages.other.length > 0 && (
             <div className="bg-white shadow rounded-lg overflow-hidden">
               <div className="px-6 py-4 border-b border-gray-200 bg-gray-50">
                 <h4 className="text-sm font-medium text-gray-800 flex items-center">
                   <HardDrive className="h-4 w-4 mr-2" />
-                  Other ({categorizedImages.other.length})
+                  Other Cached ({categorizedImages.other.length})
                 </h4>
+                <p className="text-xs text-gray-600 mt-1">Additional cached images not in recommended list</p>
               </div>
               <ImageTable images={categorizedImages.other} onRemove={handleRemoveImage} actionLoading={actionLoading} isAdmin={isAdmin} />
-            </div>
-          )}
-
-          {images.length === 0 && (
-            <div className="bg-white shadow rounded-lg p-8 text-center text-gray-500">
-              No cached Docker images. Click "Cache Image" to add some.
             </div>
           )}
         </div>
@@ -1737,6 +1871,154 @@ export default function ImageCache() {
 }
 
 // Helper Components
+
+function DockerImageSection({ title, description, images, cachedImages, icon: Icon, colorClass, onPull, onRemove, onCancel, pullStatus, actionLoading, isAdmin }: {
+  title: string
+  description: string
+  images: RecommendedImage[]
+  cachedImages: CachedImage[]
+  icon: typeof Monitor
+  colorClass: string
+  onPull: (image: string) => void
+  onRemove: (id: string, tag: string) => void
+  onCancel: (imageKey: string) => void
+  pullStatus: Record<string, DockerPullStatus>
+  actionLoading: string | null
+  isAdmin: boolean
+}) {
+  const bgClass = `bg-${colorClass}-50`
+  const textClass = `text-${colorClass}-800`
+
+  // Check if an image is cached
+  const isImageCached = (imageName: string): CachedImage | undefined => {
+    return cachedImages.find(cached =>
+      cached.tags.some(tag => tag === imageName || tag.startsWith(imageName.split(':')[0]))
+    )
+  }
+
+  if (!images || images.length === 0) return null
+
+  return (
+    <div className="bg-white shadow rounded-lg overflow-hidden">
+      <div className={clsx("px-6 py-4 border-b border-gray-200", bgClass)}>
+        <h4 className={clsx("text-sm font-medium flex items-center", textClass)}>
+          <Icon className="h-4 w-4 mr-2" />
+          {title} ({images.length})
+        </h4>
+        <p className={clsx("text-xs mt-1", textClass.replace('800', '600'))}>{description}</p>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 p-4">
+        {images.filter(img => img.image).map((img) => {
+          const imageName = img.image!
+          const imageKey = imageName.replace(/\//g, '_').replace(/:/g, '_')
+          const cached = isImageCached(imageName)
+          const pullState = pullStatus[imageKey]
+          const isPulling = pullState?.status === 'pulling'
+          const isLoading = actionLoading === `pull-${imageKey}`
+
+          return (
+            <div key={imageName} className={clsx(
+              "border rounded-lg p-4",
+              cached ? "bg-green-50 border-green-200" :
+              isPulling ? "bg-blue-50 border-blue-200" : "hover:bg-gray-50"
+            )}>
+              <div className="flex items-start justify-between">
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-gray-900 truncate" title={imageName}>{imageName}</p>
+                  <p className="text-xs text-gray-500 mt-1 line-clamp-2">{img.description}</p>
+                </div>
+                <div className="flex items-center gap-1 ml-2 flex-shrink-0">
+                  {isPulling ? (
+                    <div className="flex items-center gap-1 text-blue-600">
+                      <Loader2 className="h-4 w-4 animate-spin flex-shrink-0" />
+                      <span className="text-xs font-medium">
+                        {pullState.progress_percent ? `${pullState.progress_percent}%` : 'Starting...'}
+                      </span>
+                    </div>
+                  ) : cached ? (
+                    <>
+                      <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                        <Check className="h-3 w-3 mr-1" />
+                        Cached
+                      </span>
+                      {isAdmin && (
+                        <button
+                          onClick={() => onRemove(cached.id, cached.tags[0] || cached.id)}
+                          disabled={actionLoading === cached.id}
+                          className="text-red-600 hover:text-red-900 disabled:opacity-50 p-1"
+                          title="Remove cached image"
+                        >
+                          {actionLoading === cached.id ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Trash2 className="h-4 w-4" />
+                          )}
+                        </button>
+                      )}
+                    </>
+                  ) : isAdmin ? (
+                    <button
+                      onClick={() => onPull(imageName)}
+                      disabled={isLoading}
+                      className="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-blue-100 text-blue-700 hover:bg-blue-200 disabled:opacity-50"
+                      title="Pull image"
+                    >
+                      {isLoading ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : (
+                        <>
+                          <Download className="h-3 w-3 mr-1" />
+                          Pull
+                        </>
+                      )}
+                    </button>
+                  ) : (
+                    <span className="text-xs text-gray-400">Not cached</span>
+                  )}
+                </div>
+              </div>
+              {/* Pull progress bar */}
+              {isPulling && pullState && (
+                <div className="mt-3 space-y-1.5">
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="text-blue-700 font-medium">
+                      {pullState.layers_completed || 0} / {pullState.layers_total || '?'} layers
+                    </span>
+                    <div className="flex items-center gap-2">
+                      {pullState.progress_percent !== undefined && (
+                        <span className="text-blue-600 font-semibold">{pullState.progress_percent}%</span>
+                      )}
+                      {isAdmin && (
+                        <button
+                          onClick={() => onCancel(imageKey)}
+                          disabled={actionLoading === `cancel-docker-${imageKey}`}
+                          className="text-red-500 hover:text-red-700 p-0.5 rounded hover:bg-red-50"
+                          title="Cancel pull"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  <div className="w-full bg-blue-100 rounded-full h-2.5 overflow-hidden">
+                    {pullState.progress_percent !== undefined && pullState.progress_percent > 0 ? (
+                      <div
+                        className="bg-gradient-to-r from-blue-500 to-blue-600 h-2.5 rounded-full transition-all duration-500 ease-out"
+                        style={{ width: `${pullState.progress_percent}%` }}
+                      />
+                    ) : (
+                      <div className="bg-gradient-to-r from-blue-400 via-blue-500 to-blue-400 h-2.5 rounded-full animate-pulse w-full opacity-60" />
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
 
 function ImageTable({ images, onRemove, actionLoading, isAdmin }: {
   images: CachedImage[]

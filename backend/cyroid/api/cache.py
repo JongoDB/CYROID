@@ -1,7 +1,9 @@
 # backend/cyroid/api/cache.py
 """API endpoints for image caching and golden image management."""
 import os
-from typing import List, Optional
+import threading
+import logging
+from typing import List, Optional, Dict, Any
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, status, BackgroundTasks
@@ -11,7 +13,11 @@ from cyroid.api.deps import DBSession, CurrentUser, AdminUser
 from cyroid.services.docker_service import get_docker_service
 from cyroid.config import get_settings
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/cache", tags=["Image Cache"])
+
+# Track active Docker image pulls for progress reporting
+_active_docker_pulls: Dict[str, Dict[str, Any]] = {}
 
 
 def get_windows_iso_dir() -> str:
@@ -138,6 +144,231 @@ def remove_cached_image(image_id: str, current_user: AdminUser):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to remove image: {str(e)}"
         )
+
+
+# Async Docker image pull with progress tracking
+
+class DockerPullRequest(BaseModel):
+    image: str
+
+
+def _pull_docker_image_async(image: str):
+    """Background task to pull Docker image with progress tracking."""
+    import docker
+    import json
+
+    # Normalize image name for storage key
+    image_key = image.replace("/", "_").replace(":", "_")
+
+    _active_docker_pulls[image_key] = {
+        "status": "pulling",
+        "image": image,
+        "progress_percent": 0,
+        "current_layer": "",
+        "layers_total": 0,
+        "layers_completed": 0,
+        "cancelled": False,
+        "error": None,
+    }
+
+    try:
+        docker_service = get_docker_service()
+        client = docker_service.client
+
+        # Use low-level API to get streaming progress
+        api_client = client.api
+
+        # Track layer progress
+        layers = {}
+
+        for line in api_client.pull(image, stream=True, decode=True):
+            # Check for cancellation
+            if _active_docker_pulls.get(image_key, {}).get("cancelled"):
+                _active_docker_pulls[image_key]["status"] = "cancelled"
+                return
+
+            if "id" in line and "progressDetail" in line:
+                layer_id = line["id"]
+                progress_detail = line.get("progressDetail", {})
+                status_text = line.get("status", "")
+
+                if progress_detail:
+                    current = progress_detail.get("current", 0)
+                    total = progress_detail.get("total", 0)
+                    layers[layer_id] = {"current": current, "total": total, "status": status_text}
+                elif status_text in ["Pull complete", "Already exists"]:
+                    layers[layer_id] = {"current": 1, "total": 1, "status": status_text}
+
+                # Calculate overall progress
+                total_bytes = sum(l.get("total", 0) for l in layers.values())
+                current_bytes = sum(l.get("current", 0) for l in layers.values())
+                completed_layers = sum(1 for l in layers.values() if l.get("status") in ["Pull complete", "Already exists"])
+
+                if total_bytes > 0:
+                    progress = int((current_bytes / total_bytes) * 100)
+                else:
+                    progress = 0
+
+                _active_docker_pulls[image_key].update({
+                    "progress_percent": min(progress, 99),  # Don't show 100 until verified complete
+                    "current_layer": layer_id,
+                    "layers_total": len(layers),
+                    "layers_completed": completed_layers,
+                })
+            elif "status" in line:
+                # Handle status messages without layer ID
+                logger.debug(f"Docker pull status: {line.get('status')}")
+
+        # Verify image was pulled
+        try:
+            pulled_image = client.images.get(image)
+            _active_docker_pulls[image_key].update({
+                "status": "completed",
+                "progress_percent": 100,
+                "image_id": pulled_image.id,
+                "size_bytes": pulled_image.attrs.get("Size", 0),
+            })
+        except Exception:
+            _active_docker_pulls[image_key].update({
+                "status": "completed",
+                "progress_percent": 100,
+            })
+
+    except Exception as e:
+        logger.error(f"Failed to pull Docker image {image}: {e}")
+        _active_docker_pulls[image_key].update({
+            "status": "failed",
+            "error": str(e),
+        })
+
+
+@router.post("/images/pull")
+def start_docker_pull(
+    request: DockerPullRequest,
+    background_tasks: BackgroundTasks,
+    current_user: AdminUser
+):
+    """
+    Start an async Docker image pull with progress tracking.
+    Returns immediately and allows polling for status.
+    """
+    image = request.image
+    image_key = image.replace("/", "_").replace(":", "_")
+
+    # Check if already pulling
+    if image_key in _active_docker_pulls and _active_docker_pulls[image_key].get("status") == "pulling":
+        return {
+            "status": "already_pulling",
+            "image": image,
+            "message": "Image is already being pulled",
+        }
+
+    # Check if image already cached
+    docker = get_docker_service()
+    try:
+        existing = docker.client.images.get(image)
+        return {
+            "status": "already_cached",
+            "image": image,
+            "message": "Image is already cached",
+            "image_id": existing.id,
+        }
+    except Exception:
+        pass  # Image not cached, proceed with pull
+
+    # Start background pull
+    background_tasks.add_task(_pull_docker_image_async, image)
+
+    return {
+        "status": "pulling",
+        "image": image,
+        "message": f"Started pulling {image}",
+    }
+
+
+@router.get("/images/pull/{image_key}/status")
+def get_docker_pull_status(image_key: str, current_user: CurrentUser):
+    """Get status of a Docker image pull in progress."""
+    # Check active pulls first
+    if image_key in _active_docker_pulls:
+        pull_info = _active_docker_pulls[image_key]
+        return {
+            "status": pull_info.get("status", "unknown"),
+            "image": pull_info.get("image"),
+            "progress_percent": pull_info.get("progress_percent", 0),
+            "layers_total": pull_info.get("layers_total", 0),
+            "layers_completed": pull_info.get("layers_completed", 0),
+            "error": pull_info.get("error"),
+            "image_id": pull_info.get("image_id"),
+            "size_bytes": pull_info.get("size_bytes"),
+        }
+
+    # Not in active pulls - check if image exists (completed before tracking started)
+    docker = get_docker_service()
+    try:
+        # Convert key back to image name
+        image_name = image_key.replace("_", "/", 1)  # First underscore is /
+        if "_" in image_name:
+            # Handle tag
+            parts = image_name.rsplit("_", 1)
+            image_name = parts[0] + ":" + parts[1]
+
+        existing = docker.client.images.get(image_name)
+        return {
+            "status": "completed",
+            "image": image_name,
+            "progress_percent": 100,
+            "image_id": existing.id,
+        }
+    except Exception:
+        pass
+
+    return {
+        "status": "not_found",
+        "message": f"No pull found for {image_key}",
+    }
+
+
+@router.post("/images/pull/{image_key}/cancel")
+def cancel_docker_pull(image_key: str, current_user: AdminUser):
+    """Cancel an active Docker image pull."""
+    if image_key not in _active_docker_pulls:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No active pull found for {image_key}"
+        )
+
+    if _active_docker_pulls[image_key].get("status") != "pulling":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Pull is not in progress"
+        )
+
+    _active_docker_pulls[image_key]["cancelled"] = True
+    return {
+        "status": "cancelling",
+        "image_key": image_key,
+        "message": "Cancellation requested",
+    }
+
+
+@router.get("/images/pulls/active")
+def get_active_docker_pulls(current_user: CurrentUser):
+    """Get all active Docker image pulls."""
+    return {
+        "pulls": [
+            {
+                "image_key": key,
+                "image": info.get("image"),
+                "status": info.get("status"),
+                "progress_percent": info.get("progress_percent", 0),
+                "layers_total": info.get("layers_total", 0),
+                "layers_completed": info.get("layers_completed", 0),
+            }
+            for key, info in _active_docker_pulls.items()
+            if info.get("status") == "pulling"
+        ]
+    }
 
 
 # Windows ISO caching endpoints
