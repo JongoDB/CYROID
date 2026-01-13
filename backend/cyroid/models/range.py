@@ -35,3 +35,12 @@ class Range(Base, UUIDMixin, TimestampMixin):
     vms: Mapped[List["VM"]] = relationship(
         "VM", back_populates="range", cascade="all, delete-orphan"
     )
+    event_logs: Mapped[List["EventLog"]] = relationship(
+        "EventLog", back_populates="range", cascade="all, delete-orphan"
+    )
+    connections: Mapped[List["Connection"]] = relationship(
+        "Connection", back_populates="range", cascade="all, delete-orphan"
+    )
+    msel: Mapped[Optional["MSEL"]] = relationship(
+        "MSEL", back_populates="range", uselist=False, cascade="all, delete-orphan"
+    )

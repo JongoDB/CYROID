@@ -9,8 +9,12 @@ from cyroid.api.deps import DBSession, CurrentUser
 from cyroid.models.vm import VM, VMStatus
 from cyroid.models.range import Range
 from cyroid.models.network import Network
-from cyroid.models.template import VMTemplate
+from cyroid.models.template import VMTemplate, OSType
+from cyroid.models.event_log import EventType
 from cyroid.schemas.vm import VMCreate, VMUpdate, VMResponse
+from cyroid.services.event_service import EventService
+from cyroid.config import get_settings
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -196,7 +200,24 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
                 "cyroid.hostname": vm.hostname,
             }
 
-            if template.os_type == "windows":
+            if template.os_type == OSType.WINDOWS:
+                settings = get_settings()
+
+                # Setup VM-specific storage path
+                vm_storage_path = os.path.join(
+                    settings.template_storage_dir,
+                    "vm-storage",
+                    str(vm.id)
+                )
+
+                # Determine Windows version (VM setting takes priority over template)
+                # Version codes: 11, 11l, 11e, 10, 10l, 10e, 8e, 7u, vu, xp, 2k, 2025, 2022, 2019, 2016, 2012, 2008, 2003
+                windows_version = vm.windows_version or template.os_variant or "11"
+
+                # Determine ISO path (VM setting takes priority)
+                iso_path = vm.iso_path or (template.cached_iso_path if hasattr(template, 'cached_iso_path') and template.cached_iso_path else None)
+                clone_from = template.golden_image_path if hasattr(template, 'golden_image_path') and template.golden_image_path else None
+
                 container_id = docker.create_windows_container(
                     name=f"cyroid-{vm.hostname}-{str(vm.id)[:8]}",
                     network_id=network.docker_network_id,
@@ -204,7 +225,15 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
                     cpu_limit=vm.cpu,
                     memory_limit_mb=vm.ram_mb,
                     disk_size_gb=vm.disk_gb,
+                    windows_version=windows_version,
                     labels=labels,
+                    iso_path=iso_path,
+                    iso_url=vm.iso_url,
+                    storage_path=vm_storage_path,
+                    clone_from=clone_from,
+                    username=vm.windows_username,
+                    password=vm.windows_password,
+                    display_type=vm.display_type or "desktop",
                 )
             else:
                 container_id = docker.create_container(
@@ -232,12 +261,31 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
         db.commit()
         db.refresh(vm)
 
+        # Log event
+        event_service = EventService(db)
+        event_service.log_event(
+            range_id=vm.range_id,
+            vm_id=vm.id,
+            event_type=EventType.VM_STARTED,
+            message=f"VM {vm.hostname} started"
+        )
+
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to start VM {vm_id}: {e}")
         vm.status = VMStatus.ERROR
         db.commit()
+
+        # Log error event
+        event_service = EventService(db)
+        event_service.log_event(
+            range_id=vm.range_id,
+            vm_id=vm.id,
+            event_type=EventType.VM_ERROR,
+            message=f"VM {vm.hostname} failed to start: {str(e)}"
+        )
+
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to start VM: {str(e)}",
@@ -271,6 +319,15 @@ def stop_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
         db.commit()
         db.refresh(vm)
 
+        # Log event
+        event_service = EventService(db)
+        event_service.log_event(
+            range_id=vm.range_id,
+            vm_id=vm.id,
+            event_type=EventType.VM_STOPPED,
+            message=f"VM {vm.hostname} stopped"
+        )
+
     except Exception as e:
         logger.error(f"Failed to stop VM {vm_id}: {e}")
         raise HTTPException(
@@ -279,6 +336,36 @@ def stop_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
         )
 
     return vm
+
+
+@router.get("/{vm_id}/stats")
+def get_vm_stats(vm_id: UUID, db: DBSession, current_user: CurrentUser):
+    """Get real-time resource statistics for a VM"""
+    vm = db.query(VM).filter(VM.id == vm_id).first()
+    if not vm:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="VM not found",
+        )
+
+    if vm.status != VMStatus.RUNNING:
+        return {"vm_id": str(vm.id), "status": vm.status.value, "stats": None}
+
+    if not vm.container_id:
+        return {"vm_id": str(vm.id), "status": vm.status.value, "stats": None}
+
+    try:
+        docker = get_docker_service()
+        stats = docker.get_container_stats(vm.container_id)
+        return {
+            "vm_id": str(vm.id),
+            "hostname": vm.hostname,
+            "status": vm.status.value,
+            "stats": stats
+        }
+    except Exception as e:
+        logger.warning(f"Failed to get stats for VM {vm_id}: {e}")
+        return {"vm_id": str(vm.id), "status": vm.status.value, "stats": None}
 
 
 @router.post("/{vm_id}/restart", response_model=VMResponse)
@@ -306,10 +393,29 @@ def restart_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
         db.commit()
         db.refresh(vm)
 
+        # Log event
+        event_service = EventService(db)
+        event_service.log_event(
+            range_id=vm.range_id,
+            vm_id=vm.id,
+            event_type=EventType.VM_RESTARTED,
+            message=f"VM {vm.hostname} restarted"
+        )
+
     except Exception as e:
         logger.error(f"Failed to restart VM {vm_id}: {e}")
         vm.status = VMStatus.ERROR
         db.commit()
+
+        # Log error event
+        event_service = EventService(db)
+        event_service.log_event(
+            range_id=vm.range_id,
+            vm_id=vm.id,
+            event_type=EventType.VM_ERROR,
+            message=f"VM {vm.hostname} failed to restart: {str(e)}"
+        )
+
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to restart VM: {str(e)}",

@@ -1,8 +1,8 @@
 // frontend/src/pages/Templates.tsx
 import { useEffect, useState } from 'react'
-import { templatesApi, VMTemplateCreate } from '../services/api'
-import type { VMTemplate } from '../types'
-import { Plus, Pencil, Trash2, Copy, Loader2, X, Server } from 'lucide-react'
+import { templatesApi, cacheApi, VMTemplateCreate } from '../services/api'
+import type { VMTemplate, CachedImage, WindowsVersionsResponse, CustomISOList, RecommendedImages } from '../types'
+import { Plus, Pencil, Trash2, Copy, Loader2, X, Server, Monitor, Info, RefreshCw } from 'lucide-react'
 import clsx from 'clsx'
 
 interface TemplateFormData {
@@ -31,6 +31,13 @@ const defaultFormData: TemplateFormData = {
   tags: ''
 }
 
+const WINDOWS_DEFAULTS = {
+  default_cpu: 4,
+  default_ram_mb: 8192,
+  default_disk_gb: 64,
+  base_image: 'dockur/windows'
+}
+
 export default function Templates() {
   const [templates, setTemplates] = useState<VMTemplate[]>([])
   const [loading, setLoading] = useState(true)
@@ -39,6 +46,13 @@ export default function Templates() {
   const [formData, setFormData] = useState<TemplateFormData>(defaultFormData)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // Cached data for dropdowns
+  const [cachedImages, setCachedImages] = useState<CachedImage[]>([])
+  const [windowsVersions, setWindowsVersions] = useState<WindowsVersionsResponse | null>(null)
+  const [customISOs, setCustomISOs] = useState<CustomISOList | null>(null)
+  const [recommendedImages, setRecommendedImages] = useState<RecommendedImages | null>(null)
+  const [cacheLoading, setCacheLoading] = useState(false)
 
   const fetchTemplates = async () => {
     try {
@@ -51,8 +65,29 @@ export default function Templates() {
     }
   }
 
+  const fetchCacheData = async () => {
+    setCacheLoading(true)
+    try {
+      const [imagesRes, windowsRes, customISOsRes, recommendedRes] = await Promise.all([
+        cacheApi.listImages(),
+        cacheApi.getWindowsVersions(),
+        cacheApi.listCustomISOs(),
+        cacheApi.getRecommendedImages(),
+      ])
+      setCachedImages(imagesRes.data)
+      setWindowsVersions(windowsRes.data)
+      setCustomISOs(customISOsRes.data)
+      setRecommendedImages(recommendedRes.data)
+    } catch (err) {
+      console.error('Failed to fetch cache data:', err)
+    } finally {
+      setCacheLoading(false)
+    }
+  }
+
   useEffect(() => {
     fetchTemplates()
+    fetchCacheData()
   }, [])
 
   const openCreateModal = () => {
@@ -78,6 +113,30 @@ export default function Templates() {
     })
     setError(null)
     setShowModal(true)
+  }
+
+  const handleOsTypeChange = (newOsType: 'windows' | 'linux') => {
+    if (newOsType === 'windows') {
+      setFormData({
+        ...formData,
+        os_type: newOsType,
+        os_variant: '11', // Default to Windows 11
+        base_image: WINDOWS_DEFAULTS.base_image,
+        default_cpu: WINDOWS_DEFAULTS.default_cpu,
+        default_ram_mb: WINDOWS_DEFAULTS.default_ram_mb,
+        default_disk_gb: WINDOWS_DEFAULTS.default_disk_gb,
+      })
+    } else {
+      setFormData({
+        ...formData,
+        os_type: newOsType,
+        os_variant: '',
+        base_image: '',
+        default_cpu: 2,
+        default_ram_mb: 2048,
+        default_disk_gb: 20,
+      })
+    }
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -190,10 +249,11 @@ export default function Templates() {
                       "flex-shrink-0 rounded-md p-2",
                       template.os_type === 'linux' ? 'bg-orange-100' : 'bg-blue-100'
                     )}>
-                      <Server className={clsx(
-                        "h-6 w-6",
-                        template.os_type === 'linux' ? 'text-orange-600' : 'text-blue-600'
-                      )} />
+                      {template.os_type === 'linux' ? (
+                        <Server className="h-6 w-6 text-orange-600" />
+                      ) : (
+                        <Monitor className="h-6 w-6 text-blue-600" />
+                      )}
                     </div>
                     <div className="ml-4">
                       <h3 className="text-lg font-medium text-gray-900">{template.name}</h3>
@@ -269,14 +329,25 @@ export default function Templates() {
           <div className="flex items-center justify-center min-h-screen px-4">
             <div className="fixed inset-0 bg-gray-500 bg-opacity-75" onClick={() => setShowModal(false)} />
 
-            <div className="relative bg-white rounded-lg shadow-xl max-w-lg w-full">
-              <div className="flex items-center justify-between p-4 border-b">
+            <div className="relative bg-white rounded-lg shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto">
+              <div className="flex items-center justify-between p-4 border-b sticky top-0 bg-white z-10">
                 <h3 className="text-lg font-medium text-gray-900">
                   {editingTemplate ? 'Edit Template' : 'Create Template'}
                 </h3>
-                <button onClick={() => setShowModal(false)} className="text-gray-400 hover:text-gray-500">
-                  <X className="h-5 w-5" />
-                </button>
+                <div className="flex items-center space-x-2">
+                  <button
+                    type="button"
+                    onClick={fetchCacheData}
+                    disabled={cacheLoading}
+                    className="p-1 text-gray-400 hover:text-gray-600"
+                    title="Refresh cache data"
+                  >
+                    <RefreshCw className={clsx("h-4 w-4", cacheLoading && "animate-spin")} />
+                  </button>
+                  <button onClick={() => setShowModal(false)} className="text-gray-400 hover:text-gray-500">
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
               </div>
 
               <form onSubmit={handleSubmit} className="p-4 space-y-4">
@@ -305,43 +376,175 @@ export default function Templates() {
                   />
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700">OS Type</label>
-                    <select
-                      value={formData.os_type}
-                      onChange={(e) => setFormData({ ...formData, os_type: e.target.value as 'windows' | 'linux' })}
-                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
-                    >
-                      <option value="linux">Linux</option>
-                      <option value="windows">Windows</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700">OS Variant</label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="e.g., Ubuntu 22.04"
-                      value={formData.os_variant}
-                      onChange={(e) => setFormData({ ...formData, os_variant: e.target.value })}
-                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
-                    />
-                  </div>
-                </div>
-
+                {/* OS Type Selection */}
                 <div>
-                  <label className="block text-sm font-medium text-gray-700">Base Image</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="e.g., ubuntu:22.04"
-                    value={formData.base_image}
-                    onChange={(e) => setFormData({ ...formData, base_image: e.target.value })}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
-                  />
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Operating System</label>
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => handleOsTypeChange('linux')}
+                      className={clsx(
+                        "flex items-center justify-center p-3 border-2 rounded-lg transition-all",
+                        formData.os_type === 'linux'
+                          ? "border-orange-500 bg-orange-50 text-orange-700"
+                          : "border-gray-200 hover:border-gray-300"
+                      )}
+                    >
+                      <Server className="h-5 w-5 mr-2" />
+                      <span className="font-medium">Linux</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleOsTypeChange('windows')}
+                      className={clsx(
+                        "flex items-center justify-center p-3 border-2 rounded-lg transition-all",
+                        formData.os_type === 'windows'
+                          ? "border-blue-500 bg-blue-50 text-blue-700"
+                          : "border-gray-200 hover:border-gray-300"
+                      )}
+                    >
+                      <Monitor className="h-5 w-5 mr-2" />
+                      <span className="font-medium">Windows</span>
+                    </button>
+                  </div>
                 </div>
+
+                {/* Linux-specific fields */}
+                {formData.os_type === 'linux' && (
+                  <>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">
+                        Base Image
+                        {cachedImages.length > 0 && (
+                          <span className="ml-2 text-xs text-green-600">({cachedImages.length} cached)</span>
+                        )}
+                      </label>
+                      <select
+                        required
+                        value={formData.base_image}
+                        onChange={(e) => {
+                          const img = e.target.value
+                          // Auto-fill os_variant from image name
+                          const variant = img.split(':')[0].split('/').pop() || img
+                          setFormData({
+                            ...formData,
+                            base_image: img,
+                            os_variant: formData.os_variant || variant
+                          })
+                        }}
+                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                      >
+                        <option value="">Select an image...</option>
+                        {cachedImages.length > 0 && (
+                          <optgroup label="Cached Images">
+                            {cachedImages.map(img =>
+                              img.tags.filter(tag => !tag.includes('windows')).map(tag => (
+                                <option key={tag} value={tag}>{tag} ({img.size_gb} GB)</option>
+                              ))
+                            )}
+                          </optgroup>
+                        )}
+                        {recommendedImages && (
+                          <>
+                            <optgroup label="Recommended Linux">
+                              {recommendedImages.linux.map(rec => (
+                                <option key={rec.image} value={rec.image!}>
+                                  {rec.image} - {rec.description}
+                                </option>
+                              ))}
+                            </optgroup>
+                            <optgroup label="Services">
+                              {recommendedImages.services.map(rec => (
+                                <option key={rec.image} value={rec.image!}>
+                                  {rec.image} - {rec.description}
+                                </option>
+                              ))}
+                            </optgroup>
+                          </>
+                        )}
+                      </select>
+                      <p className="mt-1 text-xs text-gray-500">
+                        Select from cached images or recommended images. Non-cached images will be pulled on first use.
+                      </p>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">OS Variant Name</label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="e.g., Ubuntu 22.04, Debian 12"
+                        value={formData.os_variant}
+                        onChange={(e) => setFormData({ ...formData, os_variant: e.target.value })}
+                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                      />
+                    </div>
+                  </>
+                )}
+
+                {/* Windows-specific fields */}
+                {formData.os_type === 'windows' && windowsVersions && (
+                  <>
+                    <div className="bg-blue-50 border border-blue-200 rounded-md p-3">
+                      <div className="flex">
+                        <Info className="h-4 w-4 text-blue-500 mt-0.5 mr-2" />
+                        <p className="text-xs text-blue-700">
+                          Windows VMs use <strong>dockur/windows</strong> container. The ISO is automatically
+                          downloaded when the VM starts. Select a version below.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Windows Version</label>
+                      <select
+                        required
+                        value={formData.os_variant}
+                        onChange={(e) => {
+                          setFormData({
+                            ...formData,
+                            os_variant: e.target.value,
+                            base_image: 'dockur/windows'
+                          })
+                        }}
+                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                      >
+                        <option value="">Select a Windows version...</option>
+                        <optgroup label="Desktop">
+                          {windowsVersions.desktop.map(v => (
+                            <option key={v.version} value={v.version}>
+                              {v.name} ({v.version}) - {v.size_gb} GB
+                            </option>
+                          ))}
+                        </optgroup>
+                        <optgroup label="Server">
+                          {windowsVersions.server.map(v => (
+                            <option key={v.version} value={v.version}>
+                              {v.name} ({v.version}) - {v.size_gb} GB
+                            </option>
+                          ))}
+                        </optgroup>
+                        <optgroup label="Legacy">
+                          {windowsVersions.legacy.map(v => (
+                            <option key={v.version} value={v.version}>
+                              {v.name} ({v.version}) - {v.size_gb} GB
+                            </option>
+                          ))}
+                        </optgroup>
+                      </select>
+                    </div>
+
+                    {/* Custom ISO option */}
+                    {customISOs && customISOs.isos.length > 0 && (
+                      <div className="bg-gray-50 border border-gray-200 rounded-md p-3">
+                        <p className="text-xs text-gray-600 mb-2">
+                          <strong>Custom ISO available:</strong> You can also use a custom ISO when creating VMs
+                          from this template. {customISOs.total_count} custom ISO(s) in cache.
+                        </p>
+                      </div>
+                    )}
+                  </>
+                )}
 
                 <div className="grid grid-cols-3 gap-4">
                   <div>

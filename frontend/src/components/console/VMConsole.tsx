@@ -79,7 +79,7 @@ export function VMConsole({ vmId, vmHostname, token, onClose }: VMConsoleProps) 
       terminal.write(event.data)
     }
 
-    ws.onerror = (event) => {
+    ws.onerror = () => {
       setError('Connection error')
       terminal.writeln('\r\n\x1b[31mConnection error\x1b[0m')
     }

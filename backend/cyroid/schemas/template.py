@@ -18,6 +18,10 @@ class VMTemplateBase(BaseModel):
     default_disk_gb: int = Field(default=40, ge=10, le=1000)
     config_script: Optional[str] = None
     tags: List[str] = Field(default_factory=list)
+    # Cached image support
+    golden_image_path: Optional[str] = Field(None, max_length=500)
+    cached_iso_path: Optional[str] = Field(None, max_length=500)
+    is_cached: bool = Field(default=False)
 
 
 class VMTemplateCreate(VMTemplateBase):
@@ -34,6 +38,10 @@ class VMTemplateUpdate(BaseModel):
     default_disk_gb: Optional[int] = Field(None, ge=10, le=1000)
     config_script: Optional[str] = None
     tags: Optional[List[str]] = None
+    # Cached image support
+    golden_image_path: Optional[str] = Field(None, max_length=500)
+    cached_iso_path: Optional[str] = Field(None, max_length=500)
+    is_cached: Optional[bool] = None
 
 
 class VMTemplateResponse(VMTemplateBase):

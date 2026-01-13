@@ -5,6 +5,7 @@ from cyroid.schemas.template import VMTemplateBase, VMTemplateCreate, VMTemplate
 from cyroid.schemas.network import NetworkBase, NetworkCreate, NetworkUpdate, NetworkResponse
 from cyroid.schemas.vm import VMBase, VMCreate, VMUpdate, VMResponse
 from cyroid.schemas.range import RangeBase, RangeCreate, RangeUpdate, RangeResponse, RangeDetailResponse
+from cyroid.schemas.event_log import EventLogCreate, EventLogResponse, EventLogList
 
 __all__ = [
     "UserBase", "UserCreate", "UserUpdate", "UserResponse",
@@ -13,4 +14,5 @@ __all__ = [
     "NetworkBase", "NetworkCreate", "NetworkUpdate", "NetworkResponse",
     "VMBase", "VMCreate", "VMUpdate", "VMResponse",
     "RangeBase", "RangeCreate", "RangeUpdate", "RangeResponse", "RangeDetailResponse",
+    "EventLogCreate", "EventLogResponse", "EventLogList",
 ]

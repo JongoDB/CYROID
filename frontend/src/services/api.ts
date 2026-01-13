@@ -69,7 +69,7 @@ export const authApi = {
 }
 
 // Templates API
-import type { VMTemplate, Range, Network, VM } from '../types'
+import type { VMTemplate, Range, Network, VM, EventLog, EventLogList, VMStatsResponse } from '../types'
 
 export interface VMTemplateCreate {
   name: string
@@ -141,6 +141,14 @@ export interface VMCreate {
   disk_gb: number
   position_x?: number
   position_y?: number
+  // Windows-specific settings (for dockur/windows VMs)
+  // Version codes: 11, 11l, 11e, 10, 10l, 10e, 8e, 7u, vu, xp, 2k, 2025, 2022, 2019, 2016, 2012, 2008, 2003
+  windows_version?: string
+  windows_username?: string
+  windows_password?: string
+  iso_url?: string
+  iso_path?: string
+  display_type?: 'desktop' | 'server'
 }
 
 export const vmsApi = {
@@ -152,6 +160,111 @@ export const vmsApi = {
   start: (id: string) => api.post<VM>(`/vms/${id}/start`),
   stop: (id: string) => api.post<VM>(`/vms/${id}/stop`),
   restart: (id: string) => api.post<VM>(`/vms/${id}/restart`),
+  getStats: (id: string) => api.get<VMStatsResponse>(`/vms/${id}/stats`),
+}
+
+// Events API
+export const eventsApi = {
+  getEvents: (rangeId: string, limit = 100, offset = 0) =>
+    api.get<EventLogList>(`/events/${rangeId}`, { params: { limit, offset } }),
+  getVMEvents: (vmId: string, limit = 50) =>
+    api.get<EventLog[]>(`/events/vm/${vmId}`, { params: { limit } }),
+}
+
+// MSEL API
+import type { MSEL, InjectExecutionResult, ConnectionList, Connection } from '../types'
+
+export interface MSELImport {
+  name: string
+  content: string
+}
+
+export const mselApi = {
+  import: (rangeId: string, data: MSELImport) =>
+    api.post<MSEL>(`/msel/${rangeId}/import`, data),
+  get: (rangeId: string) =>
+    api.get<MSEL>(`/msel/${rangeId}`),
+  delete: (rangeId: string) =>
+    api.delete(`/msel/${rangeId}`),
+  executeInject: (injectId: string) =>
+    api.post<InjectExecutionResult>(`/msel/inject/${injectId}/execute`),
+  skipInject: (injectId: string) =>
+    api.post<{ status: string; inject_id: string }>(`/msel/inject/${injectId}/skip`),
+}
+
+// Connections API
+export const connectionsApi = {
+  getRangeConnections: (rangeId: string, limit = 100, offset = 0, activeOnly = false) =>
+    api.get<ConnectionList>(`/connections/${rangeId}`, { params: { limit, offset, active_only: activeOnly } }),
+  getVMConnections: (vmId: string, direction: 'both' | 'incoming' | 'outgoing' = 'both', limit = 50) =>
+    api.get<Connection[]>(`/connections/vm/${vmId}`, { params: { direction, limit } }),
+}
+
+// Cache API
+import type { CachedImage, ISOCacheStatus, GoldenImagesStatus, CacheStats, RecommendedImages, WindowsVersionsResponse, CustomISOList, CustomISODownloadResponse, CustomISOStatusResponse, ISOUploadResponse, WindowsISODownloadResponse, WindowsISODownloadStatus, AllSnapshotsStatus, SnapshotResponse } from '../types'
+
+export const cacheApi = {
+  // Docker images
+  listImages: () => api.get<CachedImage[]>('/cache/images'),
+  cacheImage: (image: string) => api.post<CachedImage>('/cache/images', { image }),
+  cacheBatchImages: (images: string[]) => api.post<{ status: string; message: string }>('/cache/images/batch', images),
+  removeImage: (imageId: string) => api.delete(`/cache/images/${encodeURIComponent(imageId)}`),
+
+  // Windows versions (auto-downloaded by dockur/windows)
+  getWindowsVersions: () => api.get<WindowsVersionsResponse>('/cache/windows-versions'),
+  getISOStatus: () => api.get<ISOCacheStatus>('/cache/isos'),
+
+  // Windows ISO Downloads
+  downloadWindowsISO: (version: string, url?: string) =>
+    api.post<WindowsISODownloadResponse>('/cache/isos/download', { version, url }),
+  getWindowsISODownloadStatus: (version: string) =>
+    api.get<WindowsISODownloadStatus>(`/cache/isos/download/${encodeURIComponent(version)}/status`),
+
+  // Snapshots (unified API for both Windows golden images and Docker snapshots)
+  getAllSnapshots: () => api.get<AllSnapshotsStatus>('/cache/snapshots'),
+  createSnapshot: (containerId: string, name: string, snapshotType: 'auto' | 'windows' | 'docker' = 'auto') =>
+    api.post<SnapshotResponse>('/cache/snapshots', { container_id: containerId, name, snapshot_type: snapshotType }),
+  deleteSnapshot: (snapshotType: 'windows' | 'docker', name: string) =>
+    api.delete(`/cache/snapshots/${snapshotType}/${encodeURIComponent(name)}`),
+
+  // Golden images (Windows-specific, kept for backwards compatibility)
+  getGoldenImages: () => api.get<GoldenImagesStatus>('/cache/golden-images'),
+  createGoldenImage: (containerId: string, name: string) =>
+    api.post<{ name: string; path: string; size_bytes: number; size_gb: number }>('/cache/golden-images', { container_id: containerId, name }),
+  deleteGoldenImage: (name: string) => api.delete(`/cache/golden-images/${encodeURIComponent(name)}`),
+
+  // Custom ISOs
+  listCustomISOs: () => api.get<CustomISOList>('/cache/custom-isos'),
+  downloadCustomISO: (name: string, url: string) =>
+    api.post<CustomISODownloadResponse>('/cache/custom-isos', { name, url }),
+  getCustomISOStatus: (filename: string) =>
+    api.get<CustomISOStatusResponse>(`/cache/custom-isos/${encodeURIComponent(filename)}/status`),
+  deleteCustomISO: (filename: string) =>
+    api.delete(`/cache/custom-isos/${encodeURIComponent(filename)}`),
+
+  // ISO Uploads
+  uploadWindowsISO: (file: File, version: string) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('version', version)
+    return api.post<ISOUploadResponse>('/cache/isos/upload', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  },
+  uploadCustomISO: (file: File, name: string) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('name', name)
+    return api.post<ISOUploadResponse>('/cache/custom-isos/upload', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  },
+  deleteWindowsISO: (version: string) =>
+    api.delete(`/cache/isos/${encodeURIComponent(version)}`),
+
+  // Stats and info
+  getStats: () => api.get<CacheStats>('/cache/stats'),
+  getRecommendedImages: () => api.get<RecommendedImages>('/cache/recommended-images'),
 }
 
 export default api

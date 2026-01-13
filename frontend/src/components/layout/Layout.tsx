@@ -9,7 +9,8 @@ import {
   FileBox,
   LogOut,
   Menu,
-  X
+  X,
+  HardDrive
 } from 'lucide-react'
 import { useState } from 'react'
 import clsx from 'clsx'
@@ -22,6 +23,7 @@ const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
   { name: 'Templates', href: '/templates', icon: Server },
   { name: 'Ranges', href: '/ranges', icon: Network },
+  { name: 'Image Cache', href: '/cache', icon: HardDrive },
   { name: 'Artifacts', href: '/artifacts', icon: FileBox },
 ]
 

@@ -188,12 +188,24 @@ class DockerService:
         cpu_limit: int = 4,
         memory_limit_mb: int = 8192,
         disk_size_gb: int = 64,
-        windows_version: str = "win10",
-        labels: Optional[Dict[str, str]] = None
+        windows_version: str = "11",
+        labels: Optional[Dict[str, str]] = None,
+        iso_path: Optional[str] = None,
+        iso_url: Optional[str] = None,
+        storage_path: Optional[str] = None,
+        clone_from: Optional[str] = None,
+        username: Optional[str] = None,
+        password: Optional[str] = None,
+        display_type: str = "desktop"
     ) -> str:
         """
         Create a Windows VM container using dockur/windows.
-        
+
+        Supported Windows versions (dockur/windows auto-downloads):
+        - Desktop: 11, 11l (LTSC), 11e (Enterprise), 10, 10l, 10e, 8e
+        - Server: 2025, 2022, 2019, 2016, 2012, 2008
+        - Legacy: 7u, vu, xp, 2k, 2003
+
         Args:
             name: Container name
             network_id: Network to attach to
@@ -201,37 +213,124 @@ class DockerService:
             cpu_limit: CPU core limit (minimum 4 recommended)
             memory_limit_mb: Memory limit in MB (minimum 4096 recommended)
             disk_size_gb: Virtual disk size in GB
-            windows_version: Windows version (win10, win11, win2022, etc.)
+            windows_version: Windows version code (11, 10, 2022, etc.)
             labels: Container labels
-            
+            iso_path: Path to local Windows ISO (bind mount, skips download)
+            iso_url: URL to custom Windows ISO (remote download)
+            storage_path: Path to persistent storage for Windows installation
+            clone_from: Path to golden image storage to clone from
+            username: Optional Windows username (default: Docker)
+            password: Optional Windows password (default: empty)
+            display_type: Display mode - 'desktop' (VNC/web console on ports 8006/5900)
+                         or 'server' (headless/RDP only)
+
         Returns:
             Container ID
         """
+        import os
+        import shutil
+        from cyroid.config import get_settings
+        settings = get_settings()
+
         image = "dockurr/windows"
         self._ensure_image(image)
-        
+
         try:
             network = self.client.networks.get(network_id)
         except NotFound:
             raise ValueError(f"Network not found: {network_id}")
-        
+
         # Create networking config
         networking_config = self.client.api.create_networking_config({
             network.name: self.client.api.create_endpoint_config(
                 ipv4_address=ip_address
             )
         })
-        
+
         # Environment for dockur/windows
+        # See: https://github.com/dockur/windows for full documentation
         environment = {
             "VERSION": windows_version,
             "DISK_SIZE": f"{disk_size_gb}G",
             "CPU_CORES": str(cpu_limit),
             "RAM_SIZE": f"{memory_limit_mb}M"
         }
-        
+
+        # Optional username/password for Windows setup
+        if username:
+            environment["USERNAME"] = username
+        if password:
+            environment["PASSWORD"] = password
+
+        # Display type configuration
+        # 'desktop' = web VNC console on port 8006 + VNC on port 5900 (default)
+        # 'server' = headless mode, RDP only (no VNC/web console)
+        if display_type == "server":
+            environment["DISPLAY"] = "none"  # Headless mode for server environments
+            logger.info(f"Windows VM {name} configured in server mode (RDP only)")
+        else:
+            environment["DISPLAY"] = "web"  # Web VNC console (default)
+            logger.info(f"Windows VM {name} configured in desktop mode (VNC/web console)")
+
+        # Custom ISO URL (dockur downloads from this URL)
+        if iso_url:
+            environment["BOOT"] = iso_url
+            logger.info(f"Using custom ISO URL: {iso_url}")
+
+        # Check if KVM is available for hardware acceleration
+        kvm_available = os.path.exists("/dev/kvm")
+        if not kvm_available:
+            logger.warning("KVM not available, Windows VM will run in software emulation mode (slower)")
+            environment["KVM"] = "N"
+
+        # Setup volume bindings
+        binds = []
+
+        # Check for local ISO bind mount (takes priority over URL)
+        if iso_path and os.path.exists(iso_path):
+            binds.append(f"{iso_path}:/boot.iso:ro")
+            logger.info(f"Using local ISO: {iso_path}")
+        elif not iso_url:
+            # Check for default ISO in cache directory (only if no URL provided)
+            windows_iso_dir = os.path.join(settings.iso_cache_dir, "windows-isos")
+            cached_iso = os.path.join(windows_iso_dir, f"windows-{windows_version}.iso")
+            if os.path.exists(cached_iso):
+                binds.append(f"{cached_iso}:/boot.iso:ro")
+                logger.info(f"Using cached ISO: {cached_iso}")
+
+        # Setup persistent storage
+        if storage_path:
+            os.makedirs(storage_path, exist_ok=True)
+
+            # Clone from golden image if specified
+            if clone_from and os.path.exists(clone_from):
+                if not os.listdir(storage_path):  # Only clone if empty
+                    logger.info(f"Cloning golden image from {clone_from} to {storage_path}")
+                    for item in os.listdir(clone_from):
+                        src = os.path.join(clone_from, item)
+                        dst = os.path.join(storage_path, item)
+                        if os.path.isdir(src):
+                            shutil.copytree(src, dst)
+                        else:
+                            shutil.copy2(src, dst)
+
+            binds.append(f"{storage_path}:/storage")
+            logger.info(f"Using persistent storage: {storage_path}")
+
         # Windows containers need privileged mode for KVM
         try:
+            host_config_args = {
+                "cpu_count": cpu_limit,
+                "mem_limit": f"{memory_limit_mb}m",
+                "privileged": True,
+                "cap_add": ["NET_ADMIN"],
+                "restart_policy": {"Name": "unless-stopped"}
+            }
+            if kvm_available:
+                host_config_args["devices"] = ["/dev/kvm:/dev/kvm"]
+            if binds:
+                host_config_args["binds"] = binds
+
             container = self.client.api.create_container(
                 image=image,
                 name=name,
@@ -240,14 +339,7 @@ class DockerService:
                 tty=True,
                 stdin_open=True,
                 networking_config=networking_config,
-                host_config=self.client.api.create_host_config(
-                    cpu_count=cpu_limit,
-                    mem_limit=f"{memory_limit_mb}m",
-                    privileged=True,
-                    devices=["/dev/kvm:/dev/kvm"],
-                    cap_add=["NET_ADMIN"],
-                    restart_policy={"Name": "unless-stopped"}
-                ),
+                host_config=self.client.api.create_host_config(**host_config_args),
                 environment=environment,
                 labels=labels or {}
             )
@@ -332,6 +424,53 @@ class DockerService:
                 "labels": container.labels
             }
         except NotFound:
+            return None
+
+    def get_container_stats(self, container_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get real-time resource statistics for a container.
+
+        Returns:
+            Dict with cpu_percent, memory_mb, memory_limit_mb, network_rx_bytes, network_tx_bytes
+        """
+        try:
+            container = self.client.containers.get(container_id)
+            if container.status != "running":
+                return None
+
+            stats = container.stats(stream=False)
+
+            # CPU calculation
+            cpu_delta = stats["cpu_stats"]["cpu_usage"]["total_usage"] - \
+                        stats["precpu_stats"]["cpu_usage"]["total_usage"]
+            system_delta = stats["cpu_stats"]["system_cpu_usage"] - \
+                           stats["precpu_stats"]["system_cpu_usage"]
+            cpu_count = stats["cpu_stats"].get("online_cpus", 1)
+            cpu_percent = (cpu_delta / system_delta) * cpu_count * 100.0 if system_delta > 0 else 0.0
+
+            # Memory
+            memory_usage = stats["memory_stats"].get("usage", 0)
+            memory_limit = stats["memory_stats"].get("limit", 0)
+            memory_mb = memory_usage / (1024 * 1024)
+            memory_limit_mb = memory_limit / (1024 * 1024)
+
+            # Network
+            network_stats = stats.get("networks", {})
+            rx_bytes = sum(n.get("rx_bytes", 0) for n in network_stats.values())
+            tx_bytes = sum(n.get("tx_bytes", 0) for n in network_stats.values())
+
+            return {
+                "cpu_percent": round(cpu_percent, 2),
+                "memory_mb": round(memory_mb, 2),
+                "memory_limit_mb": round(memory_limit_mb, 2),
+                "memory_percent": round((memory_usage / memory_limit) * 100, 2) if memory_limit > 0 else 0,
+                "network_rx_bytes": rx_bytes,
+                "network_tx_bytes": tx_bytes
+            }
+        except NotFound:
+            return None
+        except (KeyError, ZeroDivisionError) as e:
+            logger.warning(f"Failed to calculate stats for {container_id}: {e}")
             return None
     
     def exec_command(
@@ -556,6 +695,270 @@ class DockerService:
             "architecture": info.get("Architecture"),
             "cpus": info.get("NCPU"),
             "memory_bytes": info.get("MemTotal")
+        }
+
+    # Image Caching Methods
+
+    def cache_linux_image(self, image: str) -> Dict[str, Any]:
+        """
+        Pre-pull and cache a Linux container image.
+
+        Args:
+            image: Docker image name (e.g., "ubuntu:22.04")
+
+        Returns:
+            Dict with image info
+        """
+        logger.info(f"Caching Linux image: {image}")
+        pulled_image = self.client.images.pull(image)
+        return {
+            "id": pulled_image.id,
+            "tags": pulled_image.tags,
+            "size_bytes": pulled_image.attrs.get("Size", 0),
+            "created": pulled_image.attrs.get("Created")
+        }
+
+    def list_cached_images(self) -> List[Dict[str, Any]]:
+        """List all cached Docker images."""
+        images = self.client.images.list()
+        return [
+            {
+                "id": img.id,
+                "tags": img.tags,
+                "size_bytes": img.attrs.get("Size", 0),
+                "created": img.attrs.get("Created")
+            }
+            for img in images
+            if img.tags  # Only show tagged images
+        ]
+
+    def get_windows_iso_cache_status(self) -> Dict[str, Any]:
+        """
+        Check status of cached Windows ISOs.
+
+        Returns:
+            Dict with cached ISOs and their sizes
+        """
+        import os
+        from cyroid.config import get_settings
+        settings = get_settings()
+
+        cached_isos = []
+        # Windows ISOs are stored in a subdirectory
+        windows_iso_dir = os.path.join(settings.iso_cache_dir, "windows-isos")
+
+        if os.path.exists(windows_iso_dir):
+            for filename in os.listdir(windows_iso_dir):
+                if filename.endswith('.iso'):
+                    filepath = os.path.join(windows_iso_dir, filename)
+                    cached_isos.append({
+                        "filename": filename,
+                        "path": filepath,
+                        "size_bytes": os.path.getsize(filepath),
+                        "size_gb": round(os.path.getsize(filepath) / (1024**3), 2)
+                    })
+
+        return {
+            "cache_dir": windows_iso_dir,
+            "isos": cached_isos,
+            "total_count": len(cached_isos)
+        }
+
+    def get_golden_images_status(self) -> Dict[str, Any]:
+        """
+        Check status of Windows golden images (pre-installed templates).
+
+        Returns:
+            Dict with golden images and their sizes
+        """
+        import os
+        from cyroid.config import get_settings
+        settings = get_settings()
+
+        golden_images = []
+        template_dir = settings.template_storage_dir
+
+        if os.path.exists(template_dir):
+            for dirname in os.listdir(template_dir):
+                dirpath = os.path.join(template_dir, dirname)
+                if os.path.isdir(dirpath):
+                    # Calculate total size of the golden image
+                    total_size = 0
+                    for root, dirs, files in os.walk(dirpath):
+                        for f in files:
+                            total_size += os.path.getsize(os.path.join(root, f))
+
+                    golden_images.append({
+                        "name": dirname,
+                        "path": dirpath,
+                        "size_bytes": total_size,
+                        "size_gb": round(total_size / (1024**3), 2)
+                    })
+
+        return {
+            "template_dir": template_dir,
+            "golden_images": golden_images,
+            "total_count": len(golden_images)
+        }
+
+    def create_golden_image(
+        self,
+        container_id: str,
+        golden_image_name: str
+    ) -> Dict[str, Any]:
+        """
+        Create a golden image from a running Windows container.
+        This saves the /storage directory for reuse.
+
+        Args:
+            container_id: ID of the Windows container with completed installation
+            golden_image_name: Name for the golden image
+
+        Returns:
+            Dict with golden image info
+        """
+        import os
+        import shutil
+        from cyroid.config import get_settings
+        settings = get_settings()
+
+        # Get container info
+        container = self.client.containers.get(container_id)
+        mounts = container.attrs.get("Mounts", [])
+
+        # Find the /storage mount
+        storage_mount = None
+        for mount in mounts:
+            if mount.get("Destination") == "/storage":
+                storage_mount = mount.get("Source")
+                break
+
+        if not storage_mount:
+            raise ValueError("Container does not have a /storage mount")
+
+        # Create golden image directory
+        golden_dir = os.path.join(settings.template_storage_dir, golden_image_name)
+        os.makedirs(golden_dir, exist_ok=True)
+
+        # Copy storage to golden image
+        logger.info(f"Creating golden image from {storage_mount} to {golden_dir}")
+        for item in os.listdir(storage_mount):
+            src = os.path.join(storage_mount, item)
+            dst = os.path.join(golden_dir, item)
+            if os.path.isdir(src):
+                shutil.copytree(src, dst, dirs_exist_ok=True)
+            else:
+                shutil.copy2(src, dst)
+
+        # Calculate size
+        total_size = 0
+        for root, dirs, files in os.walk(golden_dir):
+            for f in files:
+                total_size += os.path.getsize(os.path.join(root, f))
+
+        return {
+            "name": golden_image_name,
+            "path": golden_dir,
+            "size_bytes": total_size,
+            "size_gb": round(total_size / (1024**3), 2),
+            "type": "windows"
+        }
+
+    def create_container_snapshot(
+        self,
+        container_id: str,
+        snapshot_name: str,
+        tag: str = "latest"
+    ) -> Dict[str, Any]:
+        """
+        Create a Docker image snapshot from a running container using docker commit.
+        Works for any container type (Linux, custom, etc.).
+
+        Args:
+            container_id: ID of the container to snapshot
+            snapshot_name: Name for the new image (e.g., "cyroid/mytemplate")
+            tag: Tag for the image (default: "latest")
+
+        Returns:
+            Dict with snapshot image info
+        """
+        # Get container
+        container = self.client.containers.get(container_id)
+
+        # Create the snapshot image
+        full_tag = f"{snapshot_name}:{tag}"
+        logger.info(f"Creating container snapshot: {full_tag} from container {container_id}")
+
+        # Commit the container to create a new image
+        image = container.commit(
+            repository=snapshot_name,
+            tag=tag,
+            message=f"Snapshot created from container {container_id}",
+            author="cyroid"
+        )
+
+        # Get image details
+        image_info = self.client.images.get(image.id)
+        size_bytes = image_info.attrs.get("Size", 0)
+
+        return {
+            "name": full_tag,
+            "id": image.id,
+            "short_id": image.short_id,
+            "size_bytes": size_bytes,
+            "size_gb": round(size_bytes / (1024**3), 2),
+            "type": "docker"
+        }
+
+    def get_all_snapshots(self) -> Dict[str, Any]:
+        """
+        Get all snapshots - both Windows golden images and Docker container snapshots.
+
+        Returns:
+            Dict with both types of snapshots
+        """
+        import os
+        from cyroid.config import get_settings
+
+        settings = get_settings()
+
+        # Get Windows golden images
+        golden_images = self.get_golden_images_status()
+
+        # Get Docker snapshots (images with cyroid/ prefix or cyroid labels)
+        docker_snapshots = []
+        for image in self.client.images.list():
+            tags = image.tags
+            labels = image.labels or {}
+
+            # Check if it's a cyroid snapshot
+            is_snapshot = False
+            for tag in tags:
+                if tag.startswith("cyroid/snapshot:") or tag.startswith("cyroid-snapshot/"):
+                    is_snapshot = True
+                    break
+
+            # Also check labels
+            if labels.get("cyroid.snapshot") == "true":
+                is_snapshot = True
+
+            if is_snapshot:
+                docker_snapshots.append({
+                    "id": image.id,
+                    "short_id": image.short_id,
+                    "tags": tags,
+                    "size_bytes": image.attrs.get("Size", 0),
+                    "size_gb": round(image.attrs.get("Size", 0) / (1024**3), 2),
+                    "created": image.attrs.get("Created"),
+                    "type": "docker"
+                })
+
+        return {
+            "windows_golden_images": golden_images["golden_images"],
+            "docker_snapshots": docker_snapshots,
+            "total_windows": golden_images["total_count"],
+            "total_docker": len(docker_snapshots),
+            "template_dir": golden_images["template_dir"]
         }
 
 

@@ -1,17 +1,20 @@
 // frontend/src/components/range-builder/nodes/VMNode.tsx
 import { memo } from 'react'
-import { Handle, Position, NodeProps } from '@xyflow/react'
+import { Handle, Position } from '@xyflow/react'
 import { Server } from 'lucide-react'
 import clsx from 'clsx'
-import type { VM, VMTemplate, Network } from '../../../types'
+import type { VM, VMTemplate } from '../../../types'
 
 interface VMNodeData {
   vm: VM
   template?: VMTemplate
-  network?: Network
 }
 
-export const VMNode = memo(({ data }: NodeProps<VMNodeData>) => {
+interface VMNodeProps {
+  data: VMNodeData
+}
+
+export const VMNode = memo(({ data }: VMNodeProps) => {
   const { vm, template } = data
 
   const statusColors: Record<string, string> = {

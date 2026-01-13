@@ -7,6 +7,10 @@ from cyroid.models.network import Network, IsolationLevel
 from cyroid.models.vm import VM, VMStatus
 from cyroid.models.artifact import Artifact, ArtifactPlacement, ArtifactType, MaliciousIndicator, PlacementStatus
 from cyroid.models.snapshot import Snapshot
+from cyroid.models.event_log import EventLog, EventType
+from cyroid.models.connection import Connection, ConnectionProtocol, ConnectionState
+from cyroid.models.msel import MSEL
+from cyroid.models.inject import Inject, InjectStatus
 
 __all__ = [
     "Base",
@@ -17,4 +21,8 @@ __all__ = [
     "VM", "VMStatus",
     "Artifact", "ArtifactPlacement", "ArtifactType", "MaliciousIndicator", "PlacementStatus",
     "Snapshot",
+    "EventLog", "EventType",
+    "Connection", "ConnectionProtocol", "ConnectionState",
+    "MSEL",
+    "Inject", "InjectStatus",
 ]

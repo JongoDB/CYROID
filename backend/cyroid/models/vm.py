@@ -36,6 +36,16 @@ class VM(Base, UUIDMixin, TimestampMixin):
     # Docker container ID (set after creation)
     container_id: Mapped[Optional[str]] = mapped_column(String(64))
 
+    # Windows-specific settings (for dockur/windows VMs)
+    # Version codes: 11, 11l, 11e, 10, 10l, 10e, 8e, 7u, vu, xp, 2k, 2025, 2022, 2019, 2016, 2012, 2008, 2003
+    windows_version: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
+    windows_username: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    windows_password: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    iso_url: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    iso_path: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    # Display type for Windows VMs: desktop (VNC/web console) or server (RDP only)
+    display_type: Mapped[Optional[str]] = mapped_column(String(20), nullable=True, default="desktop")
+
     # Position in visual builder (for UI)
     position_x: Mapped[int] = mapped_column(Integer, default=0)
     position_y: Mapped[int] = mapped_column(Integer, default=0)
@@ -49,4 +59,13 @@ class VM(Base, UUIDMixin, TimestampMixin):
     )
     artifact_placements: Mapped[List["ArtifactPlacement"]] = relationship(
         "ArtifactPlacement", back_populates="vm", cascade="all, delete-orphan"
+    )
+    event_logs: Mapped[List["EventLog"]] = relationship(
+        "EventLog", back_populates="vm", cascade="all, delete-orphan"
+    )
+    outgoing_connections: Mapped[List["Connection"]] = relationship(
+        "Connection", foreign_keys="Connection.src_vm_id", back_populates="src_vm"
+    )
+    incoming_connections: Mapped[List["Connection"]] = relationship(
+        "Connection", foreign_keys="Connection.dst_vm_id", back_populates="dst_vm"
     )

@@ -1,0 +1,1295 @@
+# backend/cyroid/api/cache.py
+"""API endpoints for image caching and golden image management."""
+import os
+from typing import List, Optional
+from uuid import UUID
+
+from fastapi import APIRouter, HTTPException, status, BackgroundTasks
+from pydantic import BaseModel
+
+from cyroid.api.deps import DBSession, CurrentUser, AdminUser
+from cyroid.services.docker_service import get_docker_service
+from cyroid.config import get_settings
+
+router = APIRouter(prefix="/cache", tags=["Image Cache"])
+
+
+def get_windows_iso_dir() -> str:
+    """Get the Windows ISO cache directory path."""
+    settings = get_settings()
+    return os.path.join(settings.iso_cache_dir, "windows-isos")
+
+
+# Request/Response schemas
+class CacheImageRequest(BaseModel):
+    image: str  # Docker image name (e.g., "ubuntu:22.04")
+
+
+class CachedImageResponse(BaseModel):
+    id: str
+    tags: List[str]
+    size_bytes: int
+    size_gb: float
+    created: Optional[str] = None
+
+
+class CacheStatusResponse(BaseModel):
+    cache_dir: str
+    total_count: int
+
+
+class ISOCacheResponse(CacheStatusResponse):
+    isos: List[dict]
+
+
+class GoldenImageResponse(BaseModel):
+    template_dir: str
+    total_count: int
+    golden_images: List[dict]
+
+
+class CreateGoldenImageRequest(BaseModel):
+    container_id: str
+    name: str
+
+
+class CacheProgressResponse(BaseModel):
+    status: str
+    message: str
+
+
+# Linux image caching endpoints
+
+@router.get("/images", response_model=List[CachedImageResponse])
+def list_cached_images(current_user: CurrentUser):
+    """List all cached Docker images."""
+    docker = get_docker_service()
+    images = docker.list_cached_images()
+    return [
+        CachedImageResponse(
+            id=img["id"],
+            tags=img["tags"],
+            size_bytes=img["size_bytes"],
+            size_gb=round(img["size_bytes"] / (1024**3), 2),
+            created=img.get("created")
+        )
+        for img in images
+    ]
+
+
+@router.post("/images", response_model=CachedImageResponse, status_code=status.HTTP_201_CREATED)
+def cache_image(request: CacheImageRequest, current_user: AdminUser):
+    """
+    Pre-pull and cache a Docker image.
+    Admin only as this downloads potentially large images.
+    """
+    docker = get_docker_service()
+    try:
+        result = docker.cache_linux_image(request.image)
+        return CachedImageResponse(
+            id=result["id"],
+            tags=result["tags"],
+            size_bytes=result["size_bytes"],
+            size_gb=round(result["size_bytes"] / (1024**3), 2),
+            created=result.get("created")
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to cache image: {str(e)}"
+        )
+
+
+@router.post("/images/batch", response_model=CacheProgressResponse)
+def cache_images_batch(
+    images: List[str],
+    background_tasks: BackgroundTasks,
+    current_user: AdminUser
+):
+    """
+    Start batch caching of multiple Docker images in the background.
+    Admin only.
+    """
+    def cache_all_images(image_list: List[str]):
+        docker = get_docker_service()
+        for img in image_list:
+            try:
+                docker.cache_linux_image(img)
+            except Exception as e:
+                # Log but continue with other images
+                pass
+
+    background_tasks.add_task(cache_all_images, images)
+    return CacheProgressResponse(
+        status="started",
+        message=f"Caching {len(images)} images in background"
+    )
+
+
+@router.delete("/images/{image_id}")
+def remove_cached_image(image_id: str, current_user: AdminUser):
+    """Remove a cached Docker image. Admin only."""
+    docker = get_docker_service()
+    try:
+        docker.client.images.remove(image_id, force=True)
+        return {"status": "removed", "image_id": image_id}
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to remove image: {str(e)}"
+        )
+
+
+# Windows ISO caching endpoints
+
+@router.get("/isos", response_model=ISOCacheResponse)
+def get_iso_cache_status(current_user: CurrentUser):
+    """Get status of cached Windows ISOs."""
+    docker = get_docker_service()
+    return docker.get_windows_iso_cache_status()
+
+
+# Snapshot endpoints - supports both Windows golden images and Docker container snapshots
+
+@router.get("/snapshots")
+def get_all_snapshots(current_user: CurrentUser):
+    """
+    Get all VM snapshots - both Windows golden images and Docker container snapshots.
+
+    Returns:
+    - windows_golden_images: Pre-installed Windows VMs (dockur/windows storage copies)
+    - docker_snapshots: Docker container commits (Linux VMs, custom containers)
+    """
+    docker = get_docker_service()
+    return docker.get_all_snapshots()
+
+
+@router.get("/golden-images", response_model=GoldenImageResponse)
+def get_golden_images_status(current_user: CurrentUser):
+    """Get status of Windows golden images (pre-installed templates)."""
+    docker = get_docker_service()
+    return docker.get_golden_images_status()
+
+
+class CreateSnapshotRequest(BaseModel):
+    container_id: str
+    name: str
+    snapshot_type: str = "auto"  # "auto", "windows", or "docker"
+
+
+@router.post("/snapshots", status_code=status.HTTP_201_CREATED)
+def create_snapshot(request: CreateSnapshotRequest, current_user: AdminUser):
+    """
+    Create a snapshot from a running container.
+
+    For Windows VMs (dockur/windows): Creates a golden image by copying /storage directory.
+    For other containers: Creates a Docker image using docker commit.
+
+    Args:
+        container_id: ID of the running container
+        name: Name for the snapshot
+        snapshot_type: "auto" (detect), "windows" (golden image), or "docker" (container commit)
+    """
+    docker = get_docker_service()
+
+    try:
+        # Get container to determine type
+        container = docker.client.containers.get(request.container_id)
+        image_name = container.image.tags[0] if container.image.tags else ""
+
+        # Determine snapshot type
+        is_windows = "dockur/windows" in image_name.lower() or "windows" in image_name.lower()
+
+        if request.snapshot_type == "auto":
+            use_windows_method = is_windows
+        elif request.snapshot_type == "windows":
+            use_windows_method = True
+        else:
+            use_windows_method = False
+
+        if use_windows_method:
+            result = docker.create_golden_image(request.container_id, request.name)
+        else:
+            # Use docker commit for Linux/custom containers
+            snapshot_name = f"cyroid/snapshot/{request.name}"
+            result = docker.create_container_snapshot(request.container_id, snapshot_name)
+
+        return result
+
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create snapshot: {str(e)}"
+        )
+
+
+@router.post("/golden-images", status_code=status.HTTP_201_CREATED)
+def create_golden_image(request: CreateGoldenImageRequest, current_user: AdminUser):
+    """
+    Create a Windows golden image from a running dockur/windows container.
+    This saves the /storage directory for reuse as a template.
+    Admin only as this involves significant disk operations.
+
+    For Linux containers, use POST /snapshots with snapshot_type="docker".
+    """
+    docker = get_docker_service()
+    try:
+        result = docker.create_golden_image(request.container_id, request.name)
+        return result
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create golden image: {str(e)}"
+        )
+
+
+@router.delete("/snapshots/{snapshot_type}/{name}")
+def delete_snapshot(snapshot_type: str, name: str, current_user: AdminUser):
+    """
+    Delete a snapshot.
+
+    Args:
+        snapshot_type: "windows" for golden images, "docker" for container snapshots
+        name: Name of the snapshot to delete
+    """
+    import os
+    import shutil
+    from cyroid.config import get_settings
+
+    if snapshot_type == "windows":
+        settings = get_settings()
+        golden_dir = os.path.join(settings.template_storage_dir, name)
+
+        if not os.path.exists(golden_dir):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Windows golden image not found"
+            )
+
+        try:
+            shutil.rmtree(golden_dir)
+            return {"status": "deleted", "type": "windows", "name": name}
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to delete golden image: {str(e)}"
+            )
+    elif snapshot_type == "docker":
+        docker = get_docker_service()
+        try:
+            # Look for the image
+            image_name = f"cyroid/snapshot/{name}"
+            docker.client.images.remove(image_name, force=True)
+            return {"status": "deleted", "type": "docker", "name": image_name}
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to delete Docker snapshot: {str(e)}"
+            )
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid snapshot_type. Use 'windows' or 'docker'"
+        )
+
+
+@router.delete("/golden-images/{name}")
+def delete_golden_image(name: str, current_user: AdminUser):
+    """Delete a Windows golden image. Admin only."""
+    import os
+    import shutil
+    from cyroid.config import get_settings
+
+    settings = get_settings()
+    golden_dir = os.path.join(settings.template_storage_dir, name)
+
+    if not os.path.exists(golden_dir):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Golden image not found"
+        )
+
+    try:
+        shutil.rmtree(golden_dir)
+        return {"status": "deleted", "name": name}
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete golden image: {str(e)}"
+        )
+
+
+# System cache info
+
+@router.get("/stats")
+def get_cache_stats(current_user: CurrentUser):
+    """Get overall cache statistics."""
+    docker = get_docker_service()
+
+    images = docker.list_cached_images()
+    isos = docker.get_windows_iso_cache_status()
+    golden = docker.get_golden_images_status()
+
+    total_image_size = sum(img["size_bytes"] for img in images)
+    total_iso_size = sum(iso["size_bytes"] for iso in isos["isos"])
+    total_golden_size = sum(g["size_bytes"] for g in golden["golden_images"])
+
+    return {
+        "docker_images": {
+            "count": len(images),
+            "total_size_bytes": total_image_size,
+            "total_size_gb": round(total_image_size / (1024**3), 2)
+        },
+        "windows_isos": {
+            "count": isos["total_count"],
+            "total_size_bytes": total_iso_size,
+            "total_size_gb": round(total_iso_size / (1024**3), 2),
+            "cache_dir": isos["cache_dir"]
+        },
+        "golden_images": {
+            "count": golden["total_count"],
+            "total_size_bytes": total_golden_size,
+            "total_size_gb": round(total_golden_size / (1024**3), 2),
+            "storage_dir": golden["template_dir"]
+        },
+        "total_cache_size_gb": round(
+            (total_image_size + total_iso_size + total_golden_size) / (1024**3), 2
+        )
+    }
+
+
+# Dockur/Windows supported versions
+# These are auto-downloaded by dockur/windows when the container starts
+# See: https://github.com/dockur/windows
+#
+# Download sources (from dockur/windows):
+# - Primary: dl.bobpony.com/windows (MSDN ISOs)
+# - Fallback: files.dog/MSDN
+# - Archive: archive.org
+# - Microsoft: Evaluation Center for enterprise/server
+
+DOCKUR_WINDOWS_VERSIONS = [
+    # Desktop versions - Windows 11
+    {
+        "version": "11",
+        "name": "Windows 11 Pro",
+        "size_gb": 6.3,
+        "category": "desktop",
+        "download_url": "https://dl.bobpony.com/windows/11/en-us_windows_11_24h2_x64.iso",
+    },
+    {
+        "version": "11e",
+        "name": "Windows 11 Enterprise",
+        "size_gb": 5.8,
+        "category": "desktop",
+        "download_url": "https://dl.bobpony.com/windows/11/en-us_windows_11_enterprise_24h2_x64.iso",
+    },
+    # Desktop versions - Windows 10
+    {
+        "version": "10",
+        "name": "Windows 10 Pro",
+        "size_gb": 5.7,
+        "category": "desktop",
+        "download_url": "https://dl.bobpony.com/windows/10/en-us_windows_10_22h2_x64.iso",
+    },
+    {
+        "version": "10e",
+        "name": "Windows 10 Enterprise",
+        "size_gb": 5.5,
+        "category": "desktop",
+        "download_url": "https://dl.bobpony.com/windows/10/en-us_windows_10_enterprise_22h2_x64.iso",
+    },
+    {
+        "version": "10l",
+        "name": "Windows 10 LTSC",
+        "size_gb": 4.6,
+        "category": "desktop",
+        "download_url": "https://dl.bobpony.com/windows/10/en-us_windows_10_enterprise_ltsc_2021_x64_dvd_d289cf96.iso",
+    },
+    # Desktop versions - Windows 8.1
+    {
+        "version": "81",
+        "name": "Windows 8.1 Pro",
+        "size_gb": 3.7,
+        "category": "desktop",
+        "download_url": "https://dl.bobpony.com/windows/8.x/8.1/en_windows_8.1_with_update_x64_dvd_6051480.iso",
+    },
+    # Desktop versions - Legacy
+    {
+        "version": "7",
+        "name": "Windows 7 Ultimate",
+        "size_gb": 3.1,
+        "category": "legacy",
+        "download_url": "https://dl.bobpony.com/windows/7/en_windows_7_with_sp1_x64.iso",
+    },
+    {
+        "version": "vista",
+        "name": "Windows Vista Ultimate",
+        "size_gb": 3.0,
+        "category": "legacy",
+        "download_url": "https://dl.bobpony.com/windows/vista/en_windows_vista_sp2_x64_dvd_342267.iso",
+    },
+    {
+        "version": "xp",
+        "name": "Windows XP Professional",
+        "size_gb": 0.6,
+        "category": "legacy",
+        "download_url": "https://dl.bobpony.com/windows/xp/professional/en_windows_xp_professional_with_service_pack_3_x86_cd_x14-80428.iso",
+    },
+    {
+        "version": "2k",
+        "name": "Windows 2000 Professional",
+        "size_gb": 0.3,
+        "category": "legacy",
+        "download_url": "https://archive.org/download/win-2000-pro-sp-4/Win2000ProSP4.iso",
+    },
+    # Server versions
+    {
+        "version": "2025",
+        "name": "Windows Server 2025",
+        "size_gb": 5.5,
+        "category": "server",
+        "download_url": "https://software-static.download.prss.microsoft.com/dbazure/888969d5-f34g-4e03-ac9d-1f9786c66749/26100.1742.240906-0331.ge_release_svc_refresh_SERVER_EVAL_x64FRE_en-us.iso",
+    },
+    {
+        "version": "2022",
+        "name": "Windows Server 2022",
+        "size_gb": 5.3,
+        "category": "server",
+        "download_url": "https://software-static.download.prss.microsoft.com/sg/download/888969d5-f34g-4e03-ac9d-1f9786c66749/SERVER_EVAL_x64FRE_en-us.iso",
+    },
+    {
+        "version": "2019",
+        "name": "Windows Server 2019",
+        "size_gb": 5.0,
+        "category": "server",
+        "download_url": "https://software-static.download.prss.microsoft.com/pr/download/17763.3650.221105-1748.rs5_release_svc_refresh_SERVER_EVAL_x64FRE_en-us.iso",
+    },
+    {
+        "version": "2016",
+        "name": "Windows Server 2016",
+        "size_gb": 6.0,
+        "category": "server",
+        "download_url": "https://software-static.download.prss.microsoft.com/pr/download/Windows_Server_2016_Datacenter_EVAL_en-us_14393_refresh.ISO",
+    },
+    {
+        "version": "2012",
+        "name": "Windows Server 2012 R2",
+        "size_gb": 4.3,
+        "category": "server",
+        "download_url": "https://dl.bobpony.com/windows/server/2012r2/en_windows_server_2012_r2_with_update_x64_dvd_6052708.iso",
+    },
+    {
+        "version": "2008",
+        "name": "Windows Server 2008 R2",
+        "size_gb": 3.0,
+        "category": "server",
+        "download_url": "https://dl.bobpony.com/windows/server/2008r2/en_windows_server_2008_r2_with_sp1_x64_dvd_617601.iso",
+    },
+    {
+        "version": "2003",
+        "name": "Windows Server 2003 R2",
+        "size_gb": 0.6,
+        "category": "legacy",
+        "download_url": "https://archive.org/download/en_win_srv_2003_r2_standard_x64_with_sp2_cd1_x13-05757/en_win_srv_2003_r2_standard_x64_with_sp2_cd1_x13-05757.iso",
+    },
+]
+
+
+@router.get("/windows-versions")
+def get_windows_versions(current_user: CurrentUser):
+    """
+    Get all supported Windows versions for dockur/windows with cached status.
+
+    These versions are automatically downloaded by dockur/windows
+    when a container is started - no manual ISO download needed.
+    Returns cached status for each version.
+    """
+    windows_iso_dir = get_windows_iso_dir()
+
+    # Get list of cached ISO files
+    cached_isos = set()
+    if os.path.exists(windows_iso_dir):
+        for filename in os.listdir(windows_iso_dir):
+            if filename.endswith(".iso"):
+                cached_isos.add(filename.lower())
+
+    # Add cached status to each version
+    def add_cached_status(version_list):
+        result = []
+        for v in version_list:
+            version_info = dict(v)
+            # Check for common ISO naming patterns
+            version_code = v["version"]
+            is_cached = any(
+                version_code.lower() in iso_name or
+                f"windows-{version_code}".lower() in iso_name or
+                f"win{version_code}".lower() in iso_name
+                for iso_name in cached_isos
+            )
+            version_info["cached"] = is_cached
+            result.append(version_info)
+        return result
+
+    all_versions = add_cached_status(DOCKUR_WINDOWS_VERSIONS)
+    desktop = [v for v in all_versions if v["category"] == "desktop"]
+    server = [v for v in all_versions if v["category"] == "server"]
+    legacy = [v for v in all_versions if v["category"] == "legacy"]
+
+    cached_count = sum(1 for v in all_versions if v["cached"])
+
+    return {
+        "desktop": desktop,
+        "server": server,
+        "legacy": legacy,
+        "all": all_versions,
+        "cache_dir": windows_iso_dir,
+        "cached_count": cached_count,
+        "total_count": len(all_versions),
+        "note": "ISOs are automatically downloaded by dockur/windows when the VM starts. Pre-caching is optional but speeds up first boot."
+    }
+
+
+# Custom ISO cache endpoints
+
+class CustomISORequest(BaseModel):
+    name: str  # Display name for the ISO
+    url: str   # URL to download ISO from
+
+
+class CustomISOResponse(BaseModel):
+    name: str
+    filename: str
+    path: str
+    url: str
+    size_bytes: int
+    size_gb: float
+    downloaded_at: str
+
+
+@router.get("/custom-isos")
+def list_custom_isos(current_user: CurrentUser):
+    """List all custom ISOs in the cache."""
+    import os
+    import json
+    from cyroid.config import get_settings
+
+    settings = get_settings()
+    custom_iso_dir = os.path.join(settings.iso_cache_dir, "custom-isos")
+    metadata_file = os.path.join(custom_iso_dir, "metadata.json")
+
+    # Ensure directory exists
+    os.makedirs(custom_iso_dir, exist_ok=True)
+
+    # Load metadata
+    metadata = {}
+    if os.path.exists(metadata_file):
+        try:
+            with open(metadata_file, "r") as f:
+                metadata = json.load(f)
+        except:
+            metadata = {}
+
+    isos = []
+    for filename in os.listdir(custom_iso_dir):
+        if filename.endswith(".iso"):
+            filepath = os.path.join(custom_iso_dir, filename)
+            size = os.path.getsize(filepath)
+            iso_metadata = metadata.get(filename, {})
+            isos.append({
+                "name": iso_metadata.get("name", filename.replace(".iso", "")),
+                "filename": filename,
+                "path": filepath,
+                "url": iso_metadata.get("url", ""),
+                "size_bytes": size,
+                "size_gb": round(size / (1024**3), 2),
+                "downloaded_at": iso_metadata.get("downloaded_at", "")
+            })
+
+    return {
+        "cache_dir": custom_iso_dir,
+        "total_count": len(isos),
+        "isos": isos
+    }
+
+
+@router.post("/custom-isos", status_code=status.HTTP_201_CREATED)
+def download_custom_iso(
+    request: CustomISORequest,
+    background_tasks: BackgroundTasks,
+    current_user: AdminUser
+):
+    """
+    Download a custom ISO from a URL to the cache.
+    Admin only as this downloads potentially large files.
+    """
+    import os
+    import re
+    from cyroid.config import get_settings
+
+    settings = get_settings()
+    custom_iso_dir = os.path.join(settings.iso_cache_dir, "custom-isos")
+    os.makedirs(custom_iso_dir, exist_ok=True)
+
+    # Sanitize filename from name
+    safe_name = re.sub(r'[^\w\-.]', '_', request.name)
+    if not safe_name.endswith('.iso'):
+        safe_name += '.iso'
+
+    filepath = os.path.join(custom_iso_dir, safe_name)
+
+    # Check if already exists
+    if os.path.exists(filepath):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"ISO '{safe_name}' already exists in cache"
+        )
+
+    def download_iso(url: str, dest_path: str, name: str, filename: str, iso_dir: str):
+        """Download ISO in background."""
+        import requests
+        import json
+        from datetime import datetime
+
+        metadata_file = os.path.join(iso_dir, "metadata.json")
+
+        # Load existing metadata
+        metadata = {}
+        if os.path.exists(metadata_file):
+            try:
+                with open(metadata_file, "r") as f:
+                    metadata = json.load(f)
+            except:
+                metadata = {}
+
+        try:
+            # Download with streaming
+            response = requests.get(url, stream=True, timeout=3600)
+            response.raise_for_status()
+
+            with open(dest_path, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    f.write(chunk)
+
+            # Update metadata
+            metadata[filename] = {
+                "name": name,
+                "url": url,
+                "downloaded_at": datetime.utcnow().isoformat()
+            }
+            with open(metadata_file, "w") as f:
+                json.dump(metadata, f, indent=2)
+
+        except Exception as e:
+            # Clean up partial download
+            if os.path.exists(dest_path):
+                os.remove(dest_path)
+            raise
+
+    background_tasks.add_task(
+        download_iso,
+        request.url,
+        filepath,
+        request.name,
+        safe_name,
+        custom_iso_dir
+    )
+
+    return {
+        "status": "downloading",
+        "message": f"Downloading {request.name} from {request.url}",
+        "filename": safe_name,
+        "destination": filepath
+    }
+
+
+@router.get("/custom-isos/{filename}/status")
+def get_custom_iso_download_status(filename: str, current_user: CurrentUser):
+    """Check if a custom ISO download has completed."""
+    import os
+    import json
+    from cyroid.config import get_settings
+
+    settings = get_settings()
+    custom_iso_dir = os.path.join(settings.iso_cache_dir, "custom-isos")
+    filepath = os.path.join(custom_iso_dir, filename)
+    metadata_file = os.path.join(custom_iso_dir, "metadata.json")
+
+    if not os.path.exists(filepath):
+        return {"status": "downloading", "filename": filename}
+
+    # Check if file is still being written (size is changing)
+    size1 = os.path.getsize(filepath)
+    import time
+    time.sleep(0.1)
+    size2 = os.path.getsize(filepath)
+
+    if size1 != size2:
+        return {
+            "status": "downloading",
+            "filename": filename,
+            "current_size_bytes": size2,
+            "current_size_gb": round(size2 / (1024**3), 2)
+        }
+
+    # Load metadata
+    metadata = {}
+    if os.path.exists(metadata_file):
+        try:
+            with open(metadata_file, "r") as f:
+                metadata = json.load(f)
+        except:
+            pass
+
+    iso_metadata = metadata.get(filename, {})
+
+    return {
+        "status": "completed",
+        "filename": filename,
+        "name": iso_metadata.get("name", filename.replace(".iso", "")),
+        "path": filepath,
+        "size_bytes": size2,
+        "size_gb": round(size2 / (1024**3), 2),
+        "downloaded_at": iso_metadata.get("downloaded_at", "")
+    }
+
+
+@router.delete("/custom-isos/{filename}")
+def delete_custom_iso(filename: str, current_user: AdminUser):
+    """Delete a custom ISO from the cache. Admin only."""
+    import os
+    import json
+    from cyroid.config import get_settings
+
+    settings = get_settings()
+    custom_iso_dir = os.path.join(settings.iso_cache_dir, "custom-isos")
+    filepath = os.path.join(custom_iso_dir, filename)
+    metadata_file = os.path.join(custom_iso_dir, "metadata.json")
+
+    if not os.path.exists(filepath):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Custom ISO not found"
+        )
+
+    try:
+        os.remove(filepath)
+
+        # Update metadata
+        if os.path.exists(metadata_file):
+            try:
+                with open(metadata_file, "r") as f:
+                    metadata = json.load(f)
+                if filename in metadata:
+                    del metadata[filename]
+                    with open(metadata_file, "w") as f:
+                        json.dump(metadata, f, indent=2)
+            except:
+                pass
+
+        return {"status": "deleted", "filename": filename}
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete ISO: {str(e)}"
+        )
+
+
+# Recommended images for cyber ranges - categorized
+#
+# Categories:
+# - desktop: Images with GUI desktop environment (VNC/RDP/X11 accessible)
+# - workstation: Base OS images suitable for workstation use (no GUI pre-installed)
+# - server: Headless server images
+# - services: Purpose-built service containers
+
+RECOMMENDED_DOCKER_IMAGES = {
+    "desktop": [
+        # Desktop images with built-in VNC/RDP access
+        {"image": "linuxserver/webtop:ubuntu-xfce", "description": "Ubuntu + XFCE desktop via web browser", "category": "desktop", "access": "web"},
+        {"image": "linuxserver/webtop:debian-kde", "description": "Debian + KDE desktop via web browser", "category": "desktop", "access": "web"},
+        {"image": "linuxserver/webtop:fedora-xfce", "description": "Fedora + XFCE desktop via web browser", "category": "desktop", "access": "web"},
+        {"image": "linuxserver/webtop:arch-xfce", "description": "Arch Linux + XFCE desktop via web browser", "category": "desktop", "access": "web"},
+        {"image": "kasmweb/ubuntu-jammy-desktop:1.14.0", "description": "Ubuntu 22.04 Desktop with Kasm VNC", "category": "desktop", "access": "vnc"},
+        {"image": "kasmweb/kali-rolling-desktop:1.14.0", "description": "Kali Linux Desktop for pentesting", "category": "desktop", "access": "vnc"},
+        {"image": "consol/ubuntu-xfce-vnc", "description": "Ubuntu + XFCE with VNC server", "category": "desktop", "access": "vnc"},
+        {"image": "dorowu/ubuntu-desktop-lxde-vnc", "description": "Ubuntu + LXDE with VNC server", "category": "desktop", "access": "vnc"},
+    ],
+    "workstation": [
+        # Base OS images for workstation use (CLI or install GUI manually)
+        {"image": "ubuntu:22.04", "description": "Ubuntu 22.04 LTS - Base workstation image", "category": "workstation"},
+        {"image": "ubuntu:20.04", "description": "Ubuntu 20.04 LTS - Stable base", "category": "workstation"},
+        {"image": "debian:12", "description": "Debian 12 Bookworm - Stable base", "category": "workstation"},
+        {"image": "fedora:39", "description": "Fedora 39 - Modern base", "category": "workstation"},
+        {"image": "kalilinux/kali-rolling", "description": "Kali Linux - Security tools (CLI)", "category": "workstation"},
+    ],
+    "server": [
+        {"image": "ubuntu:22.04", "description": "Ubuntu 22.04 LTS - Server", "category": "server"},
+        {"image": "debian:11", "description": "Debian 11 Bullseye - Stable server", "category": "server"},
+        {"image": "rockylinux:9", "description": "Rocky Linux 9 - RHEL compatible server", "category": "server"},
+        {"image": "centos:7", "description": "CentOS 7 - Legacy server support", "category": "server"},
+        {"image": "alpine:3.19", "description": "Alpine Linux - Lightweight server", "category": "server"},
+    ],
+    "services": [
+        {"image": "nginx:latest", "description": "Nginx web server", "category": "services"},
+        {"image": "httpd:latest", "description": "Apache web server", "category": "services"},
+        {"image": "mysql:8", "description": "MySQL database server", "category": "services"},
+        {"image": "postgres:16", "description": "PostgreSQL database server", "category": "services"},
+        {"image": "redis:7", "description": "Redis cache server", "category": "services"},
+        {"image": "mongo:7", "description": "MongoDB database server", "category": "services"},
+        {"image": "mariadb:11", "description": "MariaDB database server", "category": "services"},
+        {"image": "elasticsearch:8.11.0", "description": "Elasticsearch search engine", "category": "services"},
+    ],
+}
+
+
+@router.get("/recommended-images")
+def get_recommended_images(current_user: CurrentUser):
+    """
+    Get a list of recommended Docker images for cyber range templates.
+    These are commonly used images that can be pre-cached.
+
+    Categories:
+    - desktop: Images with GUI desktop environment (VNC/RDP/X11 accessible)
+    - workstation: Base OS images suitable for workstation use (CLI, no GUI pre-installed)
+    - server: Headless server images
+    - services: Purpose-built service containers
+    """
+    # Get cached images to mark which are already cached
+    docker = get_docker_service()
+    cached_images = docker.list_cached_images()
+    cached_tags = set()
+    for img in cached_images:
+        cached_tags.update(img.get("tags", []))
+
+    def add_cached_status(image_list):
+        result = []
+        for img in image_list:
+            img_info = dict(img)
+            img_info["cached"] = img["image"] in cached_tags
+            result.append(img_info)
+        return result
+
+    return {
+        "desktop": add_cached_status(RECOMMENDED_DOCKER_IMAGES["desktop"]),
+        "workstation": add_cached_status(RECOMMENDED_DOCKER_IMAGES["workstation"]),
+        "server": add_cached_status(RECOMMENDED_DOCKER_IMAGES["server"]),
+        "services": add_cached_status(RECOMMENDED_DOCKER_IMAGES["services"]),
+        "linux": add_cached_status(
+            RECOMMENDED_DOCKER_IMAGES["workstation"] + RECOMMENDED_DOCKER_IMAGES["server"]
+        ),  # Backwards compat - base OS images
+        "windows": DOCKUR_WINDOWS_VERSIONS,
+    }
+
+
+# ISO Upload endpoints
+from fastapi import UploadFile, File, Form
+
+
+@router.post("/isos/upload", status_code=status.HTTP_201_CREATED)
+async def upload_windows_iso(
+    file: UploadFile = File(...),
+    version: str = Form(...),
+    current_user: AdminUser = None,
+):
+    """
+    Upload a Windows ISO file to the cache.
+    The version should match a supported Windows version code (e.g., '11', '2022').
+    Admin only.
+    """
+    import os
+    import aiofiles
+    from cyroid.config import get_settings
+
+    # Validate version
+    valid_versions = [v["version"] for v in DOCKUR_WINDOWS_VERSIONS]
+    if version not in valid_versions:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid version '{version}'. Valid versions: {', '.join(valid_versions)}"
+        )
+
+    # Validate file type
+    if not file.filename or not file.filename.lower().endswith('.iso'):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File must be an ISO file"
+        )
+
+    windows_iso_dir = get_windows_iso_dir()
+    os.makedirs(windows_iso_dir, exist_ok=True)
+
+    # Save with standardized name
+    filename = f"windows-{version}.iso"
+    filepath = os.path.join(windows_iso_dir, filename)
+
+    # Check if already exists
+    if os.path.exists(filepath):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"ISO for version '{version}' already exists. Delete it first to replace."
+        )
+
+    try:
+        async with aiofiles.open(filepath, 'wb') as out_file:
+            while content := await file.read(1024 * 1024):  # 1MB chunks
+                await out_file.write(content)
+
+        file_size = os.path.getsize(filepath)
+        return {
+            "status": "uploaded",
+            "version": version,
+            "filename": filename,
+            "path": filepath,
+            "size_bytes": file_size,
+            "size_gb": round(file_size / (1024**3), 2)
+        }
+    except Exception as e:
+        # Clean up on failure
+        if os.path.exists(filepath):
+            os.remove(filepath)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to upload ISO: {str(e)}"
+        )
+
+
+@router.post("/custom-isos/upload", status_code=status.HTTP_201_CREATED)
+async def upload_custom_iso(
+    file: UploadFile = File(...),
+    name: str = Form(...),
+    current_user: AdminUser = None,
+):
+    """
+    Upload a custom ISO file to the cache.
+    Admin only.
+    """
+    import os
+    import re
+    import json
+    import aiofiles
+    from datetime import datetime
+    from cyroid.config import get_settings
+
+    # Validate file type
+    if not file.filename or not file.filename.lower().endswith('.iso'):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File must be an ISO file"
+        )
+
+    settings = get_settings()
+    custom_iso_dir = os.path.join(settings.iso_cache_dir, "custom-isos")
+    os.makedirs(custom_iso_dir, exist_ok=True)
+
+    # Sanitize filename from name
+    safe_name = re.sub(r'[^\w\-.]', '_', name)
+    if not safe_name.endswith('.iso'):
+        safe_name += '.iso'
+
+    filepath = os.path.join(custom_iso_dir, safe_name)
+    metadata_file = os.path.join(custom_iso_dir, "metadata.json")
+
+    # Check if already exists
+    if os.path.exists(filepath):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"ISO '{safe_name}' already exists. Delete it first to replace."
+        )
+
+    try:
+        async with aiofiles.open(filepath, 'wb') as out_file:
+            while content := await file.read(1024 * 1024):  # 1MB chunks
+                await out_file.write(content)
+
+        file_size = os.path.getsize(filepath)
+
+        # Update metadata
+        metadata = {}
+        if os.path.exists(metadata_file):
+            try:
+                with open(metadata_file, "r") as f:
+                    metadata = json.load(f)
+            except:
+                metadata = {}
+
+        metadata[safe_name] = {
+            "name": name,
+            "url": f"uploaded:{file.filename}",
+            "downloaded_at": datetime.utcnow().isoformat()
+        }
+        with open(metadata_file, "w") as f:
+            json.dump(metadata, f, indent=2)
+
+        return {
+            "status": "uploaded",
+            "name": name,
+            "filename": safe_name,
+            "path": filepath,
+            "size_bytes": file_size,
+            "size_gb": round(file_size / (1024**3), 2)
+        }
+    except Exception as e:
+        # Clean up on failure
+        if os.path.exists(filepath):
+            os.remove(filepath)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to upload ISO: {str(e)}"
+        )
+
+
+@router.delete("/isos/{version}")
+def delete_windows_iso(version: str, current_user: AdminUser):
+    """Delete a cached Windows ISO. Admin only."""
+    windows_iso_dir = get_windows_iso_dir()
+    filename = f"windows-{version}.iso"
+    filepath = os.path.join(windows_iso_dir, filename)
+
+    if not os.path.exists(filepath):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"ISO for version '{version}' not found"
+        )
+
+    try:
+        os.remove(filepath)
+        return {"status": "deleted", "version": version, "filename": filename}
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete ISO: {str(e)}"
+        )
+
+
+@router.get("/isos/upload-info")
+def get_iso_upload_info(current_user: CurrentUser):
+    """Get information about ISO upload locations and requirements."""
+    settings = get_settings()
+    windows_iso_dir = get_windows_iso_dir()
+    return {
+        "windows_iso_dir": windows_iso_dir,
+        "custom_iso_dir": f"{settings.iso_cache_dir}/custom-isos",
+        "instructions": [
+            "ISOs can be uploaded via the web interface or copied directly to the cache directories.",
+            "Windows ISOs should be named to match the version code (e.g., windows-11.iso, windows-2022.iso).",
+            "Custom ISOs can have any name ending in .iso.",
+            "Maximum recommended file size: 10GB per ISO.",
+        ],
+        "supported_versions": [v["version"] for v in DOCKUR_WINDOWS_VERSIONS],
+    }
+
+
+# Windows ISO Download endpoint
+
+class WindowsISODownloadRequest(BaseModel):
+    version: str
+    url: Optional[str] = None  # Custom URL, or use default for version
+
+
+class WindowsISODownloadStatusResponse(BaseModel):
+    status: str  # 'downloading', 'completed', 'failed', 'not_found'
+    version: str
+    filename: Optional[str] = None
+    progress_bytes: Optional[int] = None
+    progress_gb: Optional[float] = None
+    total_bytes: Optional[int] = None
+    total_gb: Optional[float] = None
+    error: Optional[str] = None
+
+
+# Track active downloads
+_active_downloads: dict = {}
+
+
+@router.post("/isos/download", status_code=status.HTTP_202_ACCEPTED)
+def download_windows_iso(
+    request: WindowsISODownloadRequest,
+    background_tasks: BackgroundTasks,
+    current_user: AdminUser
+):
+    """
+    Download a Windows ISO from Microsoft or custom URL.
+    Admin only as this downloads large files.
+
+    If no URL is provided, uses the default download URL for the version.
+    Some versions (consumer editions) don't have direct download URLs
+    and require manual download from Microsoft's website.
+    """
+    import os
+    from cyroid.config import get_settings
+
+    # Validate version
+    version_info = None
+    for v in DOCKUR_WINDOWS_VERSIONS:
+        if v["version"] == request.version:
+            version_info = v
+            break
+
+    if not version_info:
+        valid_versions = [v["version"] for v in DOCKUR_WINDOWS_VERSIONS]
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid version '{request.version}'. Valid versions: {', '.join(valid_versions)}"
+        )
+
+    # Determine download URL
+    download_url = request.url or version_info.get("download_url")
+
+    if not download_url:
+        # No direct download URL available
+        download_page = version_info.get("download_page")
+        download_note = version_info.get("download_note", "No direct download available")
+
+        response = {
+            "status": "no_direct_download",
+            "version": request.version,
+            "name": version_info["name"],
+            "message": download_note,
+        }
+        if download_page:
+            response["download_page"] = download_page
+            response["instructions"] = f"Visit {download_page} to download the ISO manually, then upload it."
+        else:
+            response["instructions"] = "Provide a custom URL or upload the ISO manually."
+
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=response
+        )
+
+    windows_iso_dir = get_windows_iso_dir()
+    os.makedirs(windows_iso_dir, exist_ok=True)
+
+    filename = f"windows-{request.version}.iso"
+    filepath = os.path.join(windows_iso_dir, filename)
+
+    # Check if already exists
+    if os.path.exists(filepath):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"ISO for version '{request.version}' already exists. Delete it first to re-download."
+        )
+
+    # Check if already downloading
+    if request.version in _active_downloads and _active_downloads[request.version].get("status") == "downloading":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Download already in progress for version '{request.version}'"
+        )
+
+    # Start download
+    _active_downloads[request.version] = {
+        "status": "downloading",
+        "filename": filename,
+        "progress_bytes": 0,
+        "total_bytes": None,
+        "error": None
+    }
+
+    def download_iso(url: str, dest_path: str, version: str):
+        """Download ISO in background with progress tracking."""
+        import requests
+
+        try:
+            # Use streaming download with progress
+            response = requests.get(url, stream=True, timeout=3600, allow_redirects=True)
+            response.raise_for_status()
+
+            # Get total size if available
+            total_size = response.headers.get('content-length')
+            if total_size:
+                total_size = int(total_size)
+                _active_downloads[version]["total_bytes"] = total_size
+
+            # Download with progress tracking
+            downloaded = 0
+            with open(dest_path, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=1024 * 1024):  # 1MB chunks
+                    if chunk:
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        _active_downloads[version]["progress_bytes"] = downloaded
+
+            _active_downloads[version]["status"] = "completed"
+            _active_downloads[version]["progress_bytes"] = os.path.getsize(dest_path)
+
+        except Exception as e:
+            # Clean up partial download
+            if os.path.exists(dest_path):
+                os.remove(dest_path)
+            _active_downloads[version]["status"] = "failed"
+            _active_downloads[version]["error"] = str(e)
+
+    background_tasks.add_task(download_iso, download_url, filepath, request.version)
+
+    return {
+        "status": "downloading",
+        "version": request.version,
+        "name": version_info["name"],
+        "filename": filename,
+        "destination": filepath,
+        "source_url": download_url,
+        "expected_size_gb": version_info.get("size_gb"),
+        "message": f"Downloading {version_info['name']} ISO..."
+    }
+
+
+@router.get("/isos/download/{version}/status")
+def get_windows_iso_download_status(version: str, current_user: CurrentUser):
+    """Check the status of a Windows ISO download."""
+    windows_iso_dir = get_windows_iso_dir()
+    filename = f"windows-{version}.iso"
+    filepath = os.path.join(windows_iso_dir, filename)
+
+    # Check if file exists (completed download)
+    if os.path.exists(filepath):
+        size = os.path.getsize(filepath)
+        return {
+            "status": "completed",
+            "version": version,
+            "filename": filename,
+            "path": filepath,
+            "size_bytes": size,
+            "size_gb": round(size / (1024**3), 2)
+        }
+
+    # Check active downloads
+    if version in _active_downloads:
+        info = _active_downloads[version]
+        response = {
+            "status": info["status"],
+            "version": version,
+            "filename": info.get("filename"),
+        }
+
+        if info.get("progress_bytes") is not None:
+            response["progress_bytes"] = info["progress_bytes"]
+            response["progress_gb"] = round(info["progress_bytes"] / (1024**3), 2)
+
+        if info.get("total_bytes") is not None:
+            response["total_bytes"] = info["total_bytes"]
+            response["total_gb"] = round(info["total_bytes"] / (1024**3), 2)
+            if info["progress_bytes"]:
+                response["progress_percent"] = round(info["progress_bytes"] / info["total_bytes"] * 100, 1)
+
+        if info.get("error"):
+            response["error"] = info["error"]
+
+        return response
+
+    return {
+        "status": "not_found",
+        "version": version,
+        "message": "No download in progress and ISO not found in cache"
+    }

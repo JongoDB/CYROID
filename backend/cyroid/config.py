@@ -26,6 +26,10 @@ class Settings(BaseSettings):
     app_name: str = "CYROID"
     debug: bool = True
 
+    # Image/ISO Cache
+    iso_cache_dir: str = "/data/cyroid/iso-cache"
+    template_storage_dir: str = "/data/cyroid/template-storage"
+
     class Config:
         env_file = ".env"
 

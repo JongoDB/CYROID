@@ -11,6 +11,10 @@ from cyroid.api.vms import router as vms_router
 from cyroid.api.websocket import router as websocket_router
 from cyroid.api.artifacts import router as artifacts_router
 from cyroid.api.snapshots import router as snapshots_router
+from cyroid.api.events import router as events_router
+from cyroid.api.connections import router as connections_router
+from cyroid.api.msel import router as msel_router
+from cyroid.api.cache import router as cache_router
 
 settings = get_settings()
 
@@ -37,6 +41,10 @@ app.include_router(vms_router, prefix="/api/v1")
 app.include_router(websocket_router, prefix="/api/v1")
 app.include_router(artifacts_router, prefix="/api/v1")
 app.include_router(snapshots_router, prefix="/api/v1")
+app.include_router(events_router, prefix="/api/v1")
+app.include_router(connections_router, prefix="/api/v1")
+app.include_router(msel_router, prefix="/api/v1")
+app.include_router(cache_router, prefix="/api/v1")
 
 
 @app.get("/health")

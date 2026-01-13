@@ -1,6 +1,6 @@
 // frontend/src/components/range-builder/nodes/NetworkNode.tsx
 import { memo } from 'react'
-import { Handle, Position, NodeProps } from '@xyflow/react'
+import { Handle, Position } from '@xyflow/react'
 import { Network as NetworkIcon } from 'lucide-react'
 import clsx from 'clsx'
 import type { Network } from '../../../types'
@@ -9,7 +9,11 @@ interface NetworkNodeData {
   network: Network
 }
 
-export const NetworkNode = memo(({ data }: NodeProps<NetworkNodeData>) => {
+interface NetworkNodeProps {
+  data: NetworkNodeData
+}
+
+export const NetworkNode = memo(({ data }: NetworkNodeProps) => {
   const { network } = data
 
   const isolationColors: Record<string, string> = {

@@ -5,7 +5,7 @@ import { rangesApi, networksApi, vmsApi, templatesApi, NetworkCreate, VMCreate }
 import type { Range, Network, VM, VMTemplate } from '../types'
 import {
   ArrowLeft, Plus, Loader2, X, Play, Square, RotateCw,
-  Network as NetworkIcon, Server, Trash2, Pencil, Rocket
+  Network as NetworkIcon, Server, Trash2, Rocket, Activity
 } from 'lucide-react'
 import clsx from 'clsx'
 
@@ -47,8 +47,15 @@ export default function RangeDetail() {
     template_id: '',
     cpu: 2,
     ram_mb: 2048,
-    disk_gb: 20
+    disk_gb: 20,
+    // Windows-specific
+    windows_version: '',
+    windows_username: '',
+    windows_password: '',
+    iso_url: '',
+    display_type: 'desktop'
   })
+  const [showWindowsOptions, setShowWindowsOptions] = useState(false)
 
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -149,7 +156,7 @@ export default function RangeDetail() {
     setError(null)
 
     try {
-      await vmsApi.create({
+      const vmData: VMCreate = {
         range_id: id,
         network_id: vmForm.network_id!,
         template_id: vmForm.template_id!,
@@ -158,9 +165,26 @@ export default function RangeDetail() {
         cpu: vmForm.cpu!,
         ram_mb: vmForm.ram_mb!,
         disk_gb: vmForm.disk_gb!
-      })
+      }
+
+      // Add Windows-specific settings if template is Windows
+      if (showWindowsOptions) {
+        if (vmForm.windows_version) vmData.windows_version = vmForm.windows_version
+        if (vmForm.windows_username) vmData.windows_username = vmForm.windows_username
+        if (vmForm.windows_password) vmData.windows_password = vmForm.windows_password
+        if (vmForm.iso_url) vmData.iso_url = vmForm.iso_url
+        vmData.display_type = vmForm.display_type || 'desktop'
+      }
+
+      await vmsApi.create(vmData)
       setShowVmModal(false)
-      setVmForm({ hostname: '', ip_address: '', network_id: '', template_id: '', cpu: 2, ram_mb: 2048, disk_gb: 20 })
+      setVmForm({
+        hostname: '', ip_address: '', network_id: '', template_id: '',
+        cpu: 2, ram_mb: 2048, disk_gb: 20,
+        windows_version: '', windows_username: '', windows_password: '', iso_url: '',
+        display_type: 'desktop'
+      })
+      setShowWindowsOptions(false)
       fetchData()
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to create VM')
@@ -250,13 +274,22 @@ export default function RangeDetail() {
               </button>
             )}
             {range.status === 'running' && (
-              <button
-                onClick={handleStop}
-                className="inline-flex items-center px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
-              >
-                <Square className="h-4 w-4 mr-1" />
-                Stop
-              </button>
+              <>
+                <button
+                  onClick={() => navigate(`/execution/${id}`)}
+                  className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700"
+                >
+                  <Activity className="h-4 w-4 mr-2" />
+                  Execution Console
+                </button>
+                <button
+                  onClick={handleStop}
+                  className="inline-flex items-center px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+                >
+                  <Square className="h-4 w-4 mr-1" />
+                  Stop
+                </button>
+              </>
             )}
           </div>
         </div>
@@ -508,19 +541,22 @@ export default function RangeDetail() {
                     value={vmForm.template_id}
                     onChange={(e) => {
                       const template = templates.find(t => t.id === e.target.value)
+                      const isWindows = template?.os_type === 'windows'
+                      setShowWindowsOptions(isWindows)
                       setVmForm({
                         ...vmForm,
                         template_id: e.target.value,
-                        cpu: template?.default_cpu || 2,
-                        ram_mb: template?.default_ram_mb || 2048,
-                        disk_gb: template?.default_disk_gb || 20
+                        cpu: template?.default_cpu || (isWindows ? 4 : 2),
+                        ram_mb: template?.default_ram_mb || (isWindows ? 8192 : 2048),
+                        disk_gb: template?.default_disk_gb || (isWindows ? 64 : 20),
+                        windows_version: isWindows ? template?.os_variant || '11' : ''
                       })
                     }}
                     className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
                   >
                     <option value="">Select a template</option>
                     {templates.map(t => (
-                      <option key={t.id} value={t.id}>{t.name} ({t.os_variant})</option>
+                      <option key={t.id} value={t.id}>{t.name} ({t.os_type === 'windows' ? 'Windows' : 'Linux'} - {t.os_variant})</option>
                     ))}
                   </select>
                 </div>
@@ -596,6 +632,100 @@ export default function RangeDetail() {
                     />
                   </div>
                 </div>
+
+                {/* Windows-specific options */}
+                {showWindowsOptions && (
+                  <div className="border-t pt-4 space-y-4">
+                    <h4 className="text-sm font-medium text-gray-900 flex items-center">
+                      <Server className="h-4 w-4 mr-2 text-purple-500" />
+                      Windows Settings
+                    </h4>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Environment Type</label>
+                      <select
+                        value={vmForm.display_type}
+                        onChange={(e) => setVmForm({ ...vmForm, display_type: e.target.value as 'desktop' | 'server' })}
+                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                      >
+                        <option value="desktop">Desktop (VNC/Web Console)</option>
+                        <option value="server">Server (RDP Only)</option>
+                      </select>
+                      <p className="mt-1 text-xs text-gray-500">
+                        {vmForm.display_type === 'desktop'
+                          ? 'Desktop mode provides VNC web console access on port 8006'
+                          : 'Server mode is headless, use RDP (port 3389) to connect'}
+                      </p>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Windows Version</label>
+                      <select
+                        value={vmForm.windows_version}
+                        onChange={(e) => setVmForm({ ...vmForm, windows_version: e.target.value })}
+                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                      >
+                        <optgroup label="Desktop">
+                          <option value="11">Windows 11 Pro (7.2 GB)</option>
+                          <option value="11l">Windows 11 LTSC (4.7 GB)</option>
+                          <option value="11e">Windows 11 Enterprise (6.6 GB)</option>
+                          <option value="10">Windows 10 Pro (5.7 GB)</option>
+                          <option value="10l">Windows 10 LTSC (4.6 GB)</option>
+                          <option value="10e">Windows 10 Enterprise (5.2 GB)</option>
+                          <option value="8e">Windows 8.1 Enterprise (3.7 GB)</option>
+                        </optgroup>
+                        <optgroup label="Server">
+                          <option value="2025">Windows Server 2025 (6.7 GB)</option>
+                          <option value="2022">Windows Server 2022 (6.0 GB)</option>
+                          <option value="2019">Windows Server 2019 (5.3 GB)</option>
+                          <option value="2016">Windows Server 2016 (6.5 GB)</option>
+                          <option value="2012">Windows Server 2012 (4.3 GB)</option>
+                          <option value="2008">Windows Server 2008 (3.0 GB)</option>
+                        </optgroup>
+                        <optgroup label="Legacy">
+                          <option value="7u">Windows 7 Ultimate (3.1 GB)</option>
+                          <option value="vu">Windows Vista Ultimate (3.0 GB)</option>
+                          <option value="xp">Windows XP Professional (0.6 GB)</option>
+                          <option value="2k">Windows 2000 Professional (0.4 GB)</option>
+                          <option value="2003">Windows Server 2003 (0.6 GB)</option>
+                        </optgroup>
+                      </select>
+                      <p className="mt-1 text-xs text-gray-500">ISO will be auto-downloaded by dockur/windows</p>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700">Username (optional)</label>
+                        <input
+                          type="text"
+                          value={vmForm.windows_username}
+                          onChange={(e) => setVmForm({ ...vmForm, windows_username: e.target.value })}
+                          className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                          placeholder="Docker"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700">Password (optional)</label>
+                        <input
+                          type="password"
+                          value={vmForm.windows_password}
+                          onChange={(e) => setVmForm({ ...vmForm, windows_password: e.target.value })}
+                          className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                          placeholder="Leave empty for no password"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Custom ISO URL (optional)</label>
+                      <input
+                        type="url"
+                        value={vmForm.iso_url}
+                        onChange={(e) => setVmForm({ ...vmForm, iso_url: e.target.value })}
+                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                        placeholder="https://example.com/custom.iso"
+                      />
+                      <p className="mt-1 text-xs text-gray-500">Overrides the automatic ISO download</p>
+                    </div>
+                  </div>
+                )}
+
                 <div className="flex justify-end space-x-3 pt-4">
                   <button type="button" onClick={() => setShowVmModal(false)} className="px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50">Cancel</button>
                   <button type="submit" disabled={submitting} className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 disabled:opacity-50">

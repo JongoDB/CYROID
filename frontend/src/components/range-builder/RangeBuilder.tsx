@@ -12,7 +12,6 @@ import {
   OnNodesChange,
   OnEdgesChange,
   OnConnect,
-  NodeTypes,
   BackgroundVariant,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
@@ -41,9 +40,10 @@ export function RangeBuilder({
   onAddNetwork,
   onAddVM,
   onUpdateVM,
-  onDeleteVM,
-  onDeleteNetwork,
+  onDeleteVM: _onDeleteVM,
+  onDeleteNetwork: _onDeleteNetwork,
 }: RangeBuilderProps) {
+  // Note: _onDeleteVM and _onDeleteNetwork are available for future use
   // Convert networks and VMs to React Flow nodes
   const initialNodes: Node[] = useMemo(() => {
     const networkNodes: Node[] = networks.map((network, index) => ({
@@ -86,9 +86,10 @@ export function RangeBuilder({
   const [nodes, setNodes] = useState<Node[]>(initialNodes)
   const [edges, setEdges] = useState<Edge[]>(initialEdges)
 
-  const nodeTypes: NodeTypes = useMemo(() => ({
-    vm: VMNode,
-    network: NetworkNode,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const nodeTypes = useMemo(() => ({
+    vm: VMNode as any,
+    network: NetworkNode as any,
   }), [])
 
   const onNodesChange: OnNodesChange = useCallback(

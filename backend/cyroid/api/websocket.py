@@ -21,12 +21,12 @@ async def get_current_user_ws(websocket: WebSocket, token: str, db: Session):
     """Authenticate WebSocket connection using JWT token."""
     from cyroid.models.user import User
 
-    payload = decode_access_token(token)
-    if not payload:
+    user_id = decode_access_token(token)
+    if not user_id:
         await websocket.close(code=4001, reason="Invalid token")
         return None
 
-    user = db.query(User).filter(User.id == payload.get("sub")).first()
+    user = db.query(User).filter(User.id == user_id).first()
     if not user:
         await websocket.close(code=4001, reason="User not found")
         return None

@@ -31,6 +31,11 @@ class VMTemplate(Base, UUIDMixin, TimestampMixin):
     config_script: Mapped[Optional[str]] = mapped_column(Text)  # bash or PowerShell
     tags: Mapped[List[str]] = mapped_column(JSON, default=list)
 
+    # Cached image support
+    golden_image_path: Mapped[Optional[str]] = mapped_column(String(500))  # Path to golden image for Windows
+    cached_iso_path: Mapped[Optional[str]] = mapped_column(String(500))  # Path to cached ISO
+    is_cached: Mapped[bool] = mapped_column(default=False)  # Whether this template uses cached images
+
     # Ownership
     created_by: Mapped[UUID] = mapped_column(ForeignKey("users.id"))
     created_by_user = relationship("User", back_populates="templates")

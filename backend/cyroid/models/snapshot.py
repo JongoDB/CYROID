@@ -14,8 +14,8 @@ class Snapshot(Base, UUIDMixin, TimestampMixin):
     name: Mapped[str] = mapped_column(String(100))
     description: Mapped[Optional[str]] = mapped_column(Text)
 
-    # Docker image ID (snapshot stored as image)
-    docker_image_id: Mapped[Optional[str]] = mapped_column(String(64))
+    # Docker image ID (snapshot stored as image) - needs 71+ chars for sha256:hash
+    docker_image_id: Mapped[Optional[str]] = mapped_column(String(128))
 
     # Relationships
     vm = relationship("VM", back_populates="snapshots")

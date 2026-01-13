@@ -8,6 +8,8 @@ import Dashboard from './pages/Dashboard'
 import Templates from './pages/Templates'
 import Ranges from './pages/Ranges'
 import RangeDetail from './pages/RangeDetail'
+import ExecutionConsole from './pages/ExecutionConsole'
+import ImageCache from './pages/ImageCache'
 import ProtectedRoute from './components/common/ProtectedRoute'
 import Layout from './components/layout/Layout'
 
@@ -34,6 +36,8 @@ function App() {
                 <Route path="/templates" element={<Templates />} />
                 <Route path="/ranges" element={<Ranges />} />
                 <Route path="/ranges/:id" element={<RangeDetail />} />
+                <Route path="/execution/:rangeId" element={<ExecutionConsole />} />
+                <Route path="/cache" element={<ImageCache />} />
                 <Route path="/artifacts" element={<div>Artifacts - Coming Soon</div>} />
               </Routes>
             </Layout>

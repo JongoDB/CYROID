@@ -9,6 +9,7 @@ from sqlalchemy.pool import StaticPool
 from cyroid.main import app
 from cyroid.database import get_db
 from cyroid.models import Base
+from cyroid.services.docker_service import get_docker_service
 
 
 @pytest.fixture
@@ -57,7 +58,13 @@ def client(db_session, mock_docker_service):
 
     app.dependency_overrides[get_db] = override_get_db
 
-    # Patch Docker service in all API modules
+    # Override Docker service dependency (for MSEL API which uses FastAPI dependency injection)
+    def override_get_docker_service():
+        return mock_docker_service
+
+    app.dependency_overrides[get_docker_service] = override_get_docker_service
+
+    # Patch Docker service in APIs that call it directly (not via dependency injection)
     with patch('cyroid.api.vms.get_docker_service', return_value=mock_docker_service), \
          patch('cyroid.api.networks.get_docker_service', return_value=mock_docker_service), \
          patch('cyroid.api.ranges.get_docker_service', return_value=mock_docker_service):
