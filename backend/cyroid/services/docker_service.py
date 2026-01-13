@@ -1,7 +1,17 @@
 # cyroid/services/docker_service.py
 """
 Docker orchestration service for managing containers and networks.
-Supports Linux containers and dockur/windows for Windows VMs.
+
+Supports three VM/container types:
+1. Container: Basic Docker containers for lightweight Linux workloads
+2. Linux VM: Full Linux VMs via qemus/qemu (desktop & server environments)
+3. Windows VM: Full Windows VMs via dockur/windows
+
+Both qemus/qemu and dockur/windows provide:
+- KVM acceleration for near-native performance
+- Web-based VNC console on port 8006
+- Persistent storage and golden image support
+- Auto-download of OS images (24+ Linux distros, all Windows versions)
 """
 import docker
 from docker.errors import APIError, NotFound, ImageNotFound
@@ -327,7 +337,10 @@ class DockerService:
 
         # Check if KVM is available for hardware acceleration
         kvm_available = os.path.exists("/dev/kvm")
-        if not kvm_available:
+        if kvm_available:
+            environment["KVM"] = "Y"
+            logger.info("KVM acceleration enabled for Windows VM")
+        else:
             logger.warning("KVM not available, Windows VM will run in software emulation mode (slower)")
             environment["KVM"] = "N"
 
@@ -429,6 +442,222 @@ class DockerService:
             logger.error(f"Failed to create Windows container {name}: {e}")
             raise
     
+    def create_linux_vm_container(
+        self,
+        name: str,
+        network_id: str,
+        ip_address: str,
+        cpu_limit: int = 2,
+        memory_limit_mb: int = 2048,
+        disk_size_gb: int = 64,
+        linux_distro: str = "ubuntu",
+        labels: Optional[Dict[str, str]] = None,
+        iso_path: Optional[str] = None,
+        iso_url: Optional[str] = None,
+        storage_path: Optional[str] = None,
+        clone_from: Optional[str] = None,
+        display_type: str = "desktop",
+        # Extended qemus/qemu configuration
+        boot_mode: str = "uefi",
+        disk_type: str = "scsi",
+        disk2_gb: Optional[int] = None,
+        disk3_gb: Optional[int] = None,
+        enable_shared_folder: bool = False,
+        shared_folder_path: Optional[str] = None,
+        enable_global_shared: bool = False,
+        global_shared_path: Optional[str] = None,
+    ) -> str:
+        """
+        Create a Linux VM container using qemus/qemu.
+
+        Provides full Linux desktop/server VMs with KVM acceleration and web VNC console,
+        mirroring the dockur/windows approach for Windows VMs.
+
+        Supported Linux distributions (via BOOT env var):
+        Desktop: ubuntu, debian, fedora, alpine, arch, manjaro, opensuse, mint,
+                 zorin, elementary, popos, kali, parrot, tails, rocky, alma
+        Server: Any of the above work in server mode, or use custom ISO
+
+        See: https://github.com/qemus/qemu for full documentation
+
+        Args:
+            name: Container name
+            network_id: Network to attach to
+            ip_address: Static IP address
+            cpu_limit: CPU core limit (default 2)
+            memory_limit_mb: Memory limit in MB (default 2048)
+            disk_size_gb: Virtual disk size in GB
+            linux_distro: Linux distribution to boot (ubuntu, debian, fedora, etc.)
+            labels: Container labels
+            iso_path: Path to local Linux ISO (bind mount, skips download)
+            iso_url: URL to custom Linux ISO (remote download)
+            storage_path: Path to persistent storage for Linux installation
+            clone_from: Path to golden image storage to clone from
+            display_type: Display mode - 'desktop' (VNC/web console on port 8006)
+                         or 'server' (headless mode)
+            boot_mode: Boot mode - 'uefi' (default) or 'legacy' (BIOS)
+            disk_type: Disk interface - 'scsi' (default), 'blk', or 'ide'
+            disk2_gb: Size of second disk in GB
+            disk3_gb: Size of third disk in GB
+            enable_shared_folder: Enable per-VM shared folder mount (via 9pfs)
+            shared_folder_path: Host path for per-VM shared folder
+            enable_global_shared: Mount global shared folder (read-only)
+            global_shared_path: Host path for global shared folder
+
+        Returns:
+            Container ID
+        """
+        import os
+        import shutil
+        from cyroid.config import get_settings
+        settings = get_settings()
+
+        image = "qemux/qemu"
+        self._ensure_image(image)
+
+        try:
+            network = self.client.networks.get(network_id)
+        except NotFound:
+            raise ValueError(f"Network not found: {network_id}")
+
+        # Create networking config
+        networking_config = self.client.api.create_networking_config({
+            network.name: self.client.api.create_endpoint_config(
+                ipv4_address=ip_address
+            )
+        })
+
+        # Environment for qemus/qemu
+        # See: https://github.com/qemus/qemu for full documentation
+        environment = {
+            "BOOT": linux_distro,
+            "DISK_SIZE": f"{disk_size_gb}G",
+            "CPU_CORES": str(cpu_limit),
+            "RAM_SIZE": f"{memory_limit_mb}M",
+            "BOOT_MODE": boot_mode.upper(),
+            "DISK_TYPE": disk_type,
+        }
+
+        # Custom ISO URL (qemu downloads from this URL)
+        if iso_url:
+            environment["BOOT"] = iso_url
+            logger.info(f"Using custom ISO URL: {iso_url}")
+
+        # Additional disks
+        if disk2_gb:
+            environment["DISK2_SIZE"] = f"{disk2_gb}G"
+        if disk3_gb:
+            environment["DISK3_SIZE"] = f"{disk3_gb}G"
+
+        # Display type configuration
+        # 'desktop' = web VNC console on port 8006 (default)
+        # 'server' = headless mode, SSH/console only
+        if display_type == "server":
+            environment["DISPLAY"] = "none"  # Headless mode for server environments
+            logger.info(f"Linux VM {name} configured in server mode (headless)")
+        else:
+            environment["DISPLAY"] = "web"  # Web VNC console (default)
+            logger.info(f"Linux VM {name} configured in desktop mode (VNC/web console)")
+
+        # Check if KVM is available for hardware acceleration
+        kvm_available = os.path.exists("/dev/kvm")
+        if kvm_available:
+            logger.info("KVM acceleration enabled for Linux VM")
+        else:
+            logger.warning("KVM not available, Linux VM will run in software emulation mode (slower)")
+
+        # Setup volume bindings
+        binds = []
+
+        # Check for local ISO bind mount (takes priority over URL)
+        if iso_path and os.path.isfile(iso_path):
+            binds.append(f"{iso_path}:/boot.iso:ro")
+            logger.info(f"Using local ISO: {iso_path}")
+        elif not iso_url:
+            # Check for default ISO in cache directory (only if no URL provided)
+            linux_iso_dir = os.path.join(settings.iso_cache_dir, "linux-isos")
+            cached_iso = os.path.join(linux_iso_dir, f"{linux_distro}.iso")
+            if os.path.isfile(cached_iso):
+                binds.append(f"{cached_iso}:/boot.iso:ro")
+                logger.info(f"Using cached ISO: {cached_iso}")
+
+        # Setup persistent storage
+        if storage_path:
+            os.makedirs(storage_path, exist_ok=True)
+
+            # Clone from golden image if specified
+            if clone_from and os.path.exists(clone_from):
+                if not os.listdir(storage_path):  # Only clone if empty
+                    logger.info(f"Cloning golden image from {clone_from} to {storage_path}")
+                    for item in os.listdir(clone_from):
+                        src = os.path.join(clone_from, item)
+                        dst = os.path.join(storage_path, item)
+                        if os.path.isdir(src):
+                            shutil.copytree(src, dst)
+                        else:
+                            shutil.copy2(src, dst)
+
+            binds.append(f"{storage_path}:/storage")
+            logger.info(f"Using persistent storage: {storage_path}")
+
+            # Additional disk storage
+            if disk2_gb:
+                storage2_path = os.path.join(os.path.dirname(storage_path), "storage2")
+                os.makedirs(storage2_path, exist_ok=True)
+                binds.append(f"{storage2_path}:/storage2")
+                logger.info(f"Using secondary storage: {storage2_path}")
+
+            if disk3_gb:
+                storage3_path = os.path.join(os.path.dirname(storage_path), "storage3")
+                os.makedirs(storage3_path, exist_ok=True)
+                binds.append(f"{storage3_path}:/storage3")
+                logger.info(f"Using tertiary storage: {storage3_path}")
+
+        # Shared folder (per-VM) via 9pfs
+        if enable_shared_folder and shared_folder_path:
+            os.makedirs(shared_folder_path, exist_ok=True)
+            binds.append(f"{shared_folder_path}:/shared")
+            logger.info(f"Using per-VM shared folder: {shared_folder_path}")
+
+        # Global shared folder (read-only for safety)
+        if enable_global_shared and global_shared_path:
+            os.makedirs(global_shared_path, exist_ok=True)
+            binds.append(f"{global_shared_path}:/global:ro")
+            logger.info(f"Using global shared folder: {global_shared_path}")
+
+        # Linux VM containers need privileged mode for KVM
+        try:
+            host_config_args = {
+                "cpu_count": cpu_limit,
+                "mem_limit": f"{memory_limit_mb}m",
+                "privileged": True,
+                "cap_add": ["NET_ADMIN"],
+                "restart_policy": {"Name": "unless-stopped"}
+            }
+            if kvm_available:
+                host_config_args["devices"] = ["/dev/kvm:/dev/kvm"]
+            if binds:
+                host_config_args["binds"] = binds
+
+            container = self.client.api.create_container(
+                image=image,
+                name=name,
+                hostname=name,
+                detach=True,
+                tty=True,
+                stdin_open=True,
+                networking_config=networking_config,
+                host_config=self.client.api.create_host_config(**host_config_args),
+                environment=environment,
+                labels=labels or {}
+            )
+            container_id = container["Id"]
+            logger.info(f"Created Linux VM container: {name} ({container_id[:12]})")
+            return container_id
+        except APIError as e:
+            logger.error(f"Failed to create Linux VM container {name}: {e}")
+            raise
+
     def start_container(self, container_id: str) -> bool:
         """Start a container."""
         try:
@@ -524,8 +753,8 @@ class DockerService:
                         stats["precpu_stats"]["cpu_usage"]["total_usage"]
             system_delta = stats["cpu_stats"]["system_cpu_usage"] - \
                            stats["precpu_stats"]["system_cpu_usage"]
-            cpu_count = stats["cpu_stats"].get("online_cpus", 1)
-            cpu_percent = (cpu_delta / system_delta) * cpu_count * 100.0 if system_delta > 0 else 0.0
+            # Normalize to 0-100% (average across all cores) instead of 0-N*100%
+            cpu_percent = (cpu_delta / system_delta) * 100.0 if system_delta > 0 else 0.0
 
             # Memory
             memory_usage = stats["memory_stats"].get("usage", 0)
@@ -843,9 +1072,66 @@ class DockerService:
             "total_count": len(cached_isos)
         }
 
-    def get_golden_images_status(self) -> Dict[str, Any]:
+    def get_linux_iso_cache_status(self) -> Dict[str, Any]:
         """
-        Check status of Windows golden images (pre-installed templates).
+        Check status of cached Linux ISOs.
+
+        Returns:
+            Dict with cached ISOs and their sizes
+        """
+        import os
+        from cyroid.config import get_settings
+        settings = get_settings()
+
+        cached_isos = []
+        # Linux ISOs are stored in a subdirectory
+        linux_iso_dir = os.path.join(settings.iso_cache_dir, "linux-isos")
+
+        if os.path.exists(linux_iso_dir):
+            for filename in os.listdir(linux_iso_dir):
+                if filename.endswith('.iso') or filename.endswith('.img') or filename.endswith('.qcow2'):
+                    filepath = os.path.join(linux_iso_dir, filename)
+                    cached_isos.append({
+                        "filename": filename,
+                        "path": filepath,
+                        "size_bytes": os.path.getsize(filepath),
+                        "size_gb": round(os.path.getsize(filepath) / (1024**3), 2)
+                    })
+
+        return {
+            "cache_dir": linux_iso_dir,
+            "isos": cached_isos,
+            "total_count": len(cached_isos)
+        }
+
+    def get_all_iso_cache_status(self) -> Dict[str, Any]:
+        """
+        Get combined status of all ISO caches (Windows and Linux).
+
+        Returns:
+            Dict with both Windows and Linux ISO caches
+        """
+        windows_cache = self.get_windows_iso_cache_status()
+        linux_cache = self.get_linux_iso_cache_status()
+
+        return {
+            "windows": windows_cache,
+            "linux": linux_cache,
+            "total_count": windows_cache["total_count"] + linux_cache["total_count"],
+            "total_size_gb": round(
+                sum(iso["size_gb"] for iso in windows_cache["isos"]) +
+                sum(iso["size_gb"] for iso in linux_cache["isos"]),
+                2
+            )
+        }
+
+    def get_golden_images_status(self, os_type: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Check status of golden images (pre-installed VM templates).
+        Works for both Windows (dockur/windows) and Linux (qemus/qemu) VMs.
+
+        Args:
+            os_type: Filter by OS type ('windows', 'linux', or None for all)
 
         Returns:
             Dict with golden images and their sizes
@@ -861,6 +1147,13 @@ class DockerService:
             for dirname in os.listdir(template_dir):
                 dirpath = os.path.join(template_dir, dirname)
                 if os.path.isdir(dirpath):
+                    # Determine OS type from directory name or metadata
+                    detected_os = "windows" if dirname.startswith("win") else "linux"
+
+                    # Filter by OS type if specified
+                    if os_type and detected_os != os_type:
+                        continue
+
                     # Calculate total size of the golden image
                     total_size = 0
                     for root, dirs, files in os.walk(dirpath):
@@ -871,7 +1164,8 @@ class DockerService:
                         "name": dirname,
                         "path": dirpath,
                         "size_bytes": total_size,
-                        "size_gb": round(total_size / (1024**3), 2)
+                        "size_gb": round(total_size / (1024**3), 2),
+                        "os_type": detected_os
                     })
 
         return {
@@ -883,15 +1177,18 @@ class DockerService:
     def create_golden_image(
         self,
         container_id: str,
-        golden_image_name: str
+        golden_image_name: str,
+        os_type: str = "windows"
     ) -> Dict[str, Any]:
         """
-        Create a golden image from a running Windows container.
+        Create a golden image from a running VM container.
         This saves the /storage directory for reuse.
+        Works for both Windows (dockur/windows) and Linux (qemus/qemu) VMs.
 
         Args:
-            container_id: ID of the Windows container with completed installation
+            container_id: ID of the VM container with completed installation
             golden_image_name: Name for the golden image
+            os_type: Type of OS ('windows' or 'linux')
 
         Returns:
             Dict with golden image info
@@ -915,12 +1212,16 @@ class DockerService:
         if not storage_mount:
             raise ValueError("Container does not have a /storage mount")
 
-        # Create golden image directory
+        # Create golden image directory (prefix with OS type for organization)
+        if not golden_image_name.startswith(("win", "linux-")):
+            prefix = "win-" if os_type == "windows" else "linux-"
+            golden_image_name = f"{prefix}{golden_image_name}"
+
         golden_dir = os.path.join(settings.template_storage_dir, golden_image_name)
         os.makedirs(golden_dir, exist_ok=True)
 
         # Copy storage to golden image
-        logger.info(f"Creating golden image from {storage_mount} to {golden_dir}")
+        logger.info(f"Creating {os_type} golden image from {storage_mount} to {golden_dir}")
         for item in os.listdir(storage_mount):
             src = os.path.join(storage_mount, item)
             dst = os.path.join(golden_dir, item)
@@ -940,7 +1241,7 @@ class DockerService:
             "path": golden_dir,
             "size_bytes": total_size,
             "size_gb": round(total_size / (1024**3), 2),
-            "type": "windows"
+            "os_type": os_type
         }
 
     def create_container_snapshot(

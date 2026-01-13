@@ -506,6 +506,470 @@ DOCKUR_WINDOWS_VERSIONS = [
 ]
 
 
+# qemus/qemu supported Linux distributions
+# These are auto-downloaded by qemus/qemu when the container starts
+# Download URLs sourced from: https://github.com/qemus/qemu-docker/blob/master/src/define.sh
+QEMU_LINUX_VERSIONS = [
+    # Popular desktop distributions
+    {
+        "version": "ubuntu",
+        "name": "Ubuntu Desktop",
+        "size_gb": 6.0,
+        "category": "desktop",
+        "description": "Ubuntu Desktop 24.04 LTS - Popular and user-friendly",
+        "download_url": "https://releases.ubuntu.com/noble/ubuntu-24.04.1-desktop-amd64.iso",
+    },
+    {
+        "version": "ubuntus",
+        "name": "Ubuntu Server",
+        "size_gb": 3.0,
+        "category": "server",
+        "description": "Ubuntu Server 24.04 LTS - Minimal server install",
+        "download_url": "https://releases.ubuntu.com/noble/ubuntu-24.04.1-live-server-amd64.iso",
+    },
+    {
+        "version": "debian",
+        "name": "Debian",
+        "size_gb": 3.3,
+        "category": "desktop",
+        "description": "Debian 12 Bookworm - Stable and reliable",
+        "download_url": "https://cdimage.debian.org/debian-cd/current-live/amd64/iso-hybrid/debian-live-12.8.0-amd64-gnome.iso",
+    },
+    {
+        "version": "fedora",
+        "name": "Fedora",
+        "size_gb": 2.3,
+        "category": "desktop",
+        "description": "Fedora Workstation - Cutting-edge features",
+        "download_url": "https://download.fedoraproject.org/pub/fedora/linux/releases/41/Workstation/x86_64/iso/Fedora-Workstation-Live-x86_64-41-1.4.iso",
+    },
+    {
+        "version": "alpine",
+        "name": "Alpine Linux",
+        "size_gb": 0.06,
+        "category": "server",
+        "description": "Alpine Linux - Minimal and security-focused (60 MB)",
+        "download_url": "https://dl-cdn.alpinelinux.org/alpine/v3.21/releases/x86_64/alpine-virt-3.21.2-x86_64.iso",
+    },
+    {
+        "version": "arch",
+        "name": "Arch Linux",
+        "size_gb": 1.2,
+        "category": "desktop",
+        "description": "Arch Linux - Rolling release, highly customizable",
+        "download_url": "https://geo.mirror.pkgbuild.com/iso/latest/archlinux-x86_64.iso",
+    },
+    {
+        "version": "manjaro",
+        "name": "Manjaro",
+        "size_gb": 4.1,
+        "category": "desktop",
+        "description": "Manjaro - User-friendly Arch-based distro",
+        "download_url": "https://download.manjaro.org/gnome/24.2.1/manjaro-gnome-24.2.1-241216-linux612.iso",
+    },
+    {
+        "version": "suse",
+        "name": "OpenSUSE",
+        "size_gb": 1.0,
+        "category": "desktop",
+        "description": "OpenSUSE Leap - Stable enterprise-grade",
+        "download_url": "https://download.opensuse.org/distribution/leap/15.6/iso/openSUSE-Leap-15.6-DVD-x86_64-Media.iso",
+    },
+    {
+        "version": "mint",
+        "name": "Linux Mint",
+        "size_gb": 2.8,
+        "category": "desktop",
+        "description": "Linux Mint - Windows-like experience",
+        "download_url": "https://mirrors.kernel.org/linuxmint/stable/22.1/linuxmint-22.1-cinnamon-64bit.iso",
+    },
+    {
+        "version": "zorin",
+        "name": "Zorin OS",
+        "size_gb": 3.8,
+        "category": "desktop",
+        "description": "Zorin OS - Beautiful and familiar interface",
+        "download_url": "https://mirrors.edge.kernel.org/zorinos-isos/17/Zorin-OS-17.2-Core-64-bit.iso",
+    },
+    {
+        "version": "kubuntu",
+        "name": "Kubuntu",
+        "size_gb": 4.4,
+        "category": "desktop",
+        "description": "Kubuntu - Ubuntu with KDE Plasma desktop",
+        "download_url": "https://cdimages.ubuntu.com/kubuntu/releases/noble/release/kubuntu-24.04.1-desktop-amd64.iso",
+    },
+    {
+        "version": "xubuntu",
+        "name": "Xubuntu",
+        "size_gb": 4.0,
+        "category": "desktop",
+        "description": "Xubuntu - Ubuntu with lightweight XFCE desktop",
+        "download_url": "https://cdimages.ubuntu.com/xubuntu/releases/noble/release/xubuntu-24.04.1-desktop-amd64.iso",
+    },
+    # Security-focused distributions (for cyber range training)
+    {
+        "version": "kali",
+        "name": "Kali Linux",
+        "size_gb": 3.8,
+        "category": "security",
+        "description": "Kali Linux - Penetration testing and security auditing",
+        "download_url": "https://cdimage.kali.org/kali-2024.4/kali-linux-2024.4-live-amd64.iso",
+    },
+    {
+        "version": "tails",
+        "name": "Tails",
+        "size_gb": 1.9,
+        "category": "security",
+        "description": "Tails - Privacy-focused, runs from memory",
+        "download_url": "https://download.tails.net/tails/stable/tails-amd64-7.3.1/tails-amd64-7.3.1.iso",
+    },
+    # Enterprise/server distributions
+    {
+        "version": "rocky",
+        "name": "Rocky Linux",
+        "size_gb": 2.1,
+        "category": "server",
+        "description": "Rocky Linux 9 - RHEL compatible enterprise OS",
+        "download_url": "https://dl.rockylinux.org/pub/rocky/9/live/x86_64/Rocky-9-Workstation-x86_64-latest.iso",
+    },
+    {
+        "version": "alma",
+        "name": "Alma Linux",
+        "size_gb": 2.2,
+        "category": "server",
+        "description": "Alma Linux 9 - RHEL compatible enterprise OS",
+        "download_url": "https://repo.almalinux.org/almalinux/9/live/x86_64/AlmaLinux-9-latest-x86_64-Live-GNOME.iso",
+    },
+    {
+        "version": "centos",
+        "name": "CentOS Stream",
+        "size_gb": 7.0,
+        "category": "server",
+        "description": "CentOS Stream 9 - RHEL upstream development",
+        "download_url": "https://mirrors.centos.org/mirrorlist?path=/9-stream/BaseOS/x86_64/iso/CentOS-Stream-9-latest-x86_64-dvd1.iso&redirect=1&protocol=https",
+    },
+    # Other distributions
+    {
+        "version": "gentoo",
+        "name": "Gentoo",
+        "size_gb": 3.6,
+        "category": "desktop",
+        "description": "Gentoo - Source-based, highly customizable",
+        "download_url": "https://distfiles.gentoo.org/releases/amd64/autobuilds/current-livegui-amd64/livegui-amd64-20250105T164824Z.iso",
+    },
+    {
+        "version": "nixos",
+        "name": "NixOS",
+        "size_gb": 2.4,
+        "category": "desktop",
+        "description": "NixOS - Declarative and reproducible",
+        "download_url": "https://channels.nixos.org/nixos-24.11/latest-nixos-gnome-x86_64-linux.iso",
+    },
+    {
+        "version": "mx",
+        "name": "MX Linux",
+        "size_gb": 2.2,
+        "category": "desktop",
+        "description": "MX Linux - Lightweight and fast",
+        "download_url": "https://sourceforge.net/projects/mx-linux/files/Final/Xfce/MX-23.5_x64.iso/download",
+    },
+    {
+        "version": "cachy",
+        "name": "CachyOS",
+        "size_gb": 2.6,
+        "category": "desktop",
+        "description": "CachyOS - Performance-optimized Arch-based",
+        "download_url": "https://mirror.cachyos.org/ISO/kde/250104/cachyos-kde-linux-250104.iso",
+    },
+    {
+        "version": "slack",
+        "name": "Slackware",
+        "size_gb": 3.7,
+        "category": "server",
+        "description": "Slackware - One of the oldest Linux distributions",
+        "download_url": "https://slackware.nl/slackware-live/slackware64-current-live/slackware64-live-current.iso",
+    },
+]
+
+
+def get_linux_iso_dir() -> str:
+    """Get the Linux ISO cache directory path."""
+    settings = get_settings()
+    return os.path.join(settings.iso_cache_dir, "linux-isos")
+
+
+@router.get("/linux-versions")
+def get_linux_versions(current_user: CurrentUser):
+    """
+    Get all supported Linux distributions for qemus/qemu with cached status.
+
+    These distributions are automatically downloaded by qemus/qemu
+    when a container is started - no manual ISO download needed.
+    Returns cached status for each version.
+    """
+    linux_iso_dir = get_linux_iso_dir()
+
+    # Get list of cached ISO files
+    cached_isos = set()
+    if os.path.exists(linux_iso_dir):
+        for filename in os.listdir(linux_iso_dir):
+            if filename.endswith((".iso", ".img", ".qcow2")):
+                cached_isos.add(filename.lower())
+
+    # Add cached status to each version
+    def add_cached_status(version_list):
+        result = []
+        for v in version_list:
+            version_info = dict(v)
+            # Check for common ISO naming patterns
+            version_code = v["version"]
+            is_cached = any(
+                version_code.lower() in iso_name or
+                f"linux-{version_code}".lower() in iso_name
+                for iso_name in cached_isos
+            )
+            version_info["cached"] = is_cached
+            result.append(version_info)
+        return result
+
+    all_versions = add_cached_status(QEMU_LINUX_VERSIONS)
+    desktop = [v for v in all_versions if v["category"] == "desktop"]
+    server = [v for v in all_versions if v["category"] == "server"]
+    security = [v for v in all_versions if v["category"] == "security"]
+
+    cached_count = sum(1 for v in all_versions if v["cached"])
+
+    return {
+        "desktop": desktop,
+        "server": server,
+        "security": security,
+        "all": all_versions,
+        "cache_dir": linux_iso_dir,
+        "cached_count": cached_count,
+        "total_count": len(all_versions),
+        "note": "ISOs are automatically downloaded by qemus/qemu when the VM starts. Pre-caching is optional but speeds up first boot."
+    }
+
+
+@router.get("/linux-isos")
+def get_linux_iso_cache_status(current_user: CurrentUser):
+    """Get status of cached Linux ISOs."""
+    docker = get_docker_service()
+    return docker.get_linux_iso_cache_status()
+
+
+# Linux ISO Download endpoints
+
+class LinuxISODownloadRequest(BaseModel):
+    version: str
+    url: Optional[str] = None  # Custom URL, or use default for version
+
+
+# Track active Linux ISO downloads
+_active_linux_downloads: dict = {}
+
+
+@router.post("/linux-isos/download", status_code=status.HTTP_202_ACCEPTED)
+def download_linux_iso(
+    request: LinuxISODownloadRequest,
+    background_tasks: BackgroundTasks,
+    current_user: AdminUser
+):
+    """
+    Download a Linux ISO from the official source or custom URL.
+    Admin only as this downloads large files.
+
+    If no URL is provided, uses the default download URL for the distribution.
+    Some distributions don't have static download URLs and require manual download.
+    """
+    import os
+    from cyroid.config import get_settings
+
+    # Validate version
+    version_info = None
+    for v in QEMU_LINUX_VERSIONS:
+        if v["version"] == request.version:
+            version_info = v
+            break
+
+    if not version_info:
+        valid_versions = [v["version"] for v in QEMU_LINUX_VERSIONS]
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid version '{request.version}'. Valid versions: {', '.join(valid_versions)}"
+        )
+
+    # Determine download URL
+    download_url = request.url or version_info.get("download_url")
+
+    if not download_url:
+        # No direct download URL available
+        download_note = version_info.get("download_note", "No direct download available")
+
+        response = {
+            "status": "no_direct_download",
+            "version": request.version,
+            "name": version_info["name"],
+            "message": download_note,
+            "instructions": "Provide a custom URL or upload the ISO manually.",
+        }
+
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=response
+        )
+
+    linux_iso_dir = get_linux_iso_dir()
+    os.makedirs(linux_iso_dir, exist_ok=True)
+
+    filename = f"linux-{request.version}.iso"
+    filepath = os.path.join(linux_iso_dir, filename)
+
+    # Check if already exists
+    if os.path.exists(filepath):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"ISO for '{request.version}' already exists. Delete it first to re-download."
+        )
+
+    # Check if already downloading
+    if request.version in _active_linux_downloads and _active_linux_downloads[request.version].get("status") == "downloading":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Download already in progress for '{request.version}'"
+        )
+
+    # Start download
+    _active_linux_downloads[request.version] = {
+        "status": "downloading",
+        "filename": filename,
+        "progress_bytes": 0,
+        "total_bytes": None,
+        "error": None
+    }
+
+    def download_iso(url: str, dest_path: str, version: str):
+        """Download ISO in background with progress tracking."""
+        import requests
+
+        try:
+            # Use streaming download with progress
+            response = requests.get(url, stream=True, timeout=3600, allow_redirects=True)
+            response.raise_for_status()
+
+            # Get total size if available
+            total_size = response.headers.get('content-length')
+            if total_size:
+                total_size = int(total_size)
+                _active_linux_downloads[version]["total_bytes"] = total_size
+
+            # Download with progress tracking
+            downloaded = 0
+            with open(dest_path, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=1024 * 1024):  # 1MB chunks
+                    if chunk:
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        _active_linux_downloads[version]["progress_bytes"] = downloaded
+
+            _active_linux_downloads[version]["status"] = "completed"
+            _active_linux_downloads[version]["progress_bytes"] = os.path.getsize(dest_path)
+
+        except Exception as e:
+            # Clean up partial download
+            if os.path.exists(dest_path):
+                os.remove(dest_path)
+            _active_linux_downloads[version]["status"] = "failed"
+            _active_linux_downloads[version]["error"] = str(e)
+
+    background_tasks.add_task(download_iso, download_url, filepath, request.version)
+
+    return {
+        "status": "downloading",
+        "version": request.version,
+        "name": version_info["name"],
+        "filename": filename,
+        "destination": filepath,
+        "source_url": download_url,
+        "expected_size_gb": version_info.get("size_gb"),
+        "message": f"Downloading {version_info['name']} ISO..."
+    }
+
+
+@router.get("/linux-isos/download/{version}/status")
+def get_linux_iso_download_status(version: str, current_user: CurrentUser):
+    """Check the status of a Linux ISO download."""
+    linux_iso_dir = get_linux_iso_dir()
+    filename = f"linux-{version}.iso"
+    filepath = os.path.join(linux_iso_dir, filename)
+
+    # Check if file exists (completed download)
+    if os.path.exists(filepath):
+        size = os.path.getsize(filepath)
+        return {
+            "status": "completed",
+            "version": version,
+            "filename": filename,
+            "path": filepath,
+            "size_bytes": size,
+            "size_gb": round(size / (1024**3), 2)
+        }
+
+    # Check active downloads
+    if version in _active_linux_downloads:
+        info = _active_linux_downloads[version]
+        response = {
+            "status": info["status"],
+            "version": version,
+            "filename": info.get("filename"),
+        }
+
+        if info.get("progress_bytes") is not None:
+            response["progress_bytes"] = info["progress_bytes"]
+            response["progress_gb"] = round(info["progress_bytes"] / (1024**3), 2)
+
+        if info.get("total_bytes") is not None:
+            response["total_bytes"] = info["total_bytes"]
+            response["total_gb"] = round(info["total_bytes"] / (1024**3), 2)
+            if info["progress_bytes"]:
+                response["progress_percent"] = round(info["progress_bytes"] / info["total_bytes"] * 100, 1)
+
+        if info.get("error"):
+            response["error"] = info["error"]
+
+        return response
+
+    return {
+        "status": "not_found",
+        "version": version,
+        "message": "No download in progress and ISO not found in cache"
+    }
+
+
+@router.delete("/linux-isos/{version}")
+def delete_linux_iso(version: str, current_user: AdminUser):
+    """Delete a cached Linux ISO. Admin only."""
+    linux_iso_dir = get_linux_iso_dir()
+    filename = f"linux-{version}.iso"
+    filepath = os.path.join(linux_iso_dir, filename)
+
+    if not os.path.exists(filepath):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"ISO for '{version}' not found"
+        )
+
+    try:
+        os.remove(filepath)
+        return {"status": "deleted", "version": version, "filename": filename}
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete ISO: {str(e)}"
+        )
+
+
 @router.get("/windows-versions")
 def get_windows_versions(current_user: CurrentUser):
     """

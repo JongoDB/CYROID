@@ -66,6 +66,13 @@ class VM(Base, UUIDMixin, TimestampMixin):
     # Installation mode
     manual_install: Mapped[bool] = mapped_column(Boolean, default=False)  # Interactive install mode
 
+    # Linux VM-specific settings (for qemus/qemu VMs)
+    # Distro codes: ubuntu, debian, fedora, alpine, arch, manjaro, opensuse, mint,
+    #               zorin, elementary, popos, kali, parrot, tails, rocky, alma
+    linux_distro: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    boot_mode: Mapped[Optional[str]] = mapped_column(String(10), nullable=True, default="uefi")  # uefi or legacy
+    disk_type: Mapped[Optional[str]] = mapped_column(String(10), nullable=True, default="scsi")  # scsi, blk, or ide
+
     # Position in visual builder (for UI)
     position_x: Mapped[int] = mapped_column(Integer, default=0)
     position_y: Mapped[int] = mapped_column(Integer, default=0)

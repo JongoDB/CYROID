@@ -378,6 +378,57 @@ export interface WindowsVersionsResponse {
   note: string
 }
 
+// Linux VM (qemus/qemu) Types
+export interface LinuxVersion {
+  version: string
+  name: string
+  size_gb: number
+  category: 'desktop' | 'server' | 'security'
+  description: string
+  download_url: string | null
+  download_note?: string
+  cached?: boolean
+}
+
+export interface LinuxVersionsResponse {
+  desktop: LinuxVersion[]
+  server: LinuxVersion[]
+  security: LinuxVersion[]
+  all: LinuxVersion[]
+  cache_dir: string
+  cached_count: number
+  total_count: number
+  note: string
+}
+
+export interface LinuxISODownloadResponse {
+  status: 'downloading' | 'no_direct_download'
+  version: string
+  name: string
+  filename?: string
+  destination?: string
+  source_url?: string
+  expected_size_gb?: number
+  message: string
+  instructions?: string
+}
+
+export interface LinuxISODownloadStatus {
+  status: 'downloading' | 'completed' | 'failed' | 'not_found'
+  version: string
+  filename?: string
+  path?: string
+  progress_bytes?: number
+  progress_gb?: number
+  total_bytes?: number
+  total_gb?: number
+  progress_percent?: number
+  size_bytes?: number
+  size_gb?: number
+  error?: string
+  message?: string
+}
+
 export interface RecommendedImage {
   image?: string
   version?: string

@@ -13,6 +13,45 @@ class OSType(str, Enum):
     LINUX = "linux"
 
 
+class VMType(str, Enum):
+    """Type of VM/container implementation."""
+    CONTAINER = "container"      # Basic Docker container (lightweight Linux)
+    LINUX_VM = "linux_vm"        # Full Linux VM via qemus/qemu
+    WINDOWS_VM = "windows_vm"    # Full Windows VM via dockur/windows
+
+
+class LinuxDistro(str, Enum):
+    """Supported Linux distributions for qemus/qemu VMs.
+
+    These are auto-downloaded by qemus/qemu when specified in the BOOT env var.
+    See: https://github.com/qemus/qemu
+    """
+    # Popular desktop distributions
+    UBUNTU = "ubuntu"            # ~2.5 GB
+    DEBIAN = "debian"            # ~600 MB
+    FEDORA = "fedora"            # ~2.0 GB
+    ALPINE = "alpine"            # ~60 MB (minimal)
+    ARCH = "arch"                # ~800 MB
+    MANJARO = "manjaro"          # ~2.5 GB
+    OPENSUSE = "opensuse"        # ~800 MB
+    MINT = "mint"                # ~2.5 GB
+    ZORIN = "zorin"              # ~4.5 GB
+    ELEMENTARY = "elementary"    # ~2.5 GB
+    POPOS = "popos"              # ~2.5 GB
+
+    # Security-focused distributions (for cyber range training)
+    KALI = "kali"                # ~3.5 GB - Penetration testing
+    PARROT = "parrot"            # ~5.0 GB - Security/forensics
+    TAILS = "tails"              # ~1.3 GB - Privacy-focused
+
+    # Enterprise/server distributions
+    ROCKY = "rocky"              # ~1.5 GB - RHEL compatible
+    ALMA = "alma"                # ~1.5 GB - RHEL compatible
+
+    # Custom ISO (use iso_url instead)
+    CUSTOM = "custom"
+
+
 class VMTemplate(Base, UUIDMixin, TimestampMixin):
     __tablename__ = "vm_templates"
 
@@ -20,7 +59,15 @@ class VMTemplate(Base, UUIDMixin, TimestampMixin):
     description: Mapped[Optional[str]] = mapped_column(Text)
     os_type: Mapped[OSType]
     os_variant: Mapped[str] = mapped_column(String(100))  # e.g., "Ubuntu 22.04", "Windows Server 2022"
-    base_image: Mapped[str] = mapped_column(String(255))  # Docker image or dockur config
+    base_image: Mapped[str] = mapped_column(String(255))  # Docker image, linux distro, or windows version
+
+    # VM implementation type
+    vm_type: Mapped[VMType] = mapped_column(default=VMType.CONTAINER)  # container, linux_vm, or windows_vm
+
+    # Linux VM-specific (for qemus/qemu)
+    linux_distro: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)  # ubuntu, kali, etc.
+    boot_mode: Mapped[Optional[str]] = mapped_column(String(10), nullable=True, default="uefi")
+    disk_type: Mapped[Optional[str]] = mapped_column(String(10), nullable=True, default="scsi")
 
     # Default specs
     default_cpu: Mapped[int] = mapped_column(Integer, default=2)

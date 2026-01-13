@@ -259,7 +259,7 @@ export const connectionsApi = {
 }
 
 // Cache API
-import type { CachedImage, ISOCacheStatus, GoldenImagesStatus, CacheStats, RecommendedImages, WindowsVersionsResponse, CustomISOList, CustomISODownloadResponse, CustomISOStatusResponse, ISOUploadResponse, WindowsISODownloadResponse, WindowsISODownloadStatus, AllSnapshotsStatus, SnapshotResponse } from '../types'
+import type { CachedImage, ISOCacheStatus, GoldenImagesStatus, CacheStats, RecommendedImages, WindowsVersionsResponse, LinuxVersionsResponse, LinuxISODownloadResponse, LinuxISODownloadStatus, CustomISOList, CustomISODownloadResponse, CustomISOStatusResponse, ISOUploadResponse, WindowsISODownloadResponse, WindowsISODownloadStatus, AllSnapshotsStatus, SnapshotResponse } from '../types'
 
 export const cacheApi = {
   // Docker images
@@ -271,6 +271,18 @@ export const cacheApi = {
   // Windows versions (auto-downloaded by dockur/windows)
   getWindowsVersions: () => api.get<WindowsVersionsResponse>('/cache/windows-versions'),
   getISOStatus: () => api.get<ISOCacheStatus>('/cache/isos'),
+
+  // Linux versions (auto-downloaded by qemus/qemu)
+  getLinuxVersions: () => api.get<LinuxVersionsResponse>('/cache/linux-versions'),
+  getLinuxISOStatus: () => api.get<ISOCacheStatus>('/cache/linux-isos'),
+
+  // Linux ISO Downloads
+  downloadLinuxISO: (version: string, url?: string) =>
+    api.post<LinuxISODownloadResponse>('/cache/linux-isos/download', { version, url }),
+  getLinuxISODownloadStatus: (version: string) =>
+    api.get<LinuxISODownloadStatus>(`/cache/linux-isos/download/${encodeURIComponent(version)}/status`),
+  deleteLinuxISO: (version: string) =>
+    api.delete(`/cache/linux-isos/${encodeURIComponent(version)}`),
 
   // Windows ISO Downloads
   downloadWindowsISO: (version: string, url?: string) =>

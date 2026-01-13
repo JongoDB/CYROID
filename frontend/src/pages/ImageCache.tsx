@@ -11,6 +11,9 @@ import type {
   WindowsVersion,
   WindowsISODownloadStatus,
   CustomISOList,
+  LinuxVersionsResponse,
+  LinuxVersion,
+  LinuxISODownloadStatus,
 } from '../types'
 import {
   HardDrive,
@@ -33,7 +36,7 @@ import {
 } from 'lucide-react'
 import clsx from 'clsx'
 
-type TabType = 'overview' | 'docker' | 'isos' | 'custom-isos' | 'snapshots'
+type TabType = 'overview' | 'docker' | 'isos' | 'linux-isos' | 'custom-isos' | 'snapshots'
 
 export default function ImageCache() {
   const { user } = useAuthStore()
@@ -44,6 +47,7 @@ export default function ImageCache() {
   const [allSnapshots, setAllSnapshots] = useState<AllSnapshotsStatus | null>(null)
   const [recommended, setRecommended] = useState<RecommendedImages | null>(null)
   const [windowsVersions, setWindowsVersions] = useState<WindowsVersionsResponse | null>(null)
+  const [linuxVersions, setLinuxVersions] = useState<LinuxVersionsResponse | null>(null)
   const [customISOs, setCustomISOs] = useState<CustomISOList | null>(null)
   const [loading, setLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
@@ -69,17 +73,20 @@ export default function ImageCache() {
 
   // Download state for tracking Windows ISO downloads
   const [downloadStatus, setDownloadStatus] = useState<Record<string, WindowsISODownloadStatus>>({})
+  // Download state for tracking Linux ISO downloads
+  const [linuxDownloadStatus, setLinuxDownloadStatus] = useState<Record<string, LinuxISODownloadStatus>>({})
 
   const loadData = async () => {
     setLoading(true)
     setError(null)
     try {
-      const [statsRes, imagesRes, snapshotsRes, recommendedRes, windowsRes, customISOsRes] = await Promise.all([
+      const [statsRes, imagesRes, snapshotsRes, recommendedRes, windowsRes, linuxRes, customISOsRes] = await Promise.all([
         cacheApi.getStats(),
         cacheApi.listImages(),
         cacheApi.getAllSnapshots(),
         cacheApi.getRecommendedImages(),
         cacheApi.getWindowsVersions(),
+        cacheApi.getLinuxVersions(),
         cacheApi.listCustomISOs(),
       ])
       setStats(statsRes.data)
@@ -87,6 +94,7 @@ export default function ImageCache() {
       setAllSnapshots(snapshotsRes.data)
       setRecommended(recommendedRes.data)
       setWindowsVersions(windowsRes.data)
+      setLinuxVersions(linuxRes.data)
       setCustomISOs(customISOsRes.data)
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to load cache data')
@@ -277,6 +285,88 @@ export default function ImageCache() {
     }
   }
 
+  const handleDownloadLinuxISO = async (version: LinuxVersion, customUrl?: string) => {
+    setActionLoading(`download-linux-${version.version}`)
+    setError(null)
+
+    try {
+      const res = await cacheApi.downloadLinuxISO(version.version, customUrl)
+
+      // Handle no direct download available
+      if (res.data.status === 'no_direct_download') {
+        setError(res.data.message || 'No direct download available for this distribution')
+        setActionLoading(null)
+        return
+      }
+
+      // Start polling for download status
+      setLinuxDownloadStatus(prev => ({
+        ...prev,
+        [version.version]: { status: 'downloading', version: version.version, progress_gb: 0 }
+      }))
+
+      // Poll for status
+      const pollInterval = setInterval(async () => {
+        try {
+          const statusRes = await cacheApi.getLinuxISODownloadStatus(version.version)
+          setLinuxDownloadStatus(prev => ({
+            ...prev,
+            [version.version]: statusRes.data
+          }))
+
+          if (statusRes.data.status === 'completed' || statusRes.data.status === 'failed') {
+            clearInterval(pollInterval)
+            setActionLoading(null)
+
+            if (statusRes.data.status === 'completed') {
+              setSuccess(`Downloaded ${version.name} ISO successfully!`)
+              await loadData()
+            } else if (statusRes.data.error) {
+              setError(`Download failed: ${statusRes.data.error}`)
+            }
+
+            // Clear download status after a delay
+            setTimeout(() => {
+              setLinuxDownloadStatus(prev => {
+                const newStatus = { ...prev }
+                delete newStatus[version.version]
+                return newStatus
+              })
+            }, 5000)
+          }
+        } catch (err) {
+          clearInterval(pollInterval)
+          setActionLoading(null)
+        }
+      }, 2000) // Poll every 2 seconds
+
+    } catch (err: any) {
+      const detail = err.response?.data?.detail
+      if (typeof detail === 'object' && detail.status === 'no_direct_download') {
+        setError(detail.message || 'No direct download available')
+      } else {
+        setError(typeof detail === 'string' ? detail : 'Failed to start download')
+      }
+      setActionLoading(null)
+    }
+  }
+
+  const handleDeleteLinuxISO = async (version: string) => {
+    if (!confirm(`Delete Linux ISO for ${version}?`)) return
+
+    setActionLoading(`delete-linux-${version}`)
+    setError(null)
+    try {
+      await cacheApi.deleteLinuxISO(version)
+      setSuccess(`Deleted Linux ISO: ${version}`)
+      await loadData()
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Failed to delete ISO')
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
   const handleUploadISO = async () => {
     if (!uploadFile) return
 
@@ -316,6 +406,7 @@ export default function ImageCache() {
     { id: 'overview' as const, name: 'Overview', icon: HardDrive },
     { id: 'docker' as const, name: 'Docker Images', icon: Server },
     { id: 'isos' as const, name: 'Windows ISOs', icon: Monitor },
+    { id: 'linux-isos' as const, name: 'Linux ISOs', icon: Terminal },
     { id: 'custom-isos' as const, name: 'Custom ISOs', icon: Download },
     { id: 'snapshots' as const, name: 'Snapshots', icon: Database },
   ]
@@ -677,6 +768,75 @@ export default function ImageCache() {
             onDelete={handleDeleteWindowsISO}
             onDownload={handleDownloadWindowsISO}
             downloadStatus={downloadStatus}
+            actionLoading={actionLoading}
+            isAdmin={isAdmin}
+          />
+        </div>
+      )}
+
+      {/* Linux ISOs Tab */}
+      {activeTab === 'linux-isos' && linuxVersions && (
+        <div className="space-y-6">
+          <div className="flex justify-between items-center">
+            <div>
+              <h3 className="text-lg font-medium text-gray-900">Linux Distributions (qemus/qemu)</h3>
+              <p className="text-sm text-gray-500">
+                {linuxVersions.cached_count} of {linuxVersions.total_count} distributions cached
+              </p>
+            </div>
+          </div>
+
+          {/* Cache Directory Info */}
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+            <div className="flex">
+              <Info className="h-5 w-5 text-blue-500 mt-0.5 mr-3" />
+              <div>
+                <h4 className="text-sm font-medium text-blue-800">Linux ISO Cache Directory</h4>
+                <p className="mt-1 text-sm text-blue-700">
+                  <code className="bg-blue-100 px-2 py-0.5 rounded">{linuxVersions.cache_dir}</code>
+                </p>
+                <p className="mt-2 text-sm text-blue-700">
+                  {linuxVersions.note}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Desktop Distributions */}
+          <LinuxVersionSection
+            title="Desktop"
+            versions={linuxVersions.desktop}
+            icon={Monitor}
+            colorClass="blue"
+            onDelete={handleDeleteLinuxISO}
+            onDownload={handleDownloadLinuxISO}
+            downloadStatus={linuxDownloadStatus}
+            actionLoading={actionLoading}
+            isAdmin={isAdmin}
+          />
+
+          {/* Security Distributions (for cyber range training) */}
+          <LinuxVersionSection
+            title="Security"
+            versions={linuxVersions.security}
+            icon={AlertCircle}
+            colorClass="red"
+            onDelete={handleDeleteLinuxISO}
+            onDownload={handleDownloadLinuxISO}
+            downloadStatus={linuxDownloadStatus}
+            actionLoading={actionLoading}
+            isAdmin={isAdmin}
+          />
+
+          {/* Server Distributions */}
+          <LinuxVersionSection
+            title="Server"
+            versions={linuxVersions.server}
+            icon={Server}
+            colorClass="purple"
+            onDelete={handleDeleteLinuxISO}
+            onDownload={handleDownloadLinuxISO}
+            downloadStatus={linuxDownloadStatus}
             actionLoading={actionLoading}
             isAdmin={isAdmin}
           />
@@ -1429,5 +1589,125 @@ function ImageCheckbox({ img, selected, setSelected }: {
         <Check className="h-4 w-4 text-green-600 ml-2 flex-shrink-0" />
       )}
     </label>
+  )
+}
+
+function LinuxVersionSection({ title, versions, icon: Icon, colorClass, onDelete, onDownload, downloadStatus, actionLoading, isAdmin }: {
+  title: string
+  versions: LinuxVersion[]
+  icon: typeof Monitor
+  colorClass: string
+  onDelete: (version: string) => Promise<void>
+  onDownload: (version: LinuxVersion, customUrl?: string) => Promise<void>
+  downloadStatus: Record<string, LinuxISODownloadStatus>
+  actionLoading: string | null
+  isAdmin: boolean
+}) {
+  const bgClass = `bg-${colorClass}-50`
+  const textClass = `text-${colorClass}-800`
+  const badgeBgClass = `bg-${colorClass}-100`
+  const badgeTextClass = `text-${colorClass}-800`
+
+  return (
+    <div className="bg-white shadow rounded-lg overflow-hidden">
+      <div className={clsx("px-6 py-4 border-b border-gray-200", bgClass)}>
+        <h4 className={clsx("text-sm font-medium flex items-center", textClass)}>
+          <Icon className="h-4 w-4 mr-2" />
+          {title} ({versions.length})
+        </h4>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 p-4">
+        {versions.map((v) => {
+          const status = downloadStatus[v.version]
+          const isDownloading = status?.status === 'downloading'
+          const isLoading = actionLoading === `download-linux-${v.version}` || actionLoading === `delete-linux-${v.version}`
+
+          return (
+            <div key={v.version} className={clsx(
+              "border rounded-lg p-4",
+              v.cached ? "bg-green-50 border-green-200" : "hover:bg-gray-50"
+            )}>
+              <div className="flex items-start justify-between">
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-gray-900 truncate">{v.name}</p>
+                  <div className="flex items-center gap-2 mt-1 flex-wrap">
+                    <code className={clsx("px-2 py-0.5 rounded text-xs font-mono", badgeBgClass, badgeTextClass)}>
+                      {v.version}
+                    </code>
+                    <span className="text-sm text-gray-500">{v.size_gb} GB</span>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-2">{v.description}</p>
+
+                  {/* Download progress */}
+                  {isDownloading && status && (
+                    <div className="mt-2">
+                      <div className="flex items-center text-xs text-blue-600">
+                        <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                        Downloading... {status.progress_gb?.toFixed(2) || 0} GB
+                        {status.progress_percent && ` (${status.progress_percent}%)`}
+                      </div>
+                      {status.total_bytes && (
+                        <div className="w-full bg-gray-200 rounded-full h-1.5 mt-1">
+                          <div
+                            className="bg-blue-600 h-1.5 rounded-full"
+                            style={{ width: `${status.progress_percent || 0}%` }}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Action buttons */}
+              <div className="mt-3 flex items-center gap-2">
+                {v.cached ? (
+                  <>
+                    <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                      <Check className="h-3 w-3 mr-1" />
+                      Cached
+                    </span>
+                    {isAdmin && (
+                      <button
+                        onClick={() => onDelete(v.version)}
+                        disabled={isLoading}
+                        className="p-1 text-red-600 hover:bg-red-50 rounded"
+                        title="Delete ISO"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    )}
+                  </>
+                ) : isDownloading ? (
+                  <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                    <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                    Downloading
+                  </span>
+                ) : v.download_url ? (
+                  isAdmin && (
+                    <button
+                      onClick={() => onDownload(v)}
+                      disabled={isLoading}
+                      className="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-blue-50 text-blue-700 hover:bg-blue-100"
+                    >
+                      {isLoading ? (
+                        <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                      ) : (
+                        <Download className="h-3 w-3 mr-1" />
+                      )}
+                      Download
+                    </button>
+                  )
+                ) : (
+                  <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600" title={v.download_note}>
+                    Auto-download
+                  </span>
+                )}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
   )
 }
