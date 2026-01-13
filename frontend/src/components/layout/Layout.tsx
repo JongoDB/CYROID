@@ -10,7 +10,9 @@ import {
   LogOut,
   Menu,
   X,
-  HardDrive
+  HardDrive,
+  Users,
+  Shield
 } from 'lucide-react'
 import { useState } from 'react'
 import clsx from 'clsx'
@@ -19,11 +21,19 @@ interface LayoutProps {
   children: ReactNode
 }
 
-const navigation = [
+interface NavItem {
+  name: string
+  href: string
+  icon: typeof LayoutDashboard
+  adminOnly?: boolean
+}
+
+const navigation: NavItem[] = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
   { name: 'Templates', href: '/templates', icon: Server },
   { name: 'Ranges', href: '/ranges', icon: Network },
   { name: 'Image Cache', href: '/cache', icon: HardDrive },
+  { name: 'Users', href: '/users', icon: Users, adminOnly: true },
   { name: 'Artifacts', href: '/artifacts', icon: FileBox },
 ]
 
@@ -32,6 +42,10 @@ export default function Layout({ children }: LayoutProps) {
   const navigate = useNavigate()
   const location = useLocation()
   const [sidebarOpen, setSidebarOpen] = useState(false)
+
+  // Filter navigation based on user roles (ABAC: check roles array)
+  const isAdmin = user?.roles?.includes('admin') ?? false
+  const filteredNavigation = navigation.filter(item => !item.adminOnly || isAdmin)
 
   const handleLogout = () => {
     logout()
@@ -60,7 +74,7 @@ export default function Layout({ children }: LayoutProps) {
           </button>
         </div>
         <nav className="mt-4 px-2 space-y-1">
-          {navigation.map((item) => (
+          {filteredNavigation.map((item) => (
             <Link
               key={item.name}
               to={item.href}
@@ -86,7 +100,7 @@ export default function Layout({ children }: LayoutProps) {
             <span className="text-xl font-bold text-white">CYROID</span>
           </div>
           <nav className="mt-4 flex-1 px-2 space-y-1">
-            {navigation.map((item) => (
+            {filteredNavigation.map((item) => (
               <Link
                 key={item.name}
                 to={item.href}
@@ -104,7 +118,23 @@ export default function Layout({ children }: LayoutProps) {
           </nav>
           <div className="px-2 pb-4">
             <div className="px-3 py-2 text-sm text-gray-400">
-              Signed in as <span className="font-medium text-white">{user?.username}</span>
+              <div>Signed in as <span className="font-medium text-white">{user?.username}</span></div>
+              {user?.roles && user.roles.length > 0 && (
+                <div className="mt-1 flex items-center flex-wrap gap-1">
+                  <Shield className="h-3 w-3 mr-1" />
+                  {user.roles.map((role) => (
+                    <span key={role} className="capitalize text-xs bg-gray-700 px-1.5 py-0.5 rounded">{role}</span>
+                  ))}
+                </div>
+              )}
+              {user?.tags && user.tags.length > 0 && (
+                <div className="mt-1 flex items-center flex-wrap gap-1">
+                  {user.tags.slice(0, 3).map((tag) => (
+                    <span key={tag} className="text-xs bg-gray-700 px-1.5 py-0.5 rounded text-gray-300">{tag}</span>
+                  ))}
+                  {user.tags.length > 3 && <span className="text-xs text-gray-500">+{user.tags.length - 3}</span>}
+                </div>
+              )}
             </div>
             <button
               onClick={handleLogout}

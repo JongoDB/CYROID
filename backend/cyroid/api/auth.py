@@ -1,8 +1,9 @@
 # backend/cyroid/api/auth.py
 from fastapi import APIRouter, HTTPException, status
+from sqlalchemy.orm import joinedload
 
 from cyroid.api.deps import DBSession, CurrentUser
-from cyroid.models.user import User
+from cyroid.models.user import User, UserRole, UserAttribute
 from cyroid.schemas.auth import LoginRequest, TokenResponse
 from cyroid.schemas.user import UserCreate, UserResponse
 from cyroid.utils.security import verify_password, get_password_hash, create_access_token
@@ -28,13 +29,29 @@ def register(user_data: UserCreate, db: DBSession):
             detail="Email already registered",
         )
 
+    # First user becomes admin automatically
+    user_count = db.query(User).count()
+    is_first_user = user_count == 0
+    role = UserRole.ADMIN if is_first_user else UserRole.ENGINEER
+
     # Create user
     user = User(
         username=user_data.username,
         email=user_data.email,
         hashed_password=get_password_hash(user_data.password),
+        role=role,  # Legacy field
     )
     db.add(user)
+    db.flush()  # Get user.id before adding attributes
+
+    # Add default role attribute (ABAC)
+    role_attr = UserAttribute(
+        user_id=user.id,
+        attribute_type='role',
+        attribute_value='admin' if is_first_user else 'engineer'
+    )
+    db.add(role_attr)
+
     db.commit()
     db.refresh(user)
 
@@ -43,7 +60,9 @@ def register(user_data: UserCreate, db: DBSession):
 
 @router.post("/login", response_model=TokenResponse)
 def login(credentials: LoginRequest, db: DBSession):
-    user = db.query(User).filter(User.username == credentials.username).first()
+    user = db.query(User).options(joinedload(User.attributes)).filter(
+        User.username == credentials.username
+    ).first()
 
     if not user or not verify_password(credentials.password, user.hashed_password):
         raise HTTPException(

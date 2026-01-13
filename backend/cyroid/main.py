@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from cyroid.config import get_settings
 from cyroid.api.auth import router as auth_router
+from cyroid.api.users import router as users_router
 from cyroid.api.templates import router as templates_router
 from cyroid.api.ranges import router as ranges_router
 from cyroid.api.networks import router as networks_router
@@ -34,6 +35,7 @@ app.add_middleware(
 
 # Include routers
 app.include_router(auth_router, prefix="/api/v1")
+app.include_router(users_router, prefix="/api/v1")
 app.include_router(templates_router, prefix="/api/v1")
 app.include_router(ranges_router, prefix="/api/v1")
 app.include_router(networks_router, prefix="/api/v1")

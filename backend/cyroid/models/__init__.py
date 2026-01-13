@@ -1,6 +1,7 @@
 # backend/cyroid/models/__init__.py
 from cyroid.models.base import Base
-from cyroid.models.user import User, UserRole
+from cyroid.models.user import User, UserRole, UserAttribute, AVAILABLE_ROLES
+from cyroid.models.resource_tag import ResourceTag
 from cyroid.models.template import VMTemplate, OSType
 from cyroid.models.range import Range, RangeStatus
 from cyroid.models.network import Network, IsolationLevel
@@ -14,7 +15,8 @@ from cyroid.models.inject import Inject, InjectStatus
 
 __all__ = [
     "Base",
-    "User", "UserRole",
+    "User", "UserRole", "UserAttribute", "AVAILABLE_ROLES",
+    "ResourceTag",
     "VMTemplate", "OSType",
     "Range", "RangeStatus",
     "Network", "IsolationLevel",

@@ -1,6 +1,6 @@
 # backend/cyroid/schemas/user.py
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 from uuid import UUID
 from pydantic import BaseModel, EmailStr
 
@@ -18,15 +18,62 @@ class UserCreate(UserBase):
 
 class UserUpdate(BaseModel):
     email: Optional[EmailStr] = None
-    role: Optional[UserRole] = None
     is_active: Optional[bool] = None
+
+
+# ABAC Attribute Schemas
+class UserAttributeCreate(BaseModel):
+    attribute_type: str  # 'role' or 'tag'
+    attribute_value: str
+
+
+class UserAttributeResponse(BaseModel):
+    id: UUID
+    attribute_type: str
+    attribute_value: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
 
 
 class UserResponse(UserBase):
     id: UUID
-    role: UserRole
+    role: UserRole  # Keep for backwards compatibility
+    roles: List[str]  # New: list of role attribute values
+    tags: List[str]  # New: list of tag attribute values
     is_active: bool
     created_at: datetime
 
     class Config:
         from_attributes = True
+
+
+class UserDetailResponse(UserResponse):
+    """Extended user response with full attribute details."""
+    attributes: List[UserAttributeResponse]
+
+    class Config:
+        from_attributes = True
+
+
+# Resource Tag Schemas
+class ResourceTagCreate(BaseModel):
+    tag: str
+
+
+class ResourceTagResponse(BaseModel):
+    id: UUID
+    resource_type: str
+    resource_id: UUID
+    tag: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ResourceTagsResponse(BaseModel):
+    resource_type: str
+    resource_id: UUID
+    tags: List[str]

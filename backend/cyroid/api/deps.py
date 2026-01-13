@@ -1,13 +1,15 @@
 # backend/cyroid/api/deps.py
-from typing import Annotated
+from typing import Annotated, List
 from uuid import UUID
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import or_
 
 from cyroid.database import get_db
 from cyroid.models.user import User, UserRole
+from cyroid.models.resource_tag import ResourceTag
 from cyroid.utils.security import decode_access_token
 
 security = HTTPBearer()
@@ -17,6 +19,7 @@ def get_current_user(
     credentials: Annotated[HTTPAuthorizationCredentials, Depends(security)],
     db: Annotated[Session, Depends(get_db)],
 ) -> User:
+    """Extract and validate user from JWT token, loading attributes."""
     token = credentials.credentials
     user_id = decode_access_token(token)
 
@@ -27,7 +30,8 @@ def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    user = db.query(User).filter(User.id == user_id).first()
+    # Eagerly load attributes to avoid N+1 queries
+    user = db.query(User).options(joinedload(User.attributes)).filter(User.id == user_id).first()
     if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -44,7 +48,9 @@ def get_current_user(
     return user
 
 
+# Legacy role-based check (for backwards compatibility)
 def require_role(*roles: UserRole):
+    """Legacy role checker using old role enum field."""
     def role_checker(current_user: Annotated[User, Depends(get_current_user)]) -> User:
         if current_user.role not in roles:
             raise HTTPException(
@@ -55,7 +61,151 @@ def require_role(*roles: UserRole):
     return role_checker
 
 
+# ABAC-based authorization checks
+def require_any_role(*role_values: str):
+    """
+    Require user to have at least one of the specified roles (ABAC).
+    Uses the new attributes system.
+    """
+    def checker(current_user: Annotated[User, Depends(get_current_user)]) -> User:
+        if not current_user.has_any_role(*role_values):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Required role: {', '.join(role_values)}",
+            )
+        return current_user
+    return checker
+
+
+def require_admin():
+    """Require user to have admin role."""
+    def checker(current_user: Annotated[User, Depends(get_current_user)]) -> User:
+        if not current_user.is_admin:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Administrator access required",
+            )
+        return current_user
+    return checker
+
+
+def require_any_tag(*tags: str):
+    """Require user to have at least one of the specified tags."""
+    def checker(current_user: Annotated[User, Depends(get_current_user)]) -> User:
+        if not current_user.has_any_tag(*tags):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Required tag: {', '.join(tags)}",
+            )
+        return current_user
+    return checker
+
+
+def filter_by_visibility(
+    query,
+    resource_type: str,
+    current_user: User,
+    db: Session,
+    model_class
+):
+    """
+    Filter query to only return resources visible to the user based on tags.
+
+    Visibility rules:
+    1. Admins can see ALL resources
+    2. Non-admin users see:
+       - Resources with NO tags (public)
+       - Resources with at least one matching tag
+
+    Args:
+        query: SQLAlchemy query object
+        resource_type: Type of resource ('range', 'template', 'artifact')
+        current_user: Current authenticated user
+        db: Database session
+        model_class: The SQLAlchemy model class (Range, VMTemplate, Artifact)
+
+    Returns:
+        Filtered query
+    """
+    # Admins see everything
+    if current_user.is_admin:
+        return query
+
+    user_tags = current_user.tags
+
+    # Get all resource IDs that have ANY tags
+    tagged_resource_ids = db.query(ResourceTag.resource_id).filter(
+        ResourceTag.resource_type == resource_type
+    ).distinct().subquery()
+
+    if not user_tags:
+        # User has no tags - only see untagged resources
+        return query.filter(~model_class.id.in_(tagged_resource_ids))
+
+    # User has tags - get resources matching their tags
+    matching_resource_ids = db.query(ResourceTag.resource_id).filter(
+        ResourceTag.resource_type == resource_type,
+        ResourceTag.tag.in_(user_tags)
+    ).distinct().subquery()
+
+    # Return: untagged resources OR resources matching user's tags
+    return query.filter(
+        or_(
+            ~model_class.id.in_(tagged_resource_ids),  # Untagged (public)
+            model_class.id.in_(matching_resource_ids)   # Matching tags
+        )
+    )
+
+
+def check_resource_access(
+    resource_type: str,
+    resource_id: UUID,
+    current_user: User,
+    db: Session,
+    owner_id: UUID = None
+) -> bool:
+    """
+    Check if user can access a specific resource.
+
+    Access granted if:
+    1. User is admin
+    2. User is the owner (if owner_id provided)
+    3. Resource has no tags (public)
+    4. User has at least one matching tag
+
+    Returns True if access is granted, raises HTTPException otherwise.
+    """
+    # Admins always have access
+    if current_user.is_admin:
+        return True
+
+    # Owners always have access to their own resources
+    if owner_id and owner_id == current_user.id:
+        return True
+
+    # Check resource tags
+    resource_tags = db.query(ResourceTag.tag).filter(
+        ResourceTag.resource_type == resource_type,
+        ResourceTag.resource_id == resource_id
+    ).all()
+
+    tag_values = [t.tag for t in resource_tags]
+
+    # No tags = public
+    if not tag_values:
+        return True
+
+    # Check for matching tags
+    if current_user.has_any_tag(*tag_values):
+        return True
+
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="You don't have access to this resource",
+    )
+
+
 # Type aliases for common dependencies
 CurrentUser = Annotated[User, Depends(get_current_user)]
-AdminUser = Annotated[User, Depends(require_role(UserRole.ADMIN))]
+AdminUser = Annotated[User, Depends(require_admin())]
 DBSession = Annotated[Session, Depends(get_db)]

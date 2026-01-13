@@ -1,6 +1,7 @@
 // frontend/src/pages/ImageCache.tsx
 import { useState, useEffect, useRef } from 'react'
 import { cacheApi } from '../services/api'
+import { useAuthStore } from '../stores/authStore'
 import type {
   CachedImage,
   AllSnapshotsStatus,
@@ -35,6 +36,8 @@ import clsx from 'clsx'
 type TabType = 'overview' | 'docker' | 'isos' | 'custom-isos' | 'snapshots'
 
 export default function ImageCache() {
+  const { user } = useAuthStore()
+  const isAdmin = user?.roles?.includes('admin') ?? false
   const [activeTab, setActiveTab] = useState<TabType>('overview')
   const [stats, setStats] = useState<CacheStats | null>(null)
   const [images, setImages] = useState<CachedImage[]>([])
@@ -480,6 +483,7 @@ export default function ImageCache() {
             </div>
           </div>
 
+          {isAdmin && (
           <div className="bg-white rounded-lg shadow p-6">
             <h3 className="text-lg font-medium text-gray-900 mb-4">Quick Actions</h3>
             <div className="flex flex-wrap gap-3">
@@ -506,6 +510,7 @@ export default function ImageCache() {
               </button>
             </div>
           </div>
+          )}
         </div>
       )}
 
@@ -514,13 +519,15 @@ export default function ImageCache() {
         <div className="space-y-6">
           <div className="flex justify-between items-center">
             <h3 className="text-lg font-medium text-gray-900">Cached Docker Images</h3>
-            <button
-              onClick={() => setShowCacheModal(true)}
-              className="inline-flex items-center px-3 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 text-sm"
-            >
-              <Plus className="h-4 w-4 mr-2" />
-              Cache Image
-            </button>
+            {isAdmin && (
+              <button
+                onClick={() => setShowCacheModal(true)}
+                className="inline-flex items-center px-3 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 text-sm"
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                Cache Image
+              </button>
+            )}
           </div>
 
           {/* Desktop Images (with GUI/VNC/RDP) */}
@@ -533,7 +540,7 @@ export default function ImageCache() {
                 </h4>
                 <p className="text-xs text-blue-600 mt-1">Images with GUI desktop environment (VNC/RDP/Web)</p>
               </div>
-              <ImageTable images={categorizedImages.desktop} onRemove={handleRemoveImage} actionLoading={actionLoading} />
+              <ImageTable images={categorizedImages.desktop} onRemove={handleRemoveImage} actionLoading={actionLoading} isAdmin={isAdmin} />
             </div>
           )}
 
@@ -547,7 +554,7 @@ export default function ImageCache() {
                 </h4>
                 <p className="text-xs text-cyan-600 mt-1">Base OS images for workstation use (CLI)</p>
               </div>
-              <ImageTable images={categorizedImages.workstation} onRemove={handleRemoveImage} actionLoading={actionLoading} />
+              <ImageTable images={categorizedImages.workstation} onRemove={handleRemoveImage} actionLoading={actionLoading} isAdmin={isAdmin} />
             </div>
           )}
 
@@ -560,7 +567,7 @@ export default function ImageCache() {
                   Server ({categorizedImages.server.length})
                 </h4>
               </div>
-              <ImageTable images={categorizedImages.server} onRemove={handleRemoveImage} actionLoading={actionLoading} />
+              <ImageTable images={categorizedImages.server} onRemove={handleRemoveImage} actionLoading={actionLoading} isAdmin={isAdmin} />
             </div>
           )}
 
@@ -573,7 +580,7 @@ export default function ImageCache() {
                   Services ({categorizedImages.services.length})
                 </h4>
               </div>
-              <ImageTable images={categorizedImages.services} onRemove={handleRemoveImage} actionLoading={actionLoading} />
+              <ImageTable images={categorizedImages.services} onRemove={handleRemoveImage} actionLoading={actionLoading} isAdmin={isAdmin} />
             </div>
           )}
 
@@ -586,7 +593,7 @@ export default function ImageCache() {
                   Other ({categorizedImages.other.length})
                 </h4>
               </div>
-              <ImageTable images={categorizedImages.other} onRemove={handleRemoveImage} actionLoading={actionLoading} />
+              <ImageTable images={categorizedImages.other} onRemove={handleRemoveImage} actionLoading={actionLoading} isAdmin={isAdmin} />
             </div>
           )}
 
@@ -608,13 +615,15 @@ export default function ImageCache() {
                 {windowsVersions.cached_count} of {windowsVersions.total_count} versions cached
               </p>
             </div>
-            <button
-              onClick={() => setShowUploadModal('windows')}
-              className="inline-flex items-center px-3 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 text-sm"
-            >
-              <Upload className="h-4 w-4 mr-2" />
-              Upload ISO
-            </button>
+            {isAdmin && (
+              <button
+                onClick={() => setShowUploadModal('windows')}
+                className="inline-flex items-center px-3 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 text-sm"
+              >
+                <Upload className="h-4 w-4 mr-2" />
+                Upload ISO
+              </button>
+            )}
           </div>
 
           {/* Cache Directory Info */}
@@ -643,6 +652,7 @@ export default function ImageCache() {
             onDownload={handleDownloadWindowsISO}
             downloadStatus={downloadStatus}
             actionLoading={actionLoading}
+            isAdmin={isAdmin}
           />
 
           {/* Server Versions */}
@@ -655,6 +665,7 @@ export default function ImageCache() {
             onDownload={handleDownloadWindowsISO}
             downloadStatus={downloadStatus}
             actionLoading={actionLoading}
+            isAdmin={isAdmin}
           />
 
           {/* Legacy Versions */}
@@ -667,6 +678,7 @@ export default function ImageCache() {
             onDownload={handleDownloadWindowsISO}
             downloadStatus={downloadStatus}
             actionLoading={actionLoading}
+            isAdmin={isAdmin}
           />
         </div>
       )}
@@ -681,22 +693,24 @@ export default function ImageCache() {
                 Download or upload custom ISOs from URLs for VM deployment
               </p>
             </div>
-            <div className="flex gap-2">
-              <button
-                onClick={() => setShowCustomISOModal(true)}
-                className="inline-flex items-center px-3 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 text-sm"
-              >
-                <Download className="h-4 w-4 mr-2" />
-                Download from URL
-              </button>
-              <button
-                onClick={() => setShowUploadModal('custom')}
-                className="inline-flex items-center px-3 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 text-sm"
-              >
-                <Upload className="h-4 w-4 mr-2" />
-                Upload ISO
-              </button>
-            </div>
+            {isAdmin && (
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setShowCustomISOModal(true)}
+                  className="inline-flex items-center px-3 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 text-sm"
+                >
+                  <Download className="h-4 w-4 mr-2" />
+                  Download from URL
+                </button>
+                <button
+                  onClick={() => setShowUploadModal('custom')}
+                  className="inline-flex items-center px-3 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 text-sm"
+                >
+                  <Upload className="h-4 w-4 mr-2" />
+                  Upload ISO
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Cache Directory Info */}
@@ -751,17 +765,19 @@ export default function ImageCache() {
                         ) : 'Unknown'}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-right">
-                        <button
-                          onClick={() => handleDeleteCustomISO(iso.filename, iso.name)}
-                          disabled={actionLoading === `custom-iso-${iso.filename}`}
-                          className="text-red-600 hover:text-red-900 disabled:opacity-50"
-                        >
-                          {actionLoading === `custom-iso-${iso.filename}` ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <Trash2 className="h-4 w-4" />
-                          )}
-                        </button>
+                        {isAdmin && (
+                          <button
+                            onClick={() => handleDeleteCustomISO(iso.filename, iso.name)}
+                            disabled={actionLoading === `custom-iso-${iso.filename}`}
+                            className="text-red-600 hover:text-red-900 disabled:opacity-50"
+                          >
+                            {actionLoading === `custom-iso-${iso.filename}` ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Trash2 className="h-4 w-4" />
+                            )}
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -836,18 +852,20 @@ export default function ImageCache() {
                         {golden.path}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-right">
-                        <button
-                          onClick={() => handleDeleteSnapshot('windows', golden.name)}
-                          disabled={actionLoading === `snapshot-windows-${golden.name}`}
-                          className="text-red-600 hover:text-red-900 disabled:opacity-50"
-                          title="Delete snapshot"
-                        >
-                          {actionLoading === `snapshot-windows-${golden.name}` ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <Trash2 className="h-4 w-4" />
-                          )}
-                        </button>
+                        {isAdmin && (
+                          <button
+                            onClick={() => handleDeleteSnapshot('windows', golden.name)}
+                            disabled={actionLoading === `snapshot-windows-${golden.name}`}
+                            className="text-red-600 hover:text-red-900 disabled:opacity-50"
+                            title="Delete snapshot"
+                          >
+                            {actionLoading === `snapshot-windows-${golden.name}` ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Trash2 className="h-4 w-4" />
+                            )}
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -903,18 +921,20 @@ export default function ImageCache() {
                           {snapshot.created ? new Date(snapshot.created).toLocaleDateString() : 'Unknown'}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-right">
-                          <button
-                            onClick={() => handleDeleteSnapshot('docker', snapshotName)}
-                            disabled={actionLoading === `snapshot-docker-${snapshotName}`}
-                            className="text-red-600 hover:text-red-900 disabled:opacity-50"
-                            title="Delete snapshot"
-                          >
-                            {actionLoading === `snapshot-docker-${snapshotName}` ? (
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                            ) : (
-                              <Trash2 className="h-4 w-4" />
-                            )}
-                          </button>
+                          {isAdmin && (
+                            <button
+                              onClick={() => handleDeleteSnapshot('docker', snapshotName)}
+                              disabled={actionLoading === `snapshot-docker-${snapshotName}`}
+                              className="text-red-600 hover:text-red-900 disabled:opacity-50"
+                              title="Delete snapshot"
+                            >
+                              {actionLoading === `snapshot-docker-${snapshotName}` ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <Trash2 className="h-4 w-4" />
+                              )}
+                            </button>
+                          )}
                         </td>
                       </tr>
                     )
@@ -1211,10 +1231,11 @@ export default function ImageCache() {
 
 // Helper Components
 
-function ImageTable({ images, onRemove, actionLoading }: {
+function ImageTable({ images, onRemove, actionLoading, isAdmin }: {
   images: CachedImage[]
   onRemove: (id: string, tag: string) => void
   actionLoading: string | null
+  isAdmin: boolean
 }) {
   return (
     <table className="min-w-full divide-y divide-gray-200">
@@ -1223,7 +1244,7 @@ function ImageTable({ images, onRemove, actionLoading }: {
           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Image</th>
           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Size</th>
           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Created</th>
-          <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
+          {isAdmin && <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>}
         </tr>
       </thead>
       <tbody className="bg-white divide-y divide-gray-200">
@@ -1237,15 +1258,17 @@ function ImageTable({ images, onRemove, actionLoading }: {
             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
               {image.created ? new Date(image.created).toLocaleDateString() : 'Unknown'}
             </td>
-            <td className="px-6 py-4 whitespace-nowrap text-right">
-              <button
-                onClick={() => onRemove(image.id, image.tags[0] || image.id)}
-                disabled={actionLoading === image.id}
-                className="text-red-600 hover:text-red-900 disabled:opacity-50"
-              >
-                {actionLoading === image.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
-              </button>
-            </td>
+            {isAdmin && (
+              <td className="px-6 py-4 whitespace-nowrap text-right">
+                <button
+                  onClick={() => onRemove(image.id, image.tags[0] || image.id)}
+                  disabled={actionLoading === image.id}
+                  className="text-red-600 hover:text-red-900 disabled:opacity-50"
+                >
+                  {actionLoading === image.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                </button>
+              </td>
+            )}
           </tr>
         ))}
       </tbody>
@@ -1253,7 +1276,7 @@ function ImageTable({ images, onRemove, actionLoading }: {
   )
 }
 
-function WindowsVersionSection({ title, versions, icon: Icon, colorClass, onDelete, onDownload, downloadStatus, actionLoading }: {
+function WindowsVersionSection({ title, versions, icon: Icon, colorClass, onDelete, onDownload, downloadStatus, actionLoading, isAdmin }: {
   title: string
   versions: WindowsVersion[]
   icon: typeof Monitor
@@ -1262,6 +1285,7 @@ function WindowsVersionSection({ title, versions, icon: Icon, colorClass, onDele
   onDownload: (version: WindowsVersion) => void
   downloadStatus: Record<string, WindowsISODownloadStatus>
   actionLoading: string | null
+  isAdmin: boolean
 }) {
   const bgClass = `bg-${colorClass}-50`
   const textClass = `text-${colorClass}-800`
@@ -1314,20 +1338,22 @@ function WindowsVersionSection({ title, versions, icon: Icon, colorClass, onDele
                         <Check className="h-3 w-3 mr-1" />
                         Cached
                       </span>
-                      <button
-                        onClick={() => onDelete(v.version, v.name)}
-                        disabled={actionLoading === `windows-iso-${v.version}`}
-                        className="text-red-600 hover:text-red-900 disabled:opacity-50 p-1"
-                        title="Delete cached ISO"
-                      >
-                        {actionLoading === `windows-iso-${v.version}` ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <Trash2 className="h-4 w-4" />
-                        )}
-                      </button>
+                      {isAdmin && (
+                        <button
+                          onClick={() => onDelete(v.version, v.name)}
+                          disabled={actionLoading === `windows-iso-${v.version}`}
+                          className="text-red-600 hover:text-red-900 disabled:opacity-50 p-1"
+                          title="Delete cached ISO"
+                        >
+                          {actionLoading === `windows-iso-${v.version}` ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Trash2 className="h-4 w-4" />
+                          )}
+                        </button>
+                      )}
                     </>
-                  ) : (
+                  ) : isAdmin ? (
                     <button
                       onClick={() => onDownload(v)}
                       disabled={actionLoading === `download-${v.version}`}
@@ -1343,6 +1369,8 @@ function WindowsVersionSection({ title, versions, icon: Icon, colorClass, onDele
                         </>
                       )}
                     </button>
+                  ) : (
+                    <span className="text-xs text-gray-400">Not cached</span>
                   )}
                 </div>
               </div>

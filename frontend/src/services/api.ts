@@ -52,9 +52,23 @@ export interface User {
   id: string
   username: string
   email: string
-  role: string
+  role: string           // Legacy single role
+  roles: string[]        // ABAC: multiple roles
+  tags: string[]         // ABAC: user tags
   is_active: boolean
   created_at: string
+}
+
+export interface UserAttribute {
+  id: string
+  attribute_type: 'role' | 'tag'
+  attribute_value: string
+  created_at: string
+}
+
+export interface UserAttributeCreate {
+  attribute_type: 'role' | 'tag'
+  attribute_value: string
 }
 
 export const authApi = {
@@ -66,6 +80,36 @@ export const authApi = {
 
   me: () =>
     api.get<User>('/auth/me'),
+}
+
+// User Management API (admin-only)
+export type UserRole = 'admin' | 'engineer' | 'facilitator' | 'evaluator'
+
+export interface UserUpdate {
+  email?: string
+  is_active?: boolean
+}
+
+export interface RoleInfo {
+  value: UserRole
+  label: string
+  description: string
+}
+
+export const usersApi = {
+  list: () => api.get<User[]>('/users'),
+  get: (userId: string) => api.get<User>(`/users/${userId}`),
+  update: (userId: string, data: UserUpdate) => api.patch<User>(`/users/${userId}`, data),
+  delete: (userId: string) => api.delete(`/users/${userId}`),
+  getAvailableRoles: () => api.get<RoleInfo[]>('/users/roles/available'),
+  getAllTags: () => api.get<string[]>('/users/tags/all'),
+
+  // Attribute management
+  getAttributes: (userId: string) => api.get<UserAttribute[]>(`/users/${userId}/attributes`),
+  addAttribute: (userId: string, data: UserAttributeCreate) =>
+    api.post<UserAttribute>(`/users/${userId}/attributes`, data),
+  removeAttribute: (userId: string, attributeId: string) =>
+    api.delete(`/users/${userId}/attributes/${attributeId}`),
 }
 
 // Templates API

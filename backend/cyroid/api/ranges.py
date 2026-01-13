@@ -5,15 +5,17 @@ import logging
 
 from fastapi import APIRouter, HTTPException, status
 
-from cyroid.api.deps import DBSession, CurrentUser
+from cyroid.api.deps import DBSession, CurrentUser, filter_by_visibility, check_resource_access
 from cyroid.models.range import Range, RangeStatus
 from cyroid.models.network import Network, IsolationLevel
 from cyroid.models.vm import VM, VMStatus
 from cyroid.models.template import VMTemplate
+from cyroid.models.resource_tag import ResourceTag
 from cyroid.schemas.range import (
     RangeCreate, RangeUpdate, RangeResponse, RangeDetailResponse,
     RangeTemplateExport, RangeTemplateImport, NetworkTemplateData, VMTemplateData
 )
+from cyroid.schemas.user import ResourceTagCreate, ResourceTagsResponse
 
 logger = logging.getLogger(__name__)
 
@@ -28,8 +30,35 @@ def get_docker_service():
 
 @router.get("", response_model=List[RangeResponse])
 def list_ranges(db: DBSession, current_user: CurrentUser):
-    ranges = db.query(Range).filter(Range.created_by == current_user.id).all()
-    return ranges
+    """
+    List ranges visible to the current user.
+
+    Visibility rules:
+    - Admins see ALL ranges
+    - Users see ranges they own
+    - Users see ranges with matching tags (if they have tags)
+    - Users see untagged ranges (public)
+    """
+    # Start with user's own ranges
+    query = db.query(Range).filter(Range.created_by == current_user.id)
+
+    if current_user.is_admin:
+        # Admins see all ranges
+        query = db.query(Range)
+    else:
+        # Non-admins: own ranges + visibility-filtered shared ranges
+        from sqlalchemy import or_
+        shared_query = db.query(Range).filter(Range.created_by != current_user.id)
+        shared_query = filter_by_visibility(shared_query, 'range', current_user, db, Range)
+
+        query = db.query(Range).filter(
+            or_(
+                Range.created_by == current_user.id,
+                Range.id.in_(shared_query.with_entities(Range.id).subquery())
+            )
+        )
+
+    return query.all()
 
 
 @router.post("", response_model=RangeResponse, status_code=status.HTTP_201_CREATED)
@@ -522,3 +551,91 @@ def clone_range(
 
     db.refresh(cloned_range)
     return cloned_range
+
+
+# ============================================================================
+# Resource Tag Endpoints (ABAC Visibility Control)
+# ============================================================================
+
+@router.get("/{range_id}/tags", response_model=ResourceTagsResponse)
+def get_range_tags(range_id: UUID, db: DBSession, current_user: CurrentUser):
+    """Get visibility tags for a range."""
+    range_obj = db.query(Range).filter(Range.id == range_id).first()
+    if not range_obj:
+        raise HTTPException(status_code=404, detail="Range not found")
+
+    # Check access
+    check_resource_access('range', range_id, current_user, db, range_obj.created_by)
+
+    tags = db.query(ResourceTag.tag).filter(
+        ResourceTag.resource_type == 'range',
+        ResourceTag.resource_id == range_id
+    ).all()
+
+    return ResourceTagsResponse(
+        resource_type='range',
+        resource_id=range_id,
+        tags=[t[0] for t in tags]
+    )
+
+
+@router.post("/{range_id}/tags", status_code=status.HTTP_201_CREATED)
+def add_range_tag(range_id: UUID, tag_data: ResourceTagCreate, db: DBSession, current_user: CurrentUser):
+    """
+    Add a visibility tag to a range.
+    Only the owner or an admin can add tags.
+    """
+    range_obj = db.query(Range).filter(Range.id == range_id).first()
+    if not range_obj:
+        raise HTTPException(status_code=404, detail="Range not found")
+
+    # Only owner or admin can add tags
+    if range_obj.created_by != current_user.id and not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Only the owner or admin can add tags")
+
+    # Check if tag already exists
+    existing = db.query(ResourceTag).filter(
+        ResourceTag.resource_type == 'range',
+        ResourceTag.resource_id == range_id,
+        ResourceTag.tag == tag_data.tag
+    ).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Tag already exists on this range")
+
+    tag = ResourceTag(
+        resource_type='range',
+        resource_id=range_id,
+        tag=tag_data.tag
+    )
+    db.add(tag)
+    db.commit()
+
+    return {"message": f"Tag '{tag_data.tag}' added to range"}
+
+
+@router.delete("/{range_id}/tags/{tag}")
+def remove_range_tag(range_id: UUID, tag: str, db: DBSession, current_user: CurrentUser):
+    """
+    Remove a visibility tag from a range.
+    Only the owner or an admin can remove tags.
+    """
+    range_obj = db.query(Range).filter(Range.id == range_id).first()
+    if not range_obj:
+        raise HTTPException(status_code=404, detail="Range not found")
+
+    # Only owner or admin can remove tags
+    if range_obj.created_by != current_user.id and not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Only the owner or admin can remove tags")
+
+    tag_obj = db.query(ResourceTag).filter(
+        ResourceTag.resource_type == 'range',
+        ResourceTag.resource_id == range_id,
+        ResourceTag.tag == tag
+    ).first()
+    if not tag_obj:
+        raise HTTPException(status_code=404, detail="Tag not found on this range")
+
+    db.delete(tag_obj)
+    db.commit()
+
+    return {"message": f"Tag '{tag}' removed from range"}
