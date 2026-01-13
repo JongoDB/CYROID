@@ -7,6 +7,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, HTTPException, status
 from sqlalchemy.orm import Session
+import websockets
 
 from cyroid.database import get_db
 from cyroid.models.vm import VM
@@ -15,6 +16,9 @@ from cyroid.utils.security import decode_access_token
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["WebSocket"])
+
+# VNC port for desktop VMs (noVNC websockify)
+VNC_WEBSOCKET_PORT = 8006
 
 
 async def get_current_user_ws(websocket: WebSocket, token: str, db: Session):
@@ -135,6 +139,132 @@ async def vm_console(
         await websocket.close(code=4000, reason=str(e))
     finally:
         db.close()
+
+
+@router.websocket("/ws/vnc/{vm_id}")
+async def vm_vnc_console(
+    websocket: WebSocket,
+    vm_id: UUID,
+    token: str = Query(...),
+):
+    """
+    WebSocket proxy for VNC console access (noVNC).
+    Proxies WebSocket traffic to the VM's noVNC server for graphical desktop access.
+    Used for Windows VMs and Linux VMs with desktop environments.
+    """
+    await websocket.accept()
+
+    db = next(get_db())
+    vnc_ws = None
+
+    try:
+        # Authenticate
+        user = await get_current_user_ws(websocket, token, db)
+        if not user:
+            return
+
+        # Get VM
+        vm = db.query(VM).filter(VM.id == vm_id).first()
+        if not vm:
+            await websocket.close(code=4004, reason="VM not found")
+            return
+
+        if not vm.container_id:
+            await websocket.close(code=4000, reason="VM has no running container")
+            return
+
+        # Get container IP address
+        from cyroid.services.docker_service import get_docker_service
+        docker = get_docker_service()
+
+        try:
+            container = docker.client.containers.get(vm.container_id)
+            # Get IP from the first network the container is attached to
+            networks = container.attrs.get("NetworkSettings", {}).get("Networks", {})
+            container_ip = None
+            for network_name, network_config in networks.items():
+                container_ip = network_config.get("IPAddress")
+                if container_ip:
+                    break
+
+            if not container_ip:
+                await websocket.close(code=4000, reason="Could not determine container IP")
+                return
+
+        except Exception as e:
+            logger.error(f"Failed to get container info for VM {vm_id}: {e}")
+            await websocket.close(code=4000, reason="Container not found")
+            return
+
+        # Connect to the VNC WebSocket server
+        vnc_url = f"ws://{container_ip}:{VNC_WEBSOCKET_PORT}/websockify"
+        logger.info(f"Connecting to VNC at {vnc_url} for VM {vm_id}")
+
+        try:
+            vnc_ws = await websockets.connect(
+                vnc_url,
+                subprotocols=["binary"],
+                ping_interval=None,  # Disable ping to avoid conflicts with noVNC
+            )
+        except Exception as e:
+            logger.error(f"Failed to connect to VNC server for VM {vm_id}: {e}")
+            await websocket.close(code=4000, reason=f"VNC connection failed: {str(e)}")
+            return
+
+        logger.info(f"VNC proxy established for VM {vm_id}")
+
+        async def client_to_vnc():
+            """Forward messages from client to VNC server."""
+            try:
+                while True:
+                    data = await websocket.receive_bytes()
+                    await vnc_ws.send(data)
+            except WebSocketDisconnect:
+                logger.info(f"Client disconnected from VNC proxy for VM {vm_id}")
+            except Exception as e:
+                logger.debug(f"Client->VNC error for VM {vm_id}: {e}")
+
+        async def vnc_to_client():
+            """Forward messages from VNC server to client."""
+            try:
+                async for message in vnc_ws:
+                    if isinstance(message, bytes):
+                        await websocket.send_bytes(message)
+                    else:
+                        await websocket.send_text(message)
+            except websockets.exceptions.ConnectionClosed:
+                logger.info(f"VNC server closed connection for VM {vm_id}")
+            except Exception as e:
+                logger.debug(f"VNC->Client error for VM {vm_id}: {e}")
+
+        # Run both proxy tasks concurrently
+        done, pending = await asyncio.wait(
+            [
+                asyncio.create_task(client_to_vnc()),
+                asyncio.create_task(vnc_to_client()),
+            ],
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+
+        # Cancel pending tasks
+        for task in pending:
+            task.cancel()
+
+    except WebSocketDisconnect:
+        logger.info(f"VNC WebSocket disconnected for VM {vm_id}")
+    except Exception as e:
+        logger.error(f"VNC WebSocket error for VM {vm_id}: {e}")
+        try:
+            await websocket.close(code=4000, reason=str(e))
+        except Exception:
+            pass
+    finally:
+        db.close()
+        if vnc_ws:
+            try:
+                await vnc_ws.close()
+            except Exception:
+                pass
 
 
 @router.websocket("/ws/status/{range_id}")

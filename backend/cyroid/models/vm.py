@@ -2,7 +2,7 @@
 from enum import Enum
 from typing import Optional, List
 from uuid import UUID
-from sqlalchemy import String, Integer, ForeignKey, JSON
+from sqlalchemy import String, Integer, ForeignKey, JSON, Boolean
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from cyroid.models.base import Base, TimestampMixin, UUIDMixin
@@ -45,6 +45,26 @@ class VM(Base, UUIDMixin, TimestampMixin):
     iso_path: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
     # Display type for Windows VMs: desktop (VNC/web console) or server (RDP only)
     display_type: Mapped[Optional[str]] = mapped_column(String(20), nullable=True, default="desktop")
+
+    # Extended dockur/windows configuration
+    # Network configuration
+    use_dhcp: Mapped[bool] = mapped_column(Boolean, default=False)  # DHCP vs static IP
+
+    # Additional storage (shows as D:, E: drives in Windows)
+    disk2_gb: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    disk3_gb: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+    # Shared folders (bind mounts)
+    enable_shared_folder: Mapped[bool] = mapped_column(Boolean, default=False)  # Per-VM /shared
+    enable_global_shared: Mapped[bool] = mapped_column(Boolean, default=False)  # Global /global (read-only)
+
+    # Localization
+    language: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)  # e.g., "French", "German"
+    keyboard: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)  # e.g., "en-US", "de-DE"
+    region: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)    # e.g., "en-US", "fr-FR"
+
+    # Installation mode
+    manual_install: Mapped[bool] = mapped_column(Boolean, default=False)  # Interactive install mode
 
     # Position in visual builder (for UI)
     position_x: Mapped[int] = mapped_column(Integer, default=0)

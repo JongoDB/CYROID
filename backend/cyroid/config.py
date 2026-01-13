@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     iso_cache_dir: str = "/data/cyroid/iso-cache"
     template_storage_dir: str = "/data/cyroid/template-storage"
 
+    # VM Storage
+    vm_storage_dir: str = "/data/cyroid/vm-storage"
+    global_shared_dir: str = "/data/cyroid/shared"
+
     class Config:
         env_file = ".env"
 

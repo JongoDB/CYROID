@@ -30,6 +30,26 @@ class VMCreate(VMBase):
     iso_path: Optional[str] = Field(None, max_length=512, description="Local ISO path for bind mount")
     display_type: Optional[str] = Field("desktop", description="Display type: 'desktop' (VNC/web console) or 'server' (RDP only)")
 
+    # Extended dockur/windows configuration
+    # Network mode
+    use_dhcp: bool = Field(default=False, description="Use DHCP instead of static IP assignment")
+
+    # Additional storage (appears as D:, E: drives in Windows)
+    disk2_gb: Optional[int] = Field(None, ge=1, le=1000, description="Second disk size in GB")
+    disk3_gb: Optional[int] = Field(None, ge=1, le=1000, description="Third disk size in GB")
+
+    # Shared folders
+    enable_shared_folder: bool = Field(default=False, description="Enable per-VM shared folder (/shared)")
+    enable_global_shared: bool = Field(default=False, description="Mount global shared folder (/global, read-only)")
+
+    # Localization
+    language: Optional[str] = Field(None, max_length=50, description="Windows language (e.g., French, German)")
+    keyboard: Optional[str] = Field(None, max_length=20, description="Keyboard layout (e.g., en-US, de-DE)")
+    region: Optional[str] = Field(None, max_length=20, description="Regional settings (e.g., en-US, fr-FR)")
+
+    # Installation mode
+    manual_install: bool = Field(default=False, description="Enable manual/interactive installation mode")
+
 
 class VMUpdate(BaseModel):
     hostname: Optional[str] = Field(None, min_length=1, max_length=63)
@@ -46,6 +66,16 @@ class VMUpdate(BaseModel):
     iso_url: Optional[str] = Field(None, max_length=512)
     iso_path: Optional[str] = Field(None, max_length=512)
     display_type: Optional[str] = Field(None, max_length=20)
+    # Extended dockur/windows configuration
+    use_dhcp: Optional[bool] = None
+    disk2_gb: Optional[int] = Field(None, ge=1, le=1000)
+    disk3_gb: Optional[int] = Field(None, ge=1, le=1000)
+    enable_shared_folder: Optional[bool] = None
+    enable_global_shared: Optional[bool] = None
+    language: Optional[str] = Field(None, max_length=50)
+    keyboard: Optional[str] = Field(None, max_length=20)
+    region: Optional[str] = Field(None, max_length=20)
+    manual_install: Optional[bool] = None
 
 
 class VMResponse(VMBase):
@@ -62,6 +92,16 @@ class VMResponse(VMBase):
     iso_url: Optional[str] = None
     iso_path: Optional[str] = None
     display_type: Optional[str] = "desktop"
+    # Extended dockur/windows configuration
+    use_dhcp: bool = False
+    disk2_gb: Optional[int] = None
+    disk3_gb: Optional[int] = None
+    enable_shared_folder: bool = False
+    enable_global_shared: bool = False
+    language: Optional[str] = None
+    keyboard: Optional[str] = None
+    region: Optional[str] = None
+    manual_install: bool = False
     created_at: datetime
     updated_at: datetime
 

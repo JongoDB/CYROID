@@ -113,7 +113,7 @@ export const usersApi = {
 }
 
 // Templates API
-import type { VMTemplate, Range, Network, VM, EventLog, EventLogList, VMStatsResponse } from '../types'
+import type { VMTemplate, Range, Network, VM, EventLog, EventLogList, VMStatsResponse, ResourceTagsResponse } from '../types'
 
 export interface VMTemplateCreate {
   name: string
@@ -135,6 +135,10 @@ export const templatesApi = {
   update: (id: string, data: Partial<VMTemplateCreate>) => api.put<VMTemplate>(`/templates/${id}`, data),
   delete: (id: string) => api.delete(`/templates/${id}`),
   clone: (id: string) => api.post<VMTemplate>(`/templates/${id}/clone`),
+  // Visibility tag management (ABAC)
+  getTags: (id: string) => api.get<ResourceTagsResponse>(`/templates/${id}/tags`),
+  addTag: (id: string, tag: string) => api.post(`/templates/${id}/tags`, { tag }),
+  removeTag: (id: string, tag: string) => api.delete(`/templates/${id}/tags/${encodeURIComponent(tag)}`),
 }
 
 // Ranges API
@@ -193,6 +197,16 @@ export interface VMCreate {
   iso_url?: string
   iso_path?: string
   display_type?: 'desktop' | 'server'
+  // Extended dockur/windows configuration
+  use_dhcp?: boolean
+  disk2_gb?: number | null
+  disk3_gb?: number | null
+  enable_shared_folder?: boolean
+  enable_global_shared?: boolean
+  language?: string | null
+  keyboard?: string | null
+  region?: string | null
+  manual_install?: boolean
 }
 
 export const vmsApi = {

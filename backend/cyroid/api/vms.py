@@ -205,9 +205,10 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
 
                 # Setup VM-specific storage path
                 vm_storage_path = os.path.join(
-                    settings.template_storage_dir,
-                    "vm-storage",
-                    str(vm.id)
+                    settings.vm_storage_dir,
+                    str(vm.range_id),
+                    str(vm.id),
+                    "storage"
                 )
 
                 # Determine Windows version (VM setting takes priority over template)
@@ -217,6 +218,32 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
                 # Determine ISO path (VM setting takes priority)
                 iso_path = vm.iso_path or (template.cached_iso_path if hasattr(template, 'cached_iso_path') and template.cached_iso_path else None)
                 clone_from = template.golden_image_path if hasattr(template, 'golden_image_path') and template.golden_image_path else None
+
+                # Setup per-VM shared folder path
+                shared_folder_path = None
+                if vm.enable_shared_folder:
+                    shared_folder_path = os.path.join(
+                        settings.vm_storage_dir,
+                        str(vm.range_id),
+                        str(vm.id),
+                        "shared"
+                    )
+
+                # Setup OEM directory for post-install script (from template config_script)
+                oem_script_path = None
+                if template.config_script:
+                    oem_dir = os.path.join(
+                        settings.vm_storage_dir,
+                        str(vm.range_id),
+                        str(vm.id),
+                        "oem"
+                    )
+                    os.makedirs(oem_dir, exist_ok=True)
+                    install_bat = os.path.join(oem_dir, "install.bat")
+                    with open(install_bat, "w") as f:
+                        f.write(template.config_script)
+                    oem_script_path = oem_dir
+                    logger.info(f"Created OEM install.bat for VM {vm.id}")
 
                 container_id = docker.create_windows_container(
                     name=f"cyroid-{vm.hostname}-{str(vm.id)[:8]}",
@@ -234,6 +261,19 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
                     username=vm.windows_username,
                     password=vm.windows_password,
                     display_type=vm.display_type or "desktop",
+                    # Extended dockur/windows configuration
+                    use_dhcp=vm.use_dhcp,
+                    disk2_gb=vm.disk2_gb,
+                    disk3_gb=vm.disk3_gb,
+                    enable_shared_folder=vm.enable_shared_folder,
+                    shared_folder_path=shared_folder_path,
+                    enable_global_shared=vm.enable_global_shared,
+                    global_shared_path=settings.global_shared_dir,
+                    language=vm.language,
+                    keyboard=vm.keyboard,
+                    region=vm.region,
+                    manual_install=vm.manual_install,
+                    oem_script_path=oem_script_path,
                 )
             else:
                 container_id = docker.create_container(
@@ -366,6 +406,66 @@ def get_vm_stats(vm_id: UUID, db: DBSession, current_user: CurrentUser):
     except Exception as e:
         logger.warning(f"Failed to get stats for VM {vm_id}: {e}")
         return {"vm_id": str(vm.id), "status": vm.status.value, "stats": None}
+
+
+@router.get("/{vm_id}/vnc-info")
+def get_vm_vnc_info(vm_id: UUID, db: DBSession, current_user: CurrentUser):
+    """Get VNC console connection info for a VM"""
+    vm = db.query(VM).filter(VM.id == vm_id).first()
+    if not vm:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="VM not found",
+        )
+
+    if vm.status != VMStatus.RUNNING:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"VM is not running (status: {vm.status.value})",
+        )
+
+    if not vm.container_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="VM has no running container",
+        )
+
+    try:
+        docker = get_docker_service()
+        container = docker.client.containers.get(vm.container_id)
+
+        # Get IP from the first network the container is attached to
+        networks = container.attrs.get("NetworkSettings", {}).get("Networks", {})
+        container_ip = None
+        for network_name, network_config in networks.items():
+            container_ip = network_config.get("IPAddress")
+            if container_ip:
+                break
+
+        if not container_ip:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Could not determine container IP",
+            )
+
+        # VNC web console port (noVNC)
+        vnc_port = 8006
+
+        return {
+            "vm_id": str(vm.id),
+            "hostname": vm.hostname,
+            "ip": container_ip,
+            "port": vnc_port,
+            "url": f"http://{container_ip}:{vnc_port}",
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get VNC info for VM {vm_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get VNC info: {str(e)}",
+        )
 
 
 @router.post("/{vm_id}/restart", response_model=VMResponse)

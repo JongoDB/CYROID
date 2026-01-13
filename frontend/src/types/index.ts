@@ -9,6 +9,13 @@ export interface User {
   created_at: string
 }
 
+// Resource tags for ABAC visibility control
+export interface ResourceTagsResponse {
+  resource_type: string
+  resource_id: string
+  tags: string[]
+}
+
 export interface VMTemplate {
   id: string
   name: string
@@ -69,6 +76,16 @@ export interface VM {
   iso_url: string | null
   iso_path: string | null
   display_type: 'desktop' | 'server' | null
+  // Extended dockur/windows configuration
+  use_dhcp: boolean
+  disk2_gb: number | null
+  disk3_gb: number | null
+  enable_shared_folder: boolean
+  enable_global_shared: boolean
+  language: string | null
+  keyboard: string | null
+  region: string | null
+  manual_install: boolean
   position_x: number
   position_y: number
   created_at: string

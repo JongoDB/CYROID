@@ -5,9 +5,11 @@ import { rangesApi, networksApi, vmsApi, templatesApi, NetworkCreate, VMCreate }
 import type { Range, Network, VM, VMTemplate } from '../types'
 import {
   ArrowLeft, Plus, Loader2, X, Play, Square, RotateCw,
-  Network as NetworkIcon, Server, Trash2, Rocket, Activity
+  Network as NetworkIcon, Server, Trash2, Rocket, Activity, Monitor
 } from 'lucide-react'
 import clsx from 'clsx'
+import { VncConsole } from '../components/console/VncConsole'
+import { useAuthStore } from '../stores/authStore'
 
 const statusColors: Record<string, string> = {
   draft: 'bg-gray-100 text-gray-800',
@@ -53,9 +55,23 @@ export default function RangeDetail() {
     windows_username: '',
     windows_password: '',
     iso_url: '',
-    display_type: 'desktop'
+    display_type: 'desktop',
+    // Extended dockur/windows configuration
+    use_dhcp: false,
+    disk2_gb: null,
+    disk3_gb: null,
+    enable_shared_folder: false,
+    enable_global_shared: false,
+    language: null,
+    keyboard: null,
+    region: null,
+    manual_install: false
   })
   const [showWindowsOptions, setShowWindowsOptions] = useState(false)
+
+  // Console modal state
+  const [consoleVm, setConsoleVm] = useState<VM | null>(null)
+  const token = useAuthStore((state) => state.token)
 
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -174,6 +190,16 @@ export default function RangeDetail() {
         if (vmForm.windows_password) vmData.windows_password = vmForm.windows_password
         if (vmForm.iso_url) vmData.iso_url = vmForm.iso_url
         vmData.display_type = vmForm.display_type || 'desktop'
+        // Extended dockur/windows configuration
+        vmData.use_dhcp = vmForm.use_dhcp || false
+        if (vmForm.disk2_gb) vmData.disk2_gb = vmForm.disk2_gb
+        if (vmForm.disk3_gb) vmData.disk3_gb = vmForm.disk3_gb
+        vmData.enable_shared_folder = vmForm.enable_shared_folder || false
+        vmData.enable_global_shared = vmForm.enable_global_shared || false
+        if (vmForm.language) vmData.language = vmForm.language
+        if (vmForm.keyboard) vmData.keyboard = vmForm.keyboard
+        if (vmForm.region) vmData.region = vmForm.region
+        vmData.manual_install = vmForm.manual_install || false
       }
 
       await vmsApi.create(vmData)
@@ -182,7 +208,11 @@ export default function RangeDetail() {
         hostname: '', ip_address: '', network_id: '', template_id: '',
         cpu: 2, ram_mb: 2048, disk_gb: 20,
         windows_version: '', windows_username: '', windows_password: '', iso_url: '',
-        display_type: 'desktop'
+        display_type: 'desktop',
+        // Extended dockur/windows configuration reset
+        use_dhcp: false, disk2_gb: null, disk3_gb: null,
+        enable_shared_folder: false, enable_global_shared: false,
+        language: null, keyboard: null, region: null, manual_install: false
       })
       setShowWindowsOptions(false)
       fetchData()
@@ -393,7 +423,7 @@ export default function RangeDetail() {
                       </div>
                     </div>
                     <div className="flex items-center space-x-1">
-                      {vm.status === 'stopped' && (
+                      {(vm.status === 'stopped' || vm.status === 'pending') && (
                         <button
                           onClick={() => handleVmAction(vm, 'start')}
                           className="p-1.5 text-gray-400 hover:text-green-600"
@@ -404,6 +434,13 @@ export default function RangeDetail() {
                       )}
                       {vm.status === 'running' && (
                         <>
+                          <button
+                            onClick={() => setConsoleVm(vm)}
+                            className="p-1.5 text-gray-400 hover:text-blue-600"
+                            title="Open Console"
+                          >
+                            <Monitor className="h-4 w-4" />
+                          </button>
                           <button
                             onClick={() => handleVmAction(vm, 'stop')}
                             className="p-1.5 text-gray-400 hover:text-yellow-600"
@@ -690,6 +727,25 @@ export default function RangeDetail() {
                       </select>
                       <p className="mt-1 text-xs text-gray-500">ISO will be auto-downloaded by dockur/windows</p>
                     </div>
+
+                    {/* IP Assignment */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">IP Assignment</label>
+                      <select
+                        value={vmForm.use_dhcp ? 'dhcp' : 'static'}
+                        onChange={(e) => setVmForm({ ...vmForm, use_dhcp: e.target.value === 'dhcp' })}
+                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                      >
+                        <option value="static">Static IP (use IP address field above)</option>
+                        <option value="dhcp">DHCP (Windows requests IP automatically)</option>
+                      </select>
+                      <p className="mt-1 text-xs text-gray-500">
+                        {vmForm.use_dhcp
+                          ? 'Windows will request an IP from the network DHCP server'
+                          : 'Windows will use the static IP address specified above'}
+                      </p>
+                    </div>
+
                     <div className="grid grid-cols-2 gap-4">
                       <div>
                         <label className="block text-sm font-medium text-gray-700">Username (optional)</label>
@@ -712,6 +768,61 @@ export default function RangeDetail() {
                         />
                       </div>
                     </div>
+
+                    {/* Shared Folders */}
+                    <div className="space-y-2">
+                      <label className="block text-sm font-medium text-gray-700">Shared Folders</label>
+                      <label className="flex items-center">
+                        <input
+                          type="checkbox"
+                          checked={vmForm.enable_shared_folder || false}
+                          onChange={(e) => setVmForm({ ...vmForm, enable_shared_folder: e.target.checked })}
+                          className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
+                        />
+                        <span className="ml-2 text-sm text-gray-700">Enable per-VM shared folder (/shared)</span>
+                      </label>
+                      <label className="flex items-center">
+                        <input
+                          type="checkbox"
+                          checked={vmForm.enable_global_shared || false}
+                          onChange={(e) => setVmForm({ ...vmForm, enable_global_shared: e.target.checked })}
+                          className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
+                        />
+                        <span className="ml-2 text-sm text-gray-700">Mount global shared folder (/global, read-only)</span>
+                      </label>
+                      <p className="text-xs text-gray-500">Shared folders appear as network drives in Windows</p>
+                    </div>
+
+                    {/* Additional Storage */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Additional Disks (optional)</label>
+                      <div className="grid grid-cols-2 gap-4 mt-1">
+                        <div>
+                          <input
+                            type="number"
+                            min={1}
+                            max={1000}
+                            value={vmForm.disk2_gb || ''}
+                            onChange={(e) => setVmForm({ ...vmForm, disk2_gb: e.target.value ? parseInt(e.target.value) : null })}
+                            className="block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                            placeholder="2nd Disk (GB)"
+                          />
+                        </div>
+                        <div>
+                          <input
+                            type="number"
+                            min={1}
+                            max={1000}
+                            value={vmForm.disk3_gb || ''}
+                            onChange={(e) => setVmForm({ ...vmForm, disk3_gb: e.target.value ? parseInt(e.target.value) : null })}
+                            className="block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                            placeholder="3rd Disk (GB)"
+                          />
+                        </div>
+                      </div>
+                      <p className="mt-1 text-xs text-gray-500">Additional disks appear as D: and E: drives in Windows</p>
+                    </div>
+
                     <div>
                       <label className="block text-sm font-medium text-gray-700">Custom ISO URL (optional)</label>
                       <input
@@ -723,6 +834,77 @@ export default function RangeDetail() {
                       />
                       <p className="mt-1 text-xs text-gray-500">Overrides the automatic ISO download</p>
                     </div>
+
+                    {/* Localization - Collapsible */}
+                    <details className="border rounded-md p-3 bg-gray-50">
+                      <summary className="cursor-pointer text-sm font-medium text-gray-700">Localization Settings</summary>
+                      <div className="mt-3 space-y-3">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700">Language</label>
+                          <select
+                            value={vmForm.language || ''}
+                            onChange={(e) => setVmForm({ ...vmForm, language: e.target.value || null })}
+                            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                          >
+                            <option value="">Default (English)</option>
+                            <option value="Arabic">Arabic</option>
+                            <option value="Chinese">Chinese (Simplified)</option>
+                            <option value="Dutch">Dutch</option>
+                            <option value="French">French</option>
+                            <option value="German">German</option>
+                            <option value="Italian">Italian</option>
+                            <option value="Japanese">Japanese</option>
+                            <option value="Korean">Korean</option>
+                            <option value="Polish">Polish</option>
+                            <option value="Portuguese">Portuguese</option>
+                            <option value="Russian">Russian</option>
+                            <option value="Spanish">Spanish</option>
+                            <option value="Turkish">Turkish</option>
+                          </select>
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700">Keyboard Layout</label>
+                            <input
+                              type="text"
+                              value={vmForm.keyboard || ''}
+                              onChange={(e) => setVmForm({ ...vmForm, keyboard: e.target.value || null })}
+                              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                              placeholder="e.g., en-US, de-DE"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700">Region</label>
+                            <input
+                              type="text"
+                              value={vmForm.region || ''}
+                              onChange={(e) => setVmForm({ ...vmForm, region: e.target.value || null })}
+                              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                              placeholder="e.g., en-US, fr-FR"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </details>
+
+                    {/* Advanced Options - Collapsible */}
+                    <details className="border rounded-md p-3 bg-gray-50">
+                      <summary className="cursor-pointer text-sm font-medium text-gray-700">Advanced Options</summary>
+                      <div className="mt-3">
+                        <label className="flex items-center">
+                          <input
+                            type="checkbox"
+                            checked={vmForm.manual_install || false}
+                            onChange={(e) => setVmForm({ ...vmForm, manual_install: e.target.checked })}
+                            className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
+                          />
+                          <span className="ml-2 text-sm text-gray-700">Manual Installation Mode</span>
+                        </label>
+                        <p className="mt-1 text-xs text-gray-500">
+                          Enable for custom/interactive Windows setup. Disables unattended installation.
+                        </p>
+                      </div>
+                    </details>
                   </div>
                 )}
 
@@ -734,6 +916,23 @@ export default function RangeDetail() {
                   </button>
                 </div>
               </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* VNC Console Modal */}
+      {consoleVm && token && (
+        <div className="fixed inset-0 z-50 overflow-hidden">
+          <div className="absolute inset-0 bg-gray-900/80" onClick={() => setConsoleVm(null)} />
+          <div className="relative flex items-center justify-center min-h-screen p-4">
+            <div className="w-full max-w-5xl">
+              <VncConsole
+                vmId={consoleVm.id}
+                vmHostname={consoleVm.hostname}
+                token={token}
+                onClose={() => setConsoleVm(null)}
+              />
             </div>
           </div>
         </div>

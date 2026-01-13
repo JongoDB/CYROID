@@ -196,7 +196,20 @@ class DockerService:
         clone_from: Optional[str] = None,
         username: Optional[str] = None,
         password: Optional[str] = None,
-        display_type: str = "desktop"
+        display_type: str = "desktop",
+        # Extended dockur/windows configuration
+        use_dhcp: bool = False,
+        disk2_gb: Optional[int] = None,
+        disk3_gb: Optional[int] = None,
+        enable_shared_folder: bool = False,
+        shared_folder_path: Optional[str] = None,
+        enable_global_shared: bool = False,
+        global_shared_path: Optional[str] = None,
+        language: Optional[str] = None,
+        keyboard: Optional[str] = None,
+        region: Optional[str] = None,
+        manual_install: bool = False,
+        oem_script_path: Optional[str] = None,
     ) -> str:
         """
         Create a Windows VM container using dockur/windows.
@@ -223,6 +236,18 @@ class DockerService:
             password: Optional Windows password (default: empty)
             display_type: Display mode - 'desktop' (VNC/web console on ports 8006/5900)
                          or 'server' (headless/RDP only)
+            use_dhcp: Allow Windows to request IP via DHCP instead of static
+            disk2_gb: Size of second disk in GB (appears as D: drive)
+            disk3_gb: Size of third disk in GB (appears as E: drive)
+            enable_shared_folder: Enable per-VM shared folder mount
+            shared_folder_path: Host path for per-VM shared folder
+            enable_global_shared: Mount global shared folder (read-only)
+            global_shared_path: Host path for global shared folder
+            language: Windows display language (e.g., "French", "German")
+            keyboard: Keyboard layout (e.g., "en-US", "de-DE")
+            region: Regional settings (e.g., "en-US", "fr-FR")
+            manual_install: Enable manual/interactive installation mode
+            oem_script_path: Path to OEM directory containing install.bat
 
         Returns:
             Container ID
@@ -262,6 +287,29 @@ class DockerService:
         if password:
             environment["PASSWORD"] = password
 
+        # Extended dockur/windows configuration
+        # DHCP mode
+        if use_dhcp:
+            environment["DHCP"] = "Y"
+
+        # Additional disks
+        if disk2_gb:
+            environment["DISK2_SIZE"] = f"{disk2_gb}G"
+        if disk3_gb:
+            environment["DISK3_SIZE"] = f"{disk3_gb}G"
+
+        # Localization
+        if language:
+            environment["LANGUAGE"] = language
+        if keyboard:
+            environment["KEYBOARD"] = keyboard
+        if region:
+            environment["REGION"] = region
+
+        # Manual installation mode
+        if manual_install:
+            environment["MANUAL"] = "Y"
+
         # Display type configuration
         # 'desktop' = web VNC console on port 8006 + VNC on port 5900 (default)
         # 'server' = headless mode, RDP only (no VNC/web console)
@@ -287,14 +335,15 @@ class DockerService:
         binds = []
 
         # Check for local ISO bind mount (takes priority over URL)
-        if iso_path and os.path.exists(iso_path):
+        # Use os.path.isfile() to ensure it's a file, not a directory
+        if iso_path and os.path.isfile(iso_path):
             binds.append(f"{iso_path}:/boot.iso:ro")
             logger.info(f"Using local ISO: {iso_path}")
         elif not iso_url:
             # Check for default ISO in cache directory (only if no URL provided)
             windows_iso_dir = os.path.join(settings.iso_cache_dir, "windows-isos")
             cached_iso = os.path.join(windows_iso_dir, f"windows-{windows_version}.iso")
-            if os.path.exists(cached_iso):
+            if os.path.isfile(cached_iso):
                 binds.append(f"{cached_iso}:/boot.iso:ro")
                 logger.info(f"Using cached ISO: {cached_iso}")
 
@@ -316,6 +365,36 @@ class DockerService:
 
             binds.append(f"{storage_path}:/storage")
             logger.info(f"Using persistent storage: {storage_path}")
+
+            # Additional disk storage (uses same parent directory)
+            if disk2_gb:
+                storage2_path = os.path.join(os.path.dirname(storage_path), "storage2")
+                os.makedirs(storage2_path, exist_ok=True)
+                binds.append(f"{storage2_path}:/storage2")
+                logger.info(f"Using secondary storage: {storage2_path}")
+
+            if disk3_gb:
+                storage3_path = os.path.join(os.path.dirname(storage_path), "storage3")
+                os.makedirs(storage3_path, exist_ok=True)
+                binds.append(f"{storage3_path}:/storage3")
+                logger.info(f"Using tertiary storage: {storage3_path}")
+
+        # Shared folder (per-VM)
+        if enable_shared_folder and shared_folder_path:
+            os.makedirs(shared_folder_path, exist_ok=True)
+            binds.append(f"{shared_folder_path}:/shared")
+            logger.info(f"Using per-VM shared folder: {shared_folder_path}")
+
+        # Global shared folder (read-only for safety)
+        if enable_global_shared and global_shared_path:
+            os.makedirs(global_shared_path, exist_ok=True)
+            binds.append(f"{global_shared_path}:/global:ro")
+            logger.info(f"Using global shared folder: {global_shared_path}")
+
+        # Post-install script from template config_script (OEM directory)
+        if oem_script_path and os.path.exists(oem_script_path):
+            binds.append(f"{oem_script_path}:/oem:ro")
+            logger.info(f"Using OEM script directory: {oem_script_path}")
 
         # Windows containers need privileged mode for KVM
         try:

@@ -55,11 +55,16 @@ services:
       MINIO_SECRET_KEY: cyroid123
       ISO_CACHE_DIR: /data/cyroid/iso-cache
       TEMPLATE_STORAGE_DIR: /data/cyroid/template-storage
+      VM_STORAGE_DIR: /data/cyroid/vm-storage
+      GLOBAL_SHARED_DIR: /data/cyroid/shared
     volumes:
       - ./backend:/app
       - /var/run/docker.sock:/var/run/docker.sock
-      - cyroid_iso_cache:/data/cyroid/iso-cache
-      - cyroid_template_storage:/data/cyroid/template-storage
+      # Use bind mounts so spawned VM containers can access these paths
+      - /data/cyroid/iso-cache:/data/cyroid/iso-cache
+      - /data/cyroid/template-storage:/data/cyroid/template-storage
+      - /data/cyroid/vm-storage:/data/cyroid/vm-storage
+      - /data/cyroid/shared:/data/cyroid/shared
     ports:
       - "8000:8000"
     depends_on:
@@ -81,11 +86,16 @@ services:
       MINIO_SECRET_KEY: cyroid123
       ISO_CACHE_DIR: /data/cyroid/iso-cache
       TEMPLATE_STORAGE_DIR: /data/cyroid/template-storage
+      VM_STORAGE_DIR: /data/cyroid/vm-storage
+      GLOBAL_SHARED_DIR: /data/cyroid/shared
     volumes:
       - ./backend:/app
       - /var/run/docker.sock:/var/run/docker.sock
-      - cyroid_iso_cache:/data/cyroid/iso-cache
-      - cyroid_template_storage:/data/cyroid/template-storage
+      # Use bind mounts so spawned VM containers can access these paths
+      - /data/cyroid/iso-cache:/data/cyroid/iso-cache
+      - /data/cyroid/template-storage:/data/cyroid/template-storage
+      - /data/cyroid/vm-storage:/data/cyroid/vm-storage
+      - /data/cyroid/shared:/data/cyroid/shared
     depends_on:
       db:
         condition: service_healthy
@@ -121,5 +131,3 @@ services:
 volumes:
   postgres_data:
   minio_data:
-  cyroid_iso_cache:
-  cyroid_template_storage:
