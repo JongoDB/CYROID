@@ -517,7 +517,7 @@ QEMU_LINUX_VERSIONS = [
         "size_gb": 6.0,
         "category": "desktop",
         "description": "Ubuntu Desktop 24.04 LTS - Popular and user-friendly",
-        "download_url": "https://releases.ubuntu.com/noble/ubuntu-24.04.1-desktop-amd64.iso",
+        "download_url": "https://releases.ubuntu.com/noble/ubuntu-24.04.3-desktop-amd64.iso",
     },
     {
         "version": "ubuntus",
@@ -525,15 +525,15 @@ QEMU_LINUX_VERSIONS = [
         "size_gb": 3.0,
         "category": "server",
         "description": "Ubuntu Server 24.04 LTS - Minimal server install",
-        "download_url": "https://releases.ubuntu.com/noble/ubuntu-24.04.1-live-server-amd64.iso",
+        "download_url": "https://releases.ubuntu.com/noble/ubuntu-24.04.3-live-server-amd64.iso",
     },
     {
         "version": "debian",
         "name": "Debian",
         "size_gb": 3.3,
         "category": "desktop",
-        "description": "Debian 12 Bookworm - Stable and reliable",
-        "download_url": "https://cdimage.debian.org/debian-cd/current-live/amd64/iso-hybrid/debian-live-12.8.0-amd64-gnome.iso",
+        "description": "Debian 13 Trixie - Stable and reliable",
+        "download_url": "https://cdimage.debian.org/debian-cd/current-live/amd64/iso-hybrid/debian-live-13.3.0-amd64-gnome.iso",
     },
     {
         "version": "fedora",
@@ -549,7 +549,7 @@ QEMU_LINUX_VERSIONS = [
         "size_gb": 0.06,
         "category": "server",
         "description": "Alpine Linux - Minimal and security-focused (60 MB)",
-        "download_url": "https://dl-cdn.alpinelinux.org/alpine/v3.21/releases/x86_64/alpine-virt-3.21.2-x86_64.iso",
+        "download_url": "https://dl-cdn.alpinelinux.org/alpine/v3.23/releases/x86_64/alpine-virt-3.23.2-x86_64.iso",
     },
     {
         "version": "arch",
@@ -565,7 +565,7 @@ QEMU_LINUX_VERSIONS = [
         "size_gb": 4.1,
         "category": "desktop",
         "description": "Manjaro - User-friendly Arch-based distro",
-        "download_url": "https://download.manjaro.org/gnome/24.2.1/manjaro-gnome-24.2.1-241216-linux612.iso",
+        "download_url": "https://sourceforge.net/projects/manjarolinux/files/gnome/26.0/manjaro-gnome-26.0-260104-linux618.iso/download",
     },
     {
         "version": "suse",
@@ -581,7 +581,7 @@ QEMU_LINUX_VERSIONS = [
         "size_gb": 2.8,
         "category": "desktop",
         "description": "Linux Mint - Windows-like experience",
-        "download_url": "https://mirrors.kernel.org/linuxmint/stable/22.1/linuxmint-22.1-cinnamon-64bit.iso",
+        "download_url": "https://mirrors.kernel.org/linuxmint/stable/22.3/linuxmint-22.3-cinnamon-64bit.iso",
     },
     {
         "version": "zorin",
@@ -589,7 +589,7 @@ QEMU_LINUX_VERSIONS = [
         "size_gb": 3.8,
         "category": "desktop",
         "description": "Zorin OS - Beautiful and familiar interface",
-        "download_url": "https://mirrors.edge.kernel.org/zorinos-isos/17/Zorin-OS-17.2-Core-64-bit.iso",
+        "download_url": "https://mirrors.edge.kernel.org/zorinos-isos/17/Zorin-OS-17.3-Core-64-bit-r2.iso",
     },
     {
         "version": "kubuntu",
@@ -597,7 +597,7 @@ QEMU_LINUX_VERSIONS = [
         "size_gb": 4.4,
         "category": "desktop",
         "description": "Kubuntu - Ubuntu with KDE Plasma desktop",
-        "download_url": "https://cdimages.ubuntu.com/kubuntu/releases/noble/release/kubuntu-24.04.1-desktop-amd64.iso",
+        "download_url": "https://cdimages.ubuntu.com/kubuntu/releases/noble/release/kubuntu-24.04.3-desktop-amd64.iso",
     },
     {
         "version": "xubuntu",
@@ -605,7 +605,7 @@ QEMU_LINUX_VERSIONS = [
         "size_gb": 4.0,
         "category": "desktop",
         "description": "Xubuntu - Ubuntu with lightweight XFCE desktop",
-        "download_url": "https://cdimages.ubuntu.com/xubuntu/releases/noble/release/xubuntu-24.04.1-desktop-amd64.iso",
+        "download_url": "https://cdimages.ubuntu.com/xubuntu/releases/noble/release/xubuntu-24.04.3-desktop-amd64.iso",
     },
     # Security-focused distributions (for cyber range training)
     {
@@ -614,7 +614,7 @@ QEMU_LINUX_VERSIONS = [
         "size_gb": 3.8,
         "category": "security",
         "description": "Kali Linux - Penetration testing and security auditing",
-        "download_url": "https://cdimage.kali.org/kali-2024.4/kali-linux-2024.4-live-amd64.iso",
+        "download_url": "https://cdimage.kali.org/kali-2025.4/kali-linux-2025.4-installer-amd64.iso",
     },
     {
         "version": "tails",
@@ -656,7 +656,7 @@ QEMU_LINUX_VERSIONS = [
         "size_gb": 3.6,
         "category": "desktop",
         "description": "Gentoo - Source-based, highly customizable",
-        "download_url": "https://distfiles.gentoo.org/releases/amd64/autobuilds/current-livegui-amd64/livegui-amd64-20250105T164824Z.iso",
+        "download_url": "https://distfiles.gentoo.org/releases/amd64/autobuilds/current-livegui-amd64/livegui-amd64-20260111T160052Z.iso",
     },
     {
         "version": "nixos",
@@ -664,7 +664,7 @@ QEMU_LINUX_VERSIONS = [
         "size_gb": 2.4,
         "category": "desktop",
         "description": "NixOS - Declarative and reproducible",
-        "download_url": "https://channels.nixos.org/nixos-24.11/latest-nixos-gnome-x86_64-linux.iso",
+        "download_url": "https://channels.nixos.org/nixos-25.11/latest-nixos-gnome-x86_64-linux.iso",
     },
     {
         "version": "mx",
@@ -672,7 +672,7 @@ QEMU_LINUX_VERSIONS = [
         "size_gb": 2.2,
         "category": "desktop",
         "description": "MX Linux - Lightweight and fast",
-        "download_url": "https://sourceforge.net/projects/mx-linux/files/Final/Xfce/MX-23.5_x64.iso/download",
+        "download_url": "https://sourceforge.net/projects/mx-linux/files/Final/Xfce/MX-25_Xfce_x64.iso/download",
     },
     {
         "version": "cachy",
@@ -680,7 +680,7 @@ QEMU_LINUX_VERSIONS = [
         "size_gb": 2.6,
         "category": "desktop",
         "description": "CachyOS - Performance-optimized Arch-based",
-        "download_url": "https://mirror.cachyos.org/ISO/kde/250104/cachyos-kde-linux-250104.iso",
+        "download_url": "https://sourceforge.net/projects/cachyos-arch/files/gui-installer/desktop/251129/cachyos-desktop-linux-251129.iso/download",
     },
     {
         "version": "slack",
