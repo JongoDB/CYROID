@@ -46,6 +46,7 @@ export interface RegisterRequest {
 export interface TokenResponse {
   access_token: string
   token_type: string
+  password_reset_required: boolean
 }
 
 export interface User {
@@ -56,6 +57,8 @@ export interface User {
   roles: string[]        // ABAC: multiple roles
   tags: string[]         // ABAC: user tags
   is_active: boolean
+  is_approved: boolean
+  password_reset_required: boolean
   created_at: string
 }
 
@@ -71,6 +74,15 @@ export interface UserAttributeCreate {
   attribute_value: string
 }
 
+export interface PasswordChangeRequest {
+  current_password: string
+  new_password: string
+}
+
+export interface PasswordChangeResponse {
+  message: string
+}
+
 export const authApi = {
   login: (data: LoginRequest) =>
     api.post<TokenResponse>('/auth/login', data),
@@ -80,6 +92,9 @@ export const authApi = {
 
   me: () =>
     api.get<User>('/auth/me'),
+
+  changePassword: (data: PasswordChangeRequest) =>
+    api.post<PasswordChangeResponse>('/auth/change-password', data),
 }
 
 // User Management API (admin-only)
@@ -88,6 +103,16 @@ export type UserRole = 'admin' | 'engineer' | 'facilitator' | 'evaluator'
 export interface UserUpdate {
   email?: string
   is_active?: boolean
+  is_approved?: boolean
+}
+
+export interface AdminCreateUser {
+  username: string
+  email: string
+  password: string
+  roles?: string[]
+  tags?: string[]
+  is_approved?: boolean
 }
 
 export interface RoleInfo {
@@ -98,11 +123,20 @@ export interface RoleInfo {
 
 export const usersApi = {
   list: () => api.get<User[]>('/users'),
+  listPending: () => api.get<User[]>('/users/pending'),
   get: (userId: string) => api.get<User>(`/users/${userId}`),
+  create: (data: AdminCreateUser) => api.post<User>('/users', data),
   update: (userId: string, data: UserUpdate) => api.patch<User>(`/users/${userId}`, data),
   delete: (userId: string) => api.delete(`/users/${userId}`),
   getAvailableRoles: () => api.get<RoleInfo[]>('/users/roles/available'),
   getAllTags: () => api.get<string[]>('/users/tags/all'),
+
+  // User approval
+  approve: (userId: string) => api.post<User>(`/users/${userId}/approve`),
+  deny: (userId: string) => api.post(`/users/${userId}/deny`),
+
+  // Admin password reset
+  resetPassword: (userId: string) => api.post<User>(`/users/${userId}/reset-password`),
 
   // Attribute management
   getAttributes: (userId: string) => api.get<UserAttribute[]>(`/users/${userId}/attributes`),
@@ -281,6 +315,8 @@ export const cacheApi = {
     api.post<LinuxISODownloadResponse>('/cache/linux-isos/download', { version, url }),
   getLinuxISODownloadStatus: (version: string) =>
     api.get<LinuxISODownloadStatus>(`/cache/linux-isos/download/${encodeURIComponent(version)}/status`),
+  cancelLinuxISODownload: (version: string) =>
+    api.post(`/cache/linux-isos/download/${encodeURIComponent(version)}/cancel`),
   deleteLinuxISO: (version: string) =>
     api.delete(`/cache/linux-isos/${encodeURIComponent(version)}`),
 
@@ -289,6 +325,8 @@ export const cacheApi = {
     api.post<WindowsISODownloadResponse>('/cache/isos/download', { version, url }),
   getWindowsISODownloadStatus: (version: string) =>
     api.get<WindowsISODownloadStatus>(`/cache/isos/download/${encodeURIComponent(version)}/status`),
+  cancelWindowsISODownload: (version: string) =>
+    api.post(`/cache/isos/download/${encodeURIComponent(version)}/cancel`),
 
   // Snapshots (unified API for both Windows golden images and Docker snapshots)
   getAllSnapshots: () => api.get<AllSnapshotsStatus>('/cache/snapshots'),
@@ -309,6 +347,8 @@ export const cacheApi = {
     api.post<CustomISODownloadResponse>('/cache/custom-isos', { name, url }),
   getCustomISOStatus: (filename: string) =>
     api.get<CustomISOStatusResponse>(`/cache/custom-isos/${encodeURIComponent(filename)}/status`),
+  cancelCustomISODownload: (filename: string) =>
+    api.post(`/cache/custom-isos/${encodeURIComponent(filename)}/cancel`),
   deleteCustomISO: (filename: string) =>
     api.delete(`/cache/custom-isos/${encodeURIComponent(filename)}`),
 

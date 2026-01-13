@@ -11,6 +11,7 @@ import type {
   WindowsVersion,
   WindowsISODownloadStatus,
   CustomISOList,
+  CustomISOStatusResponse,
   LinuxVersionsResponse,
   LinuxVersion,
   LinuxISODownloadStatus,
@@ -75,6 +76,8 @@ export default function ImageCache() {
   const [downloadStatus, setDownloadStatus] = useState<Record<string, WindowsISODownloadStatus>>({})
   // Download state for tracking Linux ISO downloads
   const [linuxDownloadStatus, setLinuxDownloadStatus] = useState<Record<string, LinuxISODownloadStatus>>({})
+  // Download state for tracking Custom ISO downloads
+  const [customISODownloadStatus, setCustomISODownloadStatus] = useState<Record<string, CustomISOStatusResponse>>({})
 
   const loadData = async () => {
     setLoading(true)
@@ -103,8 +106,206 @@ export default function ImageCache() {
     }
   }
 
+  // Store polling intervals so we can clear them
+  const pollingIntervalsRef = useRef<Record<string, NodeJS.Timeout>>({})
+
+  // Check for active downloads on mount and restore polling
+  const checkActiveDownloads = async () => {
+    // Check Linux downloads
+    if (linuxVersions) {
+      const allLinuxVersions = [
+        ...(linuxVersions.desktop || []),
+        ...(linuxVersions.server || []),
+        ...(linuxVersions.security || []),
+      ]
+      for (const v of allLinuxVersions) {
+        try {
+          const statusRes = await cacheApi.getLinuxISODownloadStatus(v.version)
+          if (statusRes.data.status === 'downloading') {
+            setLinuxDownloadStatus(prev => ({ ...prev, [v.version]: statusRes.data }))
+            // Start polling for this download
+            startLinuxDownloadPolling(v.version)
+          }
+        } catch {
+          // Ignore errors for individual status checks
+        }
+      }
+    }
+
+    // Check Windows downloads
+    if (windowsVersions) {
+      const allWindowsVersions = [
+        ...(windowsVersions.desktop || []),
+        ...(windowsVersions.server || []),
+        ...(windowsVersions.legacy || []),
+      ]
+      for (const v of allWindowsVersions) {
+        try {
+          const statusRes = await cacheApi.getWindowsISODownloadStatus(v.version)
+          if (statusRes.data.status === 'downloading') {
+            setDownloadStatus(prev => ({ ...prev, [v.version]: statusRes.data }))
+            // Start polling for this download
+            startWindowsDownloadPolling(v.version)
+          }
+        } catch {
+          // Ignore errors for individual status checks
+        }
+      }
+    }
+
+    // Check Custom ISO downloads
+    if (customISOs) {
+      for (const iso of customISOs.isos) {
+        try {
+          const statusRes = await cacheApi.getCustomISOStatus(iso.filename)
+          if (statusRes.data.status === 'downloading') {
+            setCustomISODownloadStatus(prev => ({ ...prev, [iso.filename]: statusRes.data }))
+            // Start polling for this download
+            startCustomISODownloadPolling(iso.filename)
+          }
+        } catch {
+          // Ignore errors for individual status checks
+        }
+      }
+    }
+  }
+
+  const startLinuxDownloadPolling = (version: string) => {
+    // Clear any existing interval for this version
+    if (pollingIntervalsRef.current[`linux-${version}`]) {
+      clearInterval(pollingIntervalsRef.current[`linux-${version}`])
+    }
+
+    const pollInterval = setInterval(async () => {
+      try {
+        const statusRes = await cacheApi.getLinuxISODownloadStatus(version)
+        setLinuxDownloadStatus(prev => ({ ...prev, [version]: statusRes.data }))
+
+        if (statusRes.data.status === 'completed' || statusRes.data.status === 'failed') {
+          clearInterval(pollInterval)
+          delete pollingIntervalsRef.current[`linux-${version}`]
+
+          if (statusRes.data.status === 'completed') {
+            setSuccess(`Downloaded Linux ISO: ${version}`)
+            await loadData()
+          } else if (statusRes.data.error) {
+            setError(`Download failed: ${statusRes.data.error}`)
+          }
+
+          // Clear download status after a delay
+          setTimeout(() => {
+            setLinuxDownloadStatus(prev => {
+              const newStatus = { ...prev }
+              delete newStatus[version]
+              return newStatus
+            })
+          }, 5000)
+        }
+      } catch {
+        clearInterval(pollInterval)
+        delete pollingIntervalsRef.current[`linux-${version}`]
+      }
+    }, 2000)
+
+    pollingIntervalsRef.current[`linux-${version}`] = pollInterval
+  }
+
+  const startWindowsDownloadPolling = (version: string) => {
+    // Clear any existing interval for this version
+    if (pollingIntervalsRef.current[`windows-${version}`]) {
+      clearInterval(pollingIntervalsRef.current[`windows-${version}`])
+    }
+
+    const pollInterval = setInterval(async () => {
+      try {
+        const statusRes = await cacheApi.getWindowsISODownloadStatus(version)
+        setDownloadStatus(prev => ({ ...prev, [version]: statusRes.data }))
+
+        if (statusRes.data.status === 'completed' || statusRes.data.status === 'failed') {
+          clearInterval(pollInterval)
+          delete pollingIntervalsRef.current[`windows-${version}`]
+
+          if (statusRes.data.status === 'completed') {
+            setSuccess(`Downloaded Windows ISO: ${version}`)
+            await loadData()
+          } else if (statusRes.data.error) {
+            setError(`Download failed: ${statusRes.data.error}`)
+          }
+
+          // Clear download status after a delay
+          setTimeout(() => {
+            setDownloadStatus(prev => {
+              const newStatus = { ...prev }
+              delete newStatus[version]
+              return newStatus
+            })
+          }, 5000)
+        }
+      } catch {
+        clearInterval(pollInterval)
+        delete pollingIntervalsRef.current[`windows-${version}`]
+      }
+    }, 2000)
+
+    pollingIntervalsRef.current[`windows-${version}`] = pollInterval
+  }
+
+  const startCustomISODownloadPolling = (filename: string) => {
+    // Clear any existing interval for this filename
+    if (pollingIntervalsRef.current[`custom-${filename}`]) {
+      clearInterval(pollingIntervalsRef.current[`custom-${filename}`])
+    }
+
+    const pollInterval = setInterval(async () => {
+      try {
+        const statusRes = await cacheApi.getCustomISOStatus(filename)
+        setCustomISODownloadStatus(prev => ({ ...prev, [filename]: statusRes.data }))
+
+        if (statusRes.data.status === 'completed' || statusRes.data.status === 'failed') {
+          clearInterval(pollInterval)
+          delete pollingIntervalsRef.current[`custom-${filename}`]
+
+          if (statusRes.data.status === 'completed') {
+            setSuccess(`Downloaded custom ISO: ${statusRes.data.name || filename}`)
+            await loadData()
+          } else if (statusRes.data.error) {
+            setError(`Download failed: ${statusRes.data.error}`)
+          }
+
+          // Clear download status after a delay
+          setTimeout(() => {
+            setCustomISODownloadStatus(prev => {
+              const newStatus = { ...prev }
+              delete newStatus[filename]
+              return newStatus
+            })
+          }, 5000)
+        }
+      } catch {
+        clearInterval(pollInterval)
+        delete pollingIntervalsRef.current[`custom-${filename}`]
+      }
+    }, 2000)
+
+    pollingIntervalsRef.current[`custom-${filename}`] = pollInterval
+  }
+
   useEffect(() => {
     loadData()
+  }, [])
+
+  // Check for active downloads after data is loaded
+  useEffect(() => {
+    if (linuxVersions || windowsVersions || customISOs) {
+      checkActiveDownloads()
+    }
+  }, [linuxVersions, windowsVersions, customISOs])
+
+  // Cleanup polling intervals on unmount
+  useEffect(() => {
+    return () => {
+      Object.values(pollingIntervalsRef.current).forEach(clearInterval)
+    }
   }, [])
 
   const handleCacheBatch = async () => {
@@ -168,14 +369,40 @@ export default function ImageCache() {
     setActionLoading('custom-iso-download')
     setError(null)
     try {
-      await cacheApi.downloadCustomISO(customISOName, customISOUrl)
-      setSuccess(`Started downloading ${customISOName}. This may take a while for large ISOs.`)
+      const res = await cacheApi.downloadCustomISO(customISOName, customISOUrl)
+      const filename = res.data.filename
+
+      // Start polling for download status
+      setCustomISODownloadStatus(prev => ({
+        ...prev,
+        [filename]: { status: 'downloading', filename, name: customISOName, progress_gb: 0 }
+      }))
+      startCustomISODownloadPolling(filename)
+
+      setSuccess(`Started downloading ${customISOName}`)
       setShowCustomISOModal(false)
       setCustomISOName('')
       setCustomISOUrl('')
-      setTimeout(() => loadData(), 2000)
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to start ISO download')
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
+  const handleCancelCustomISODownload = async (filename: string) => {
+    setActionLoading(`cancel-custom-${filename}`)
+    setError(null)
+    try {
+      await cacheApi.cancelCustomISODownload(filename)
+      setSuccess(`Cancelled download for ${filename}`)
+      setCustomISODownloadStatus(prev => {
+        const newStatus = { ...prev }
+        delete newStatus[filename]
+        return newStatus
+      })
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Failed to cancel download')
     } finally {
       setActionLoading(null)
     }
@@ -189,6 +416,12 @@ export default function ImageCache() {
     try {
       await cacheApi.deleteCustomISO(filename)
       setSuccess(`Deleted custom ISO: ${name}`)
+      // Clear download status
+      setCustomISODownloadStatus(prev => {
+        const newStatus = { ...prev }
+        delete newStatus[filename]
+        return newStatus
+      })
       await loadData()
     } catch (err: any) {
       setError(err.response?.data?.detail || `Failed to delete ${name}`)
@@ -359,9 +592,51 @@ export default function ImageCache() {
     try {
       await cacheApi.deleteLinuxISO(version)
       setSuccess(`Deleted Linux ISO: ${version}`)
+      // Clear download status
+      setLinuxDownloadStatus(prev => {
+        const newStatus = { ...prev }
+        delete newStatus[version]
+        return newStatus
+      })
       await loadData()
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to delete ISO')
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
+  const handleCancelLinuxDownload = async (version: string) => {
+    setActionLoading(`cancel-linux-${version}`)
+    setError(null)
+    try {
+      await cacheApi.cancelLinuxISODownload(version)
+      setSuccess(`Cancelled download for ${version}`)
+      setLinuxDownloadStatus(prev => {
+        const newStatus = { ...prev }
+        delete newStatus[version]
+        return newStatus
+      })
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Failed to cancel download')
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
+  const handleCancelWindowsDownload = async (version: string) => {
+    setActionLoading(`cancel-windows-${version}`)
+    setError(null)
+    try {
+      await cacheApi.cancelWindowsISODownload(version)
+      setSuccess(`Cancelled download for ${version}`)
+      setDownloadStatus(prev => {
+        const newStatus = { ...prev }
+        delete newStatus[version]
+        return newStatus
+      })
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Failed to cancel download')
     } finally {
       setActionLoading(null)
     }
@@ -741,6 +1016,7 @@ export default function ImageCache() {
             colorClass="blue"
             onDelete={handleDeleteWindowsISO}
             onDownload={handleDownloadWindowsISO}
+            onCancel={handleCancelWindowsDownload}
             downloadStatus={downloadStatus}
             actionLoading={actionLoading}
             isAdmin={isAdmin}
@@ -754,6 +1030,7 @@ export default function ImageCache() {
             colorClass="purple"
             onDelete={handleDeleteWindowsISO}
             onDownload={handleDownloadWindowsISO}
+            onCancel={handleCancelWindowsDownload}
             downloadStatus={downloadStatus}
             actionLoading={actionLoading}
             isAdmin={isAdmin}
@@ -767,6 +1044,7 @@ export default function ImageCache() {
             colorClass="orange"
             onDelete={handleDeleteWindowsISO}
             onDownload={handleDownloadWindowsISO}
+            onCancel={handleCancelWindowsDownload}
             downloadStatus={downloadStatus}
             actionLoading={actionLoading}
             isAdmin={isAdmin}
@@ -810,6 +1088,7 @@ export default function ImageCache() {
             colorClass="blue"
             onDelete={handleDeleteLinuxISO}
             onDownload={handleDownloadLinuxISO}
+            onCancel={handleCancelLinuxDownload}
             downloadStatus={linuxDownloadStatus}
             actionLoading={actionLoading}
             isAdmin={isAdmin}
@@ -823,6 +1102,7 @@ export default function ImageCache() {
             colorClass="red"
             onDelete={handleDeleteLinuxISO}
             onDownload={handleDownloadLinuxISO}
+            onCancel={handleCancelLinuxDownload}
             downloadStatus={linuxDownloadStatus}
             actionLoading={actionLoading}
             isAdmin={isAdmin}
@@ -836,6 +1116,7 @@ export default function ImageCache() {
             colorClass="purple"
             onDelete={handleDeleteLinuxISO}
             onDownload={handleDownloadLinuxISO}
+            onCancel={handleCancelLinuxDownload}
             downloadStatus={linuxDownloadStatus}
             actionLoading={actionLoading}
             isAdmin={isAdmin}
@@ -885,6 +1166,72 @@ export default function ImageCache() {
               </div>
             </div>
           </div>
+
+          {/* Active Downloads */}
+          {Object.keys(customISODownloadStatus).length > 0 && (
+            <div className="bg-white shadow rounded-lg overflow-hidden">
+              <div className="px-6 py-4 border-b border-gray-200 bg-blue-50">
+                <h4 className="text-sm font-medium text-blue-800 flex items-center">
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Active Downloads ({Object.keys(customISODownloadStatus).length})
+                </h4>
+              </div>
+              <div className="p-4 space-y-4">
+                {Object.entries(customISODownloadStatus).map(([filename, status]) => (
+                  <div key={filename} className="border rounded-lg p-4 bg-blue-50 border-blue-200">
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-gray-900">{status.name || filename}</p>
+                        <div className="text-xs text-gray-500 font-mono mt-1">{filename}</div>
+                      </div>
+                      <div className="flex items-center gap-1 ml-2 flex-shrink-0">
+                        <div className="flex items-center gap-1 text-blue-600">
+                          <Loader2 className="h-4 w-4 animate-spin flex-shrink-0" />
+                          <span className="text-xs font-medium">
+                            {status.progress_percent ? `${status.progress_percent}%` : 'Starting...'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                    {/* Download progress bar */}
+                    <div className="mt-3 space-y-1.5">
+                      <div className="flex justify-between items-center text-xs">
+                        <span className="text-blue-700 font-medium">
+                          {status.progress_gb?.toFixed(2) || '0.00'} GB
+                          {status.total_gb ? ` / ${status.total_gb.toFixed(2)} GB` : ''}
+                        </span>
+                        <div className="flex items-center gap-2">
+                          {status.progress_percent && (
+                            <span className="text-blue-600 font-semibold">{status.progress_percent}%</span>
+                          )}
+                          {isAdmin && (
+                            <button
+                              onClick={() => handleCancelCustomISODownload(filename)}
+                              disabled={actionLoading === `cancel-custom-${filename}`}
+                              className="text-red-500 hover:text-red-700 p-0.5 rounded hover:bg-red-50"
+                              title="Cancel download"
+                            >
+                              <X className="h-4 w-4" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      <div className="w-full bg-blue-100 rounded-full h-2.5 overflow-hidden">
+                        {status.total_bytes && status.progress_bytes ? (
+                          <div
+                            className="bg-gradient-to-r from-blue-500 to-blue-600 h-2.5 rounded-full transition-all duration-500 ease-out"
+                            style={{ width: `${(status.progress_bytes / status.total_bytes) * 100}%` }}
+                          />
+                        ) : (
+                          <div className="bg-gradient-to-r from-blue-400 via-blue-500 to-blue-400 h-2.5 rounded-full animate-pulse w-full opacity-60" />
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Custom ISOs List */}
           <div className="bg-white shadow rounded-lg overflow-hidden">
@@ -1436,13 +1783,14 @@ function ImageTable({ images, onRemove, actionLoading, isAdmin }: {
   )
 }
 
-function WindowsVersionSection({ title, versions, icon: Icon, colorClass, onDelete, onDownload, downloadStatus, actionLoading, isAdmin }: {
+function WindowsVersionSection({ title, versions, icon: Icon, colorClass, onDelete, onDownload, onCancel, downloadStatus, actionLoading, isAdmin }: {
   title: string
   versions: WindowsVersion[]
   icon: typeof Monitor
   colorClass: string
   onDelete: (version: string, name: string) => void
   onDownload: (version: WindowsVersion) => void
+  onCancel: (version: string) => void
   downloadStatus: Record<string, WindowsISODownloadStatus>
   actionLoading: string | null
   isAdmin: boolean
@@ -1483,14 +1831,11 @@ function WindowsVersionSection({ title, versions, icon: Icon, colorClass, onDele
                 </div>
                 <div className="flex items-center gap-1 ml-2 flex-shrink-0">
                   {isDownloading ? (
-                    <div className="text-blue-600">
-                      <div className="flex items-center gap-2">
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        <span className="text-xs">
-                          {dlStatus.progress_percent ? `${dlStatus.progress_percent}%` :
-                           dlStatus.progress_gb ? `${dlStatus.progress_gb} GB` : 'Starting...'}
-                        </span>
-                      </div>
+                    <div className="flex items-center gap-1 text-blue-600">
+                      <Loader2 className="h-4 w-4 animate-spin flex-shrink-0" />
+                      <span className="text-xs font-medium">
+                        {dlStatus.progress_percent ? `${dlStatus.progress_percent}%` : 'Starting...'}
+                      </span>
                     </div>
                   ) : v.cached ? (
                     <>
@@ -1535,13 +1880,38 @@ function WindowsVersionSection({ title, versions, icon: Icon, colorClass, onDele
                 </div>
               </div>
               {/* Download progress bar */}
-              {isDownloading && dlStatus.total_bytes && dlStatus.progress_bytes && (
-                <div className="mt-2">
-                  <div className="w-full bg-blue-200 rounded-full h-1.5">
-                    <div
-                      className="bg-blue-600 h-1.5 rounded-full transition-all duration-300"
-                      style={{ width: `${(dlStatus.progress_bytes / dlStatus.total_bytes) * 100}%` }}
-                    />
+              {isDownloading && (
+                <div className="mt-3 space-y-1.5">
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="text-blue-700 font-medium">
+                      {dlStatus.progress_gb?.toFixed(2) || '0.00'} GB
+                      {dlStatus.total_gb ? ` / ${dlStatus.total_gb.toFixed(2)} GB` : ''}
+                    </span>
+                    <div className="flex items-center gap-2">
+                      {dlStatus.progress_percent && (
+                        <span className="text-blue-600 font-semibold">{dlStatus.progress_percent}%</span>
+                      )}
+                      {isAdmin && (
+                        <button
+                          onClick={() => onCancel(v.version)}
+                          disabled={actionLoading === `cancel-windows-${v.version}`}
+                          className="text-red-500 hover:text-red-700 p-0.5 rounded hover:bg-red-50"
+                          title="Cancel download"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  <div className="w-full bg-blue-100 rounded-full h-2.5 overflow-hidden">
+                    {dlStatus.total_bytes && dlStatus.progress_bytes ? (
+                      <div
+                        className="bg-gradient-to-r from-blue-500 to-blue-600 h-2.5 rounded-full transition-all duration-500 ease-out"
+                        style={{ width: `${(dlStatus.progress_bytes / dlStatus.total_bytes) * 100}%` }}
+                      />
+                    ) : (
+                      <div className="bg-gradient-to-r from-blue-400 via-blue-500 to-blue-400 h-2.5 rounded-full animate-pulse w-full opacity-60" />
+                    )}
                   </div>
                 </div>
               )}
@@ -1592,13 +1962,14 @@ function ImageCheckbox({ img, selected, setSelected }: {
   )
 }
 
-function LinuxVersionSection({ title, versions, icon: Icon, colorClass, onDelete, onDownload, downloadStatus, actionLoading, isAdmin }: {
+function LinuxVersionSection({ title, versions, icon: Icon, colorClass, onDelete, onDownload, onCancel, downloadStatus, actionLoading, isAdmin }: {
   title: string
   versions: LinuxVersion[]
   icon: typeof Monitor
   colorClass: string
   onDelete: (version: string) => Promise<void>
   onDownload: (version: LinuxVersion, customUrl?: string) => Promise<void>
+  onCancel: (version: string) => Promise<void>
   downloadStatus: Record<string, LinuxISODownloadStatus>
   actionLoading: string | null
   isAdmin: boolean
@@ -1640,20 +2011,38 @@ function LinuxVersionSection({ title, versions, icon: Icon, colorClass, onDelete
 
                   {/* Download progress */}
                   {isDownloading && status && (
-                    <div className="mt-2">
-                      <div className="flex items-center text-xs text-blue-600">
-                        <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                        Downloading... {status.progress_gb?.toFixed(2) || 0} GB
-                        {status.progress_percent && ` (${status.progress_percent}%)`}
+                    <div className="mt-3 space-y-1.5">
+                      <div className="flex justify-between items-center text-xs">
+                        <span className="text-blue-700 font-medium">
+                          {status.progress_gb?.toFixed(2) || '0.00'} GB
+                          {status.total_gb ? ` / ${status.total_gb.toFixed(2)} GB` : ''}
+                        </span>
+                        <div className="flex items-center gap-2">
+                          {status.progress_percent && (
+                            <span className="text-blue-600 font-semibold">{status.progress_percent}%</span>
+                          )}
+                          {isAdmin && (
+                            <button
+                              onClick={() => onCancel(v.version)}
+                              disabled={actionLoading === `cancel-linux-${v.version}`}
+                              className="text-red-500 hover:text-red-700 p-0.5 rounded hover:bg-red-50"
+                              title="Cancel download"
+                            >
+                              <X className="h-4 w-4" />
+                            </button>
+                          )}
+                        </div>
                       </div>
-                      {status.total_bytes && (
-                        <div className="w-full bg-gray-200 rounded-full h-1.5 mt-1">
+                      <div className="w-full bg-blue-100 rounded-full h-2.5 overflow-hidden">
+                        {status.total_bytes && status.progress_bytes ? (
                           <div
-                            className="bg-blue-600 h-1.5 rounded-full"
+                            className="bg-gradient-to-r from-blue-500 to-blue-600 h-2.5 rounded-full transition-all duration-500 ease-out"
                             style={{ width: `${status.progress_percent || 0}%` }}
                           />
-                        </div>
-                      )}
+                        ) : (
+                          <div className="bg-gradient-to-r from-blue-400 via-blue-500 to-blue-400 h-2.5 rounded-full animate-pulse w-full opacity-60" />
+                        )}
+                      </div>
                     </div>
                   )}
                 </div>

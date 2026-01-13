@@ -852,6 +852,7 @@ def download_linux_iso(
     def download_iso(url: str, dest_path: str, version: str):
         """Download ISO in background with progress tracking."""
         import requests
+        import time
 
         try:
             # Use streaming download with progress
@@ -868,6 +869,13 @@ def download_linux_iso(
             downloaded = 0
             with open(dest_path, 'wb') as f:
                 for chunk in response.iter_content(chunk_size=1024 * 1024):  # 1MB chunks
+                    # Check if download was cancelled
+                    if version not in _active_linux_downloads or _active_linux_downloads[version].get("cancelled"):
+                        if os.path.exists(dest_path):
+                            os.remove(dest_path)
+                        if version in _active_linux_downloads:
+                            del _active_linux_downloads[version]
+                        return
                     if chunk:
                         f.write(chunk)
                         downloaded += len(chunk)
@@ -876,12 +884,22 @@ def download_linux_iso(
             _active_linux_downloads[version]["status"] = "completed"
             _active_linux_downloads[version]["progress_bytes"] = os.path.getsize(dest_path)
 
+            # Clear from active downloads after a delay (allow frontend to see completion)
+            time.sleep(3)
+            if version in _active_linux_downloads:
+                del _active_linux_downloads[version]
+
         except Exception as e:
             # Clean up partial download
             if os.path.exists(dest_path):
                 os.remove(dest_path)
-            _active_linux_downloads[version]["status"] = "failed"
-            _active_linux_downloads[version]["error"] = str(e)
+            if version in _active_linux_downloads:
+                _active_linux_downloads[version]["status"] = "failed"
+                _active_linux_downloads[version]["error"] = str(e)
+                # Clear failed downloads after a delay
+                time.sleep(5)
+                if version in _active_linux_downloads:
+                    del _active_linux_downloads[version]
 
     background_tasks.add_task(download_iso, download_url, filepath, request.version)
 
@@ -904,19 +922,7 @@ def get_linux_iso_download_status(version: str, current_user: CurrentUser):
     filename = f"linux-{version}.iso"
     filepath = os.path.join(linux_iso_dir, filename)
 
-    # Check if file exists (completed download)
-    if os.path.exists(filepath):
-        size = os.path.getsize(filepath)
-        return {
-            "status": "completed",
-            "version": version,
-            "filename": filename,
-            "path": filepath,
-            "size_bytes": size,
-            "size_gb": round(size / (1024**3), 2)
-        }
-
-    # Check active downloads
+    # IMPORTANT: Check active downloads FIRST (file exists during download)
     if version in _active_linux_downloads:
         info = _active_linux_downloads[version]
         response = {
@@ -940,11 +946,45 @@ def get_linux_iso_download_status(version: str, current_user: CurrentUser):
 
         return response
 
+    # Only check file if NOT in active downloads (truly completed)
+    if os.path.exists(filepath):
+        size = os.path.getsize(filepath)
+        return {
+            "status": "completed",
+            "version": version,
+            "filename": filename,
+            "path": filepath,
+            "size_bytes": size,
+            "size_gb": round(size / (1024**3), 2)
+        }
+
     return {
         "status": "not_found",
         "version": version,
         "message": "No download in progress and ISO not found in cache"
     }
+
+
+@router.post("/linux-isos/download/{version}/cancel")
+def cancel_linux_iso_download(version: str, current_user: AdminUser):
+    """Cancel an in-progress Linux ISO download. Admin only."""
+    if version not in _active_linux_downloads:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No active download found for '{version}'"
+        )
+
+    if _active_linux_downloads[version].get("status") != "downloading":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Download for '{version}' is not in progress (status: {_active_linux_downloads[version].get('status')})"
+        )
+
+    # Mark as cancelled - the download loop will detect this and clean up
+    _active_linux_downloads[version]["cancelled"] = True
+    _active_linux_downloads[version]["status"] = "cancelled"
+
+    return {"status": "cancelled", "version": version, "message": f"Download for '{version}' has been cancelled"}
 
 
 @router.delete("/linux-isos/{version}")
@@ -953,6 +993,10 @@ def delete_linux_iso(version: str, current_user: AdminUser):
     linux_iso_dir = get_linux_iso_dir()
     filename = f"linux-{version}.iso"
     filepath = os.path.join(linux_iso_dir, filename)
+
+    # Clear any active download entry for this version
+    if version in _active_linux_downloads:
+        del _active_linux_downloads[version]
 
     if not os.path.exists(filepath):
         raise HTTPException(
@@ -1025,6 +1069,9 @@ def get_windows_versions(current_user: CurrentUser):
 
 
 # Custom ISO cache endpoints
+
+# Track active custom ISO downloads
+_active_custom_downloads: dict = {}
 
 class CustomISORequest(BaseModel):
     name: str  # Display name for the ISO
@@ -1119,33 +1166,69 @@ def download_custom_iso(
             detail=f"ISO '{safe_name}' already exists in cache"
         )
 
+    # Check if already downloading
+    if safe_name in _active_custom_downloads and _active_custom_downloads[safe_name].get("status") == "downloading":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Download already in progress for '{request.name}'"
+        )
+
+    # Start download with progress tracking
+    _active_custom_downloads[safe_name] = {
+        "status": "downloading",
+        "name": request.name,
+        "filename": safe_name,
+        "url": request.url,
+        "progress_bytes": 0,
+        "total_bytes": None,
+        "error": None
+    }
+
     def download_iso(url: str, dest_path: str, name: str, filename: str, iso_dir: str):
-        """Download ISO in background."""
+        """Download ISO in background with progress tracking."""
         import requests
         import json
+        import time
         from datetime import datetime
 
         metadata_file = os.path.join(iso_dir, "metadata.json")
 
-        # Load existing metadata
-        metadata = {}
-        if os.path.exists(metadata_file):
-            try:
-                with open(metadata_file, "r") as f:
-                    metadata = json.load(f)
-            except:
-                metadata = {}
-
         try:
-            # Download with streaming
-            response = requests.get(url, stream=True, timeout=3600)
+            # Use streaming download with progress
+            response = requests.get(url, stream=True, timeout=3600, allow_redirects=True)
             response.raise_for_status()
 
+            # Get total size if available
+            total_size = response.headers.get('content-length')
+            if total_size:
+                total_size = int(total_size)
+                _active_custom_downloads[filename]["total_bytes"] = total_size
+
+            # Download with progress tracking
+            downloaded = 0
             with open(dest_path, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    f.write(chunk)
+                for chunk in response.iter_content(chunk_size=1024 * 1024):  # 1MB chunks
+                    # Check if download was cancelled
+                    if filename not in _active_custom_downloads or _active_custom_downloads[filename].get("cancelled"):
+                        if os.path.exists(dest_path):
+                            os.remove(dest_path)
+                        if filename in _active_custom_downloads:
+                            del _active_custom_downloads[filename]
+                        return
+                    if chunk:
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        _active_custom_downloads[filename]["progress_bytes"] = downloaded
 
             # Update metadata
+            metadata = {}
+            if os.path.exists(metadata_file):
+                try:
+                    with open(metadata_file, "r") as f:
+                        metadata = json.load(f)
+                except:
+                    metadata = {}
+
             metadata[filename] = {
                 "name": name,
                 "url": url,
@@ -1154,11 +1237,25 @@ def download_custom_iso(
             with open(metadata_file, "w") as f:
                 json.dump(metadata, f, indent=2)
 
+            _active_custom_downloads[filename]["status"] = "completed"
+            _active_custom_downloads[filename]["progress_bytes"] = os.path.getsize(dest_path)
+
+            # Clear from active downloads after a delay (allow frontend to see completion)
+            time.sleep(3)
+            if filename in _active_custom_downloads:
+                del _active_custom_downloads[filename]
+
         except Exception as e:
             # Clean up partial download
             if os.path.exists(dest_path):
                 os.remove(dest_path)
-            raise
+            if filename in _active_custom_downloads:
+                _active_custom_downloads[filename]["status"] = "failed"
+                _active_custom_downloads[filename]["error"] = str(e)
+                # Clear failed downloads after a delay
+                time.sleep(5)
+                if filename in _active_custom_downloads:
+                    del _active_custom_downloads[filename]
 
     background_tasks.add_task(
         download_iso,
@@ -1173,13 +1270,14 @@ def download_custom_iso(
         "status": "downloading",
         "message": f"Downloading {request.name} from {request.url}",
         "filename": safe_name,
+        "name": request.name,
         "destination": filepath
     }
 
 
 @router.get("/custom-isos/{filename}/status")
 def get_custom_iso_download_status(filename: str, current_user: CurrentUser):
-    """Check if a custom ISO download has completed."""
+    """Check the status of a custom ISO download."""
     import os
     import json
     from cyroid.config import get_settings
@@ -1189,43 +1287,82 @@ def get_custom_iso_download_status(filename: str, current_user: CurrentUser):
     filepath = os.path.join(custom_iso_dir, filename)
     metadata_file = os.path.join(custom_iso_dir, "metadata.json")
 
-    if not os.path.exists(filepath):
-        return {"status": "downloading", "filename": filename}
-
-    # Check if file is still being written (size is changing)
-    size1 = os.path.getsize(filepath)
-    import time
-    time.sleep(0.1)
-    size2 = os.path.getsize(filepath)
-
-    if size1 != size2:
-        return {
-            "status": "downloading",
+    # IMPORTANT: Check active downloads FIRST (file exists during download)
+    if filename in _active_custom_downloads:
+        info = _active_custom_downloads[filename]
+        response = {
+            "status": info["status"],
             "filename": filename,
-            "current_size_bytes": size2,
-            "current_size_gb": round(size2 / (1024**3), 2)
+            "name": info.get("name"),
         }
 
-    # Load metadata
-    metadata = {}
-    if os.path.exists(metadata_file):
-        try:
-            with open(metadata_file, "r") as f:
-                metadata = json.load(f)
-        except:
-            pass
+        if info.get("progress_bytes") is not None:
+            response["progress_bytes"] = info["progress_bytes"]
+            response["progress_gb"] = round(info["progress_bytes"] / (1024**3), 2)
 
-    iso_metadata = metadata.get(filename, {})
+        if info.get("total_bytes") is not None:
+            response["total_bytes"] = info["total_bytes"]
+            response["total_gb"] = round(info["total_bytes"] / (1024**3), 2)
+            if info["progress_bytes"]:
+                response["progress_percent"] = round(info["progress_bytes"] / info["total_bytes"] * 100, 1)
+
+        if info.get("error"):
+            response["error"] = info["error"]
+
+        return response
+
+    # Only check file if NOT in active downloads (truly completed)
+    if os.path.exists(filepath):
+        size = os.path.getsize(filepath)
+
+        # Load metadata
+        metadata = {}
+        if os.path.exists(metadata_file):
+            try:
+                with open(metadata_file, "r") as f:
+                    metadata = json.load(f)
+            except:
+                pass
+
+        iso_metadata = metadata.get(filename, {})
+
+        return {
+            "status": "completed",
+            "filename": filename,
+            "name": iso_metadata.get("name", filename.replace(".iso", "")),
+            "path": filepath,
+            "size_bytes": size,
+            "size_gb": round(size / (1024**3), 2),
+            "downloaded_at": iso_metadata.get("downloaded_at", "")
+        }
 
     return {
-        "status": "completed",
+        "status": "not_found",
         "filename": filename,
-        "name": iso_metadata.get("name", filename.replace(".iso", "")),
-        "path": filepath,
-        "size_bytes": size2,
-        "size_gb": round(size2 / (1024**3), 2),
-        "downloaded_at": iso_metadata.get("downloaded_at", "")
+        "message": "No download in progress and ISO not found in cache"
     }
+
+
+@router.post("/custom-isos/{filename}/cancel")
+def cancel_custom_iso_download(filename: str, current_user: AdminUser):
+    """Cancel an in-progress custom ISO download. Admin only."""
+    if filename not in _active_custom_downloads:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No active download found for '{filename}'"
+        )
+
+    if _active_custom_downloads[filename].get("status") != "downloading":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Download for '{filename}' is not in progress (status: {_active_custom_downloads[filename].get('status')})"
+        )
+
+    # Mark as cancelled - the download loop will detect this and clean up
+    _active_custom_downloads[filename]["cancelled"] = True
+    _active_custom_downloads[filename]["status"] = "cancelled"
+
+    return {"status": "cancelled", "filename": filename, "message": f"Download for '{filename}' has been cancelled"}
 
 
 @router.delete("/custom-isos/{filename}")
@@ -1239,6 +1376,10 @@ def delete_custom_iso(filename: str, current_user: AdminUser):
     custom_iso_dir = os.path.join(settings.iso_cache_dir, "custom-isos")
     filepath = os.path.join(custom_iso_dir, filename)
     metadata_file = os.path.join(custom_iso_dir, "metadata.json")
+
+    # Clear any active download entry for this filename
+    if filename in _active_custom_downloads:
+        del _active_custom_downloads[filename]
 
     if not os.path.exists(filepath):
         raise HTTPException(
@@ -1513,12 +1654,38 @@ async def upload_custom_iso(
         )
 
 
+@router.post("/isos/download/{version}/cancel")
+def cancel_windows_iso_download(version: str, current_user: AdminUser):
+    """Cancel an in-progress Windows ISO download. Admin only."""
+    if version not in _active_downloads:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No active download found for '{version}'"
+        )
+
+    if _active_downloads[version].get("status") != "downloading":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Download for '{version}' is not in progress (status: {_active_downloads[version].get('status')})"
+        )
+
+    # Mark as cancelled - the download loop will detect this and clean up
+    _active_downloads[version]["cancelled"] = True
+    _active_downloads[version]["status"] = "cancelled"
+
+    return {"status": "cancelled", "version": version, "message": f"Download for '{version}' has been cancelled"}
+
+
 @router.delete("/isos/{version}")
 def delete_windows_iso(version: str, current_user: AdminUser):
     """Delete a cached Windows ISO. Admin only."""
     windows_iso_dir = get_windows_iso_dir()
     filename = f"windows-{version}.iso"
     filepath = os.path.join(windows_iso_dir, filename)
+
+    # Clear any active download entry for this version
+    if version in _active_downloads:
+        del _active_downloads[version]
 
     if not os.path.exists(filepath):
         raise HTTPException(
@@ -1664,6 +1831,7 @@ def download_windows_iso(
     def download_iso(url: str, dest_path: str, version: str):
         """Download ISO in background with progress tracking."""
         import requests
+        import time
 
         try:
             # Use streaming download with progress
@@ -1680,6 +1848,13 @@ def download_windows_iso(
             downloaded = 0
             with open(dest_path, 'wb') as f:
                 for chunk in response.iter_content(chunk_size=1024 * 1024):  # 1MB chunks
+                    # Check if download was cancelled
+                    if version not in _active_downloads or _active_downloads[version].get("cancelled"):
+                        if os.path.exists(dest_path):
+                            os.remove(dest_path)
+                        if version in _active_downloads:
+                            del _active_downloads[version]
+                        return
                     if chunk:
                         f.write(chunk)
                         downloaded += len(chunk)
@@ -1688,12 +1863,22 @@ def download_windows_iso(
             _active_downloads[version]["status"] = "completed"
             _active_downloads[version]["progress_bytes"] = os.path.getsize(dest_path)
 
+            # Clear from active downloads after a delay (allow frontend to see completion)
+            time.sleep(3)
+            if version in _active_downloads:
+                del _active_downloads[version]
+
         except Exception as e:
             # Clean up partial download
             if os.path.exists(dest_path):
                 os.remove(dest_path)
-            _active_downloads[version]["status"] = "failed"
-            _active_downloads[version]["error"] = str(e)
+            if version in _active_downloads:
+                _active_downloads[version]["status"] = "failed"
+                _active_downloads[version]["error"] = str(e)
+                # Clear failed downloads after a delay
+                time.sleep(5)
+                if version in _active_downloads:
+                    del _active_downloads[version]
 
     background_tasks.add_task(download_iso, download_url, filepath, request.version)
 
@@ -1716,19 +1901,7 @@ def get_windows_iso_download_status(version: str, current_user: CurrentUser):
     filename = f"windows-{version}.iso"
     filepath = os.path.join(windows_iso_dir, filename)
 
-    # Check if file exists (completed download)
-    if os.path.exists(filepath):
-        size = os.path.getsize(filepath)
-        return {
-            "status": "completed",
-            "version": version,
-            "filename": filename,
-            "path": filepath,
-            "size_bytes": size,
-            "size_gb": round(size / (1024**3), 2)
-        }
-
-    # Check active downloads
+    # IMPORTANT: Check active downloads FIRST (file exists during download)
     if version in _active_downloads:
         info = _active_downloads[version]
         response = {
@@ -1751,6 +1924,18 @@ def get_windows_iso_download_status(version: str, current_user: CurrentUser):
             response["error"] = info["error"]
 
         return response
+
+    # Only check file if NOT in active downloads (truly completed)
+    if os.path.exists(filepath):
+        size = os.path.getsize(filepath)
+        return {
+            "status": "completed",
+            "version": version,
+            "filename": filename,
+            "path": filepath,
+            "size_bytes": size,
+            "size_gb": round(size / (1024**3), 2)
+        }
 
     return {
         "status": "not_found",

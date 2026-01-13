@@ -45,6 +45,10 @@ class User(Base, UUIDMixin, TimestampMixin):
     # Keep role column for backwards compatibility (will be removed in future migration)
     role: Mapped[UserRole] = mapped_column(default=UserRole.ENGINEER)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Password reset flag - when True, user must change password on next login
+    password_reset_required: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Registration approval - new users need admin approval (first user auto-approved)
+    is_approved: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # ABAC attributes relationship
     attributes = relationship("UserAttribute", back_populates="user", cascade="all, delete-orphan")

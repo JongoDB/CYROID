@@ -1,5 +1,5 @@
 // frontend/src/components/layout/Layout.tsx
-import { ReactNode } from 'react'
+import { ReactNode, useState } from 'react'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from '../../stores/authStore'
 import {
@@ -12,10 +12,11 @@ import {
   X,
   HardDrive,
   Users,
-  Shield
+  Shield,
+  Key
 } from 'lucide-react'
-import { useState } from 'react'
 import clsx from 'clsx'
+import PasswordChangeModal from '../common/PasswordChangeModal'
 
 interface LayoutProps {
   children: ReactNode
@@ -38,10 +39,11 @@ const navigation: NavItem[] = [
 ]
 
 export default function Layout({ children }: LayoutProps) {
-  const { user, logout } = useAuthStore()
+  const { user, logout, passwordResetRequired } = useAuthStore()
   const navigate = useNavigate()
   const location = useLocation()
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [showPasswordModal, setShowPasswordModal] = useState(false)
 
   // Filter navigation based on user roles (ABAC: check roles array)
   const isAdmin = user?.roles?.includes('admin') ?? false
@@ -51,6 +53,9 @@ export default function Layout({ children }: LayoutProps) {
     logout()
     navigate('/login')
   }
+
+  // Show forced password modal if required
+  const shouldShowForcedPasswordModal = passwordResetRequired && !showPasswordModal
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -137,6 +142,13 @@ export default function Layout({ children }: LayoutProps) {
               )}
             </div>
             <button
+              onClick={() => setShowPasswordModal(true)}
+              className="flex items-center w-full px-3 py-2 text-sm font-medium text-gray-300 rounded-md hover:bg-gray-700 hover:text-white"
+            >
+              <Key className="mr-3 h-5 w-5" />
+              Change Password
+            </button>
+            <button
               onClick={handleLogout}
               className="flex items-center w-full px-3 py-2 text-sm font-medium text-gray-300 rounded-md hover:bg-gray-700 hover:text-white"
             >
@@ -169,6 +181,20 @@ export default function Layout({ children }: LayoutProps) {
           </div>
         </main>
       </div>
+
+      {/* Voluntary password change modal */}
+      <PasswordChangeModal
+        isOpen={showPasswordModal}
+        onClose={() => setShowPasswordModal(false)}
+        isForced={false}
+      />
+
+      {/* Forced password change modal (when admin requires reset) */}
+      <PasswordChangeModal
+        isOpen={shouldShowForcedPasswordModal}
+        onClose={() => {}}
+        isForced={true}
+      />
     </div>
   )
 }

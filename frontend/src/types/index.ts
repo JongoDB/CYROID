@@ -482,13 +482,18 @@ export interface CustomISODownloadResponse {
 }
 
 export interface CustomISOStatusResponse {
-  status: 'downloading' | 'completed'
+  status: 'downloading' | 'completed' | 'failed' | 'not_found' | 'cancelled'
   filename: string
   name?: string
   path?: string
   size_bytes?: number
   size_gb?: number
-  current_size_bytes?: number
-  current_size_gb?: number
+  progress_bytes?: number
+  progress_gb?: number
+  total_bytes?: number
+  total_gb?: number
+  progress_percent?: number
+  error?: string
+  message?: string
   downloaded_at?: string
 }

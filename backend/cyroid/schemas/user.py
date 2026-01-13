@@ -19,6 +19,23 @@ class UserCreate(UserBase):
 class UserUpdate(BaseModel):
     email: Optional[EmailStr] = None
     is_active: Optional[bool] = None
+    is_approved: Optional[bool] = None
+
+
+class PasswordChangeRequest(BaseModel):
+    """Request to change user's own password."""
+    current_password: str
+    new_password: str
+
+
+class AdminCreateUser(BaseModel):
+    """Admin request to create a new user."""
+    username: str
+    email: EmailStr
+    password: str
+    roles: List[str] = ["engineer"]  # Default role
+    tags: List[str] = []
+    is_approved: bool = True  # Admin-created users are auto-approved
 
 
 # ABAC Attribute Schemas
@@ -43,6 +60,8 @@ class UserResponse(UserBase):
     roles: List[str]  # New: list of role attribute values
     tags: List[str]  # New: list of tag attribute values
     is_active: bool
+    is_approved: bool
+    password_reset_required: bool
     created_at: datetime
 
     class Config:

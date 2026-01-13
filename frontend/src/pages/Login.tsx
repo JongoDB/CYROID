@@ -1,22 +1,41 @@
 // frontend/src/pages/Login.tsx
-import { useState, FormEvent } from 'react'
+import { useState, FormEvent, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../stores/authStore'
+import PasswordChangeModal from '../components/common/PasswordChangeModal'
 
 export default function Login() {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
-  const { login, isLoading, error, clearError } = useAuthStore()
+  const [showPasswordModal, setShowPasswordModal] = useState(false)
+  const { login, isLoading, error, clearError, passwordResetRequired } = useAuthStore()
   const navigate = useNavigate()
+
+  // Check if password reset is required after login
+  useEffect(() => {
+    if (passwordResetRequired) {
+      setShowPasswordModal(true)
+    }
+  }, [passwordResetRequired])
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
     try {
       await login({ username, password })
-      navigate('/')
+      // If password reset is required, the useEffect will show the modal
+      // Otherwise, navigate to home
+      const state = useAuthStore.getState()
+      if (!state.passwordResetRequired) {
+        navigate('/')
+      }
     } catch {
       // Error is handled by store
     }
+  }
+
+  const handlePasswordChangeComplete = () => {
+    setShowPasswordModal(false)
+    navigate('/')
   }
 
   return (
@@ -52,7 +71,7 @@ export default function Login() {
           <div className="rounded-md shadow-sm -space-y-px">
             <div>
               <label htmlFor="username" className="sr-only">
-                Username
+                Username or Email
               </label>
               <input
                 id="username"
@@ -60,7 +79,7 @@ export default function Login() {
                 type="text"
                 required
                 className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-t-md focus:outline-none focus:ring-primary-500 focus:border-primary-500 focus:z-10 sm:text-sm"
-                placeholder="Username"
+                placeholder="Username or Email"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
               />
@@ -93,6 +112,13 @@ export default function Login() {
           </div>
         </form>
       </div>
+
+      {/* Forced password change modal */}
+      <PasswordChangeModal
+        isOpen={showPasswordModal}
+        onClose={handlePasswordChangeComplete}
+        isForced={true}
+      />
     </div>
   )
 }

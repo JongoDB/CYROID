@@ -10,8 +10,9 @@ from cyroid.api.deps import DBSession, AdminUser, CurrentUser
 from cyroid.models.user import User, UserRole, UserAttribute, AVAILABLE_ROLES
 from cyroid.schemas.user import (
     UserResponse, UserUpdate, UserDetailResponse,
-    UserAttributeCreate, UserAttributeResponse
+    UserAttributeCreate, UserAttributeResponse, AdminCreateUser
 )
+from cyroid.utils.security import get_password_hash
 
 router = APIRouter(prefix="/users", tags=["User Management"])
 
@@ -21,6 +22,83 @@ def list_users(db: DBSession, current_user: AdminUser):
     """List all users with their attributes. Admin only."""
     users = db.query(User).options(joinedload(User.attributes)).order_by(User.created_at.desc()).all()
     return users
+
+
+@router.get("/pending", response_model=List[UserResponse])
+def list_pending_users(db: DBSession, current_user: AdminUser):
+    """List all users pending approval. Admin only."""
+    users = db.query(User).options(joinedload(User.attributes)).filter(
+        User.is_approved == False
+    ).order_by(User.created_at.desc()).all()
+    return users
+
+
+@router.post("", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+def create_user(user_data: AdminCreateUser, db: DBSession, current_user: AdminUser):
+    """
+    Create a new user as admin.
+    Admin-created users are pre-approved and can optionally have password reset required.
+    """
+    # Check if username exists
+    existing_user = db.query(User).filter(User.username == user_data.username).first()
+    if existing_user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Username already registered",
+        )
+
+    # Check if email exists
+    existing_email = db.query(User).filter(User.email == user_data.email).first()
+    if existing_email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email already registered",
+        )
+
+    # Validate roles
+    for role in user_data.roles:
+        if role not in AVAILABLE_ROLES:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid role '{role}'. Available roles: {', '.join(AVAILABLE_ROLES)}"
+            )
+
+    # Determine legacy role (first role or engineer)
+    legacy_role = UserRole.ADMIN if 'admin' in user_data.roles else UserRole.ENGINEER
+
+    # Create user - admin created users are auto-approved
+    user = User(
+        username=user_data.username,
+        email=user_data.email,
+        hashed_password=get_password_hash(user_data.password),
+        role=legacy_role,
+        is_approved=user_data.is_approved,
+        password_reset_required=True,  # Force password change on first login
+    )
+    db.add(user)
+    db.flush()
+
+    # Add role attributes
+    for role in user_data.roles:
+        role_attr = UserAttribute(
+            user_id=user.id,
+            attribute_type='role',
+            attribute_value=role
+        )
+        db.add(role_attr)
+
+    # Add tag attributes
+    for tag in user_data.tags:
+        tag_attr = UserAttribute(
+            user_id=user.id,
+            attribute_type='tag',
+            attribute_value=tag
+        )
+        db.add(tag_attr)
+
+    db.commit()
+    db.refresh(user)
+    return user
 
 
 @router.get("/me", response_model=UserResponse)
@@ -77,6 +155,57 @@ def update_user(user_id: UUID, user_update: UserUpdate, db: DBSession, current_u
     if user_update.is_active is not None:
         user.is_active = user_update.is_active
 
+    if user_update.is_approved is not None:
+        user.is_approved = user_update.is_approved
+
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+@router.post("/{user_id}/approve", response_model=UserResponse)
+def approve_user(user_id: UUID, db: DBSession, current_user: AdminUser):
+    """Approve a pending user registration. Admin only."""
+    user = db.query(User).options(joinedload(User.attributes)).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if user.is_approved:
+        raise HTTPException(status_code=400, detail="User is already approved")
+
+    user.is_approved = True
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+@router.post("/{user_id}/deny", status_code=status.HTTP_204_NO_CONTENT)
+def deny_user(user_id: UUID, db: DBSession, current_user: AdminUser):
+    """Deny a pending user registration (deletes the user). Admin only."""
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if user.is_approved:
+        raise HTTPException(status_code=400, detail="Cannot deny an already approved user. Use delete instead.")
+
+    db.delete(user)
+    db.commit()
+    return None
+
+
+@router.post("/{user_id}/reset-password", response_model=UserResponse)
+def admin_reset_password(user_id: UUID, db: DBSession, current_user: AdminUser):
+    """
+    Force a user to reset their password on next login.
+    Sets password_reset_required flag to True.
+    Admin only.
+    """
+    user = db.query(User).options(joinedload(User.attributes)).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    user.password_reset_required = True
     db.commit()
     db.refresh(user)
     return user

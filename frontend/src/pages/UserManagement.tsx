@@ -1,16 +1,18 @@
 // frontend/src/pages/UserManagement.tsx
 import { useEffect, useState } from 'react'
-import { usersApi, type User, type RoleInfo, type UserAttribute } from '../services/api'
+import { usersApi, type User, type RoleInfo, type UserAttribute, type AdminCreateUser } from '../services/api'
 import { useAuthStore } from '../stores/authStore'
-import { Users, Shield, Loader2, Trash2, Plus, X, Tag } from 'lucide-react'
+import { Users, Shield, Loader2, Trash2, Plus, X, Tag, UserPlus, Clock, Check, Ban, Key, RefreshCw } from 'lucide-react'
 
 export default function UserManagement() {
   const { user: currentUser } = useAuthStore()
   const [users, setUsers] = useState<User[]>([])
+  const [pendingUsers, setPendingUsers] = useState<User[]>([])
   const [roles, setRoles] = useState<RoleInfo[]>([])
   const [allTags, setAllTags] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [successMessage, setSuccessMessage] = useState<string | null>(null)
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
 
   // Attribute editing state
@@ -19,6 +21,18 @@ export default function UserManagement() {
   const [newTagInput, setNewTagInput] = useState('')
   const [attributeLoading, setAttributeLoading] = useState(false)
 
+  // Create user modal state
+  const [showCreateModal, setShowCreateModal] = useState(false)
+  const [createForm, setCreateForm] = useState<AdminCreateUser>({
+    username: '',
+    email: '',
+    password: '',
+    roles: ['engineer'],
+    tags: [],
+    is_approved: true
+  })
+  const [createLoading, setCreateLoading] = useState(false)
+
   useEffect(() => {
     fetchData()
   }, [])
@@ -26,12 +40,15 @@ export default function UserManagement() {
   const fetchData = async () => {
     try {
       setLoading(true)
-      const [usersRes, rolesRes, tagsRes] = await Promise.all([
+      const [usersRes, pendingRes, rolesRes, tagsRes] = await Promise.all([
         usersApi.list(),
+        usersApi.listPending(),
         usersApi.getAvailableRoles(),
         usersApi.getAllTags()
       ])
-      setUsers(usersRes.data)
+      // Filter out pending users from main list (they're shown separately)
+      setUsers(usersRes.data.filter(u => u.is_approved))
+      setPendingUsers(pendingRes.data)
       setRoles(rolesRes.data)
       setAllTags(tagsRes.data)
     } catch (err: any) {
@@ -131,6 +148,67 @@ export default function UserManagement() {
     }
   }
 
+  const handleApprove = async (userId: string) => {
+    try {
+      await usersApi.approve(userId)
+      setSuccessMessage('User approved successfully')
+      fetchData()
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Failed to approve user')
+    }
+  }
+
+  const handleDeny = async (userId: string) => {
+    try {
+      await usersApi.deny(userId)
+      setSuccessMessage('User registration denied')
+      setPendingUsers(pendingUsers.filter(u => u.id !== userId))
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Failed to deny user')
+    }
+  }
+
+  const handleResetPassword = async (userId: string) => {
+    try {
+      await usersApi.resetPassword(userId)
+      setSuccessMessage('Password reset flag set. User will be prompted to change password on next login.')
+      fetchData()
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Failed to reset password')
+    }
+  }
+
+  const handleCreateUser = async () => {
+    try {
+      setCreateLoading(true)
+      await usersApi.create(createForm)
+      setSuccessMessage('User created successfully')
+      setShowCreateModal(false)
+      setCreateForm({
+        username: '',
+        email: '',
+        password: '',
+        roles: ['engineer'],
+        tags: [],
+        is_approved: true
+      })
+      fetchData()
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Failed to create user')
+    } finally {
+      setCreateLoading(false)
+    }
+  }
+
+  const generateRandomPassword = () => {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*'
+    let password = ''
+    for (let i = 0; i < 16; i++) {
+      password += chars.charAt(Math.floor(Math.random() * chars.length))
+    }
+    setCreateForm({ ...createForm, password })
+  }
+
   const getRoleBadgeColor = (role: string) => {
     switch (role) {
       case 'admin': return 'bg-red-100 text-red-800'
@@ -177,6 +255,15 @@ export default function UserManagement() {
             Manage user accounts, roles, and tags using Attribute-Based Access Control (ABAC).
           </p>
         </div>
+        <div className="mt-4 sm:mt-0 sm:ml-16 sm:flex-none">
+          <button
+            onClick={() => setShowCreateModal(true)}
+            className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500"
+          >
+            <UserPlus className="h-4 w-4 mr-2" />
+            Create User
+          </button>
+        </div>
       </div>
 
       {error && (
@@ -185,6 +272,18 @@ export default function UserManagement() {
             <X className="h-5 w-5 text-red-400" />
             <p className="ml-3 text-sm text-red-700">{error}</p>
             <button onClick={() => setError(null)} className="ml-auto text-red-500 hover:text-red-700">
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {successMessage && (
+        <div className="mt-4 rounded-md bg-green-50 p-4">
+          <div className="flex">
+            <Check className="h-5 w-5 text-green-400" />
+            <p className="ml-3 text-sm text-green-700">{successMessage}</p>
+            <button onClick={() => setSuccessMessage(null)} className="ml-auto text-green-500 hover:text-green-700">
               <X className="h-5 w-5" />
             </button>
           </div>
@@ -202,6 +301,155 @@ export default function UserManagement() {
           </div>
         ))}
       </div>
+
+      {/* Pending Approvals Section */}
+      {pendingUsers.length > 0 && (
+        <div className="mt-8">
+          <div className="flex items-center mb-4">
+            <Clock className="h-5 w-5 text-amber-500 mr-2" />
+            <h2 className="text-lg font-semibold text-gray-900">Pending Approvals ({pendingUsers.length})</h2>
+          </div>
+          <div className="bg-amber-50 border border-amber-200 rounded-lg overflow-hidden">
+            <ul className="divide-y divide-amber-200">
+              {pendingUsers.map((user) => (
+                <li key={user.id} className="px-4 py-4 sm:px-6">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center">
+                      <div className="h-10 w-10 flex-shrink-0 rounded-full bg-amber-100 flex items-center justify-center">
+                        <Users className="h-5 w-5 text-amber-600" />
+                      </div>
+                      <div className="ml-4">
+                        <div className="font-medium text-gray-900">{user.username}</div>
+                        <div className="text-sm text-gray-500">{user.email}</div>
+                        <div className="text-xs text-gray-400">Registered: {new Date(user.created_at).toLocaleDateString()}</div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => handleApprove(user.id)}
+                        className="inline-flex items-center px-3 py-1.5 border border-transparent text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700"
+                      >
+                        <Check className="h-4 w-4 mr-1" />
+                        Approve
+                      </button>
+                      <button
+                        onClick={() => handleDeny(user.id)}
+                        className="inline-flex items-center px-3 py-1.5 border border-transparent text-sm font-medium rounded-md text-white bg-red-600 hover:bg-red-700"
+                      >
+                        <Ban className="h-4 w-4 mr-1" />
+                        Deny
+                      </button>
+                    </div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      )}
+
+      {/* Create User Modal */}
+      {showCreateModal && (
+        <div className="fixed inset-0 z-50 overflow-y-auto">
+          <div className="flex items-center justify-center min-h-screen px-4">
+            <div className="fixed inset-0 bg-gray-500 bg-opacity-75" onClick={() => setShowCreateModal(false)} />
+            <div className="relative bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-lg font-medium text-gray-900">Create New User</h3>
+                <button onClick={() => setShowCreateModal(false)} className="text-gray-400 hover:text-gray-600">
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Username</label>
+                  <input
+                    type="text"
+                    value={createForm.username}
+                    onChange={(e) => setCreateForm({ ...createForm, username: e.target.value })}
+                    className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm px-3 py-2 focus:ring-primary-500 focus:border-primary-500 sm:text-sm"
+                    placeholder="Enter username"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Email</label>
+                  <input
+                    type="email"
+                    value={createForm.email}
+                    onChange={(e) => setCreateForm({ ...createForm, email: e.target.value })}
+                    className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm px-3 py-2 focus:ring-primary-500 focus:border-primary-500 sm:text-sm"
+                    placeholder="user@example.com"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Password</label>
+                  <div className="mt-1 flex gap-2">
+                    <input
+                      type="text"
+                      value={createForm.password}
+                      onChange={(e) => setCreateForm({ ...createForm, password: e.target.value })}
+                      className="block flex-1 border border-gray-300 rounded-md shadow-sm px-3 py-2 focus:ring-primary-500 focus:border-primary-500 sm:text-sm"
+                      placeholder="Enter or generate password"
+                    />
+                    <button
+                      type="button"
+                      onClick={generateRandomPassword}
+                      className="px-3 py-2 border border-gray-300 rounded-md text-sm text-gray-700 hover:bg-gray-50"
+                      title="Generate random password"
+                    >
+                      <RefreshCw className="h-4 w-4" />
+                    </button>
+                  </div>
+                  <p className="mt-1 text-xs text-gray-500">User will be required to change password on first login.</p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Roles</label>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {roles.map((role) => (
+                      <label key={role.value} className="inline-flex items-center">
+                        <input
+                          type="checkbox"
+                          checked={createForm.roles?.includes(role.value) ?? false}
+                          onChange={(e) => {
+                            const newRoles = e.target.checked
+                              ? [...(createForm.roles || []), role.value]
+                              : (createForm.roles || []).filter(r => r !== role.value)
+                            setCreateForm({ ...createForm, roles: newRoles })
+                          }}
+                          className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                        />
+                        <span className={`ml-2 text-sm ${getRoleBadgeColor(role.value)} px-2 py-0.5 rounded-full`}>
+                          {role.label}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-6 flex justify-end gap-3">
+                <button
+                  onClick={() => setShowCreateModal(false)}
+                  className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleCreateUser}
+                  disabled={createLoading || !createForm.username || !createForm.email || !createForm.password}
+                  className="px-4 py-2 text-sm font-medium text-white bg-primary-600 border border-transparent rounded-md hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {createLoading ? 'Creating...' : 'Create User'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* User Attribute Editor Modal */}
       {editingUser && (
@@ -369,15 +617,23 @@ export default function UserManagement() {
                         </div>
                       </td>
                       <td className="whitespace-nowrap px-3 py-4 text-sm">
-                        <button
-                          onClick={() => user.id !== currentUser?.id && handleToggleActive(user.id, !user.is_active)}
-                          disabled={user.id === currentUser?.id}
-                          className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                            user.is_active ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
-                          } ${user.id !== currentUser?.id ? 'cursor-pointer hover:opacity-80' : 'cursor-not-allowed'}`}
-                        >
-                          {user.is_active ? 'Active' : 'Inactive'}
-                        </button>
+                        <div className="flex flex-col gap-1">
+                          <button
+                            onClick={() => user.id !== currentUser?.id && handleToggleActive(user.id, !user.is_active)}
+                            disabled={user.id === currentUser?.id}
+                            className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                              user.is_active ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
+                            } ${user.id !== currentUser?.id ? 'cursor-pointer hover:opacity-80' : 'cursor-not-allowed'}`}
+                          >
+                            {user.is_active ? 'Active' : 'Inactive'}
+                          </button>
+                          {user.password_reset_required && (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800">
+                              <Key className="h-3 w-3 mr-1" />
+                              Password Reset
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="relative whitespace-nowrap py-4 pl-3 pr-4 text-right text-sm font-medium sm:pr-6">
                         <div className="flex items-center justify-end gap-2">
@@ -387,6 +643,15 @@ export default function UserManagement() {
                           >
                             Edit
                           </button>
+                          {user.id !== currentUser?.id && (
+                            <button
+                              onClick={() => handleResetPassword(user.id)}
+                              className="text-amber-600 hover:text-amber-900"
+                              title="Force password reset on next login"
+                            >
+                              <Key className="h-4 w-4" />
+                            </button>
+                          )}
                           {deleteConfirmId === user.id ? (
                             <div className="flex items-center gap-1">
                               <button onClick={() => handleDelete(user.id)} className="text-red-600 hover:text-red-900">Yes</button>

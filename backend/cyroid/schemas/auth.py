@@ -10,3 +10,8 @@ class LoginRequest(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+    password_reset_required: bool = False
+
+
+class PasswordChangeResponse(BaseModel):
+    message: str

@@ -76,20 +76,20 @@ export function VMGrid({ vms, onRefresh, onOpenConsole }: Props) {
   }
 
   return (
-    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 lg:gap-4">
       {vms.map((vm) => {
         const stats = vmStats[vm.id]
         return (
           <div
             key={vm.id}
-            className="bg-white rounded-lg shadow p-4 border border-gray-200"
+            className="bg-white rounded-lg shadow p-3 lg:p-4 border border-gray-200 min-w-0"
           >
-            <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center gap-2">
-                <Server className="w-5 h-5 text-orange-500" />
+            <div className="flex items-center justify-between mb-3 gap-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <Server className="w-5 h-5 text-orange-500 shrink-0" />
                 <span className="font-medium truncate">{vm.hostname}</span>
               </div>
-              <span className={clsx('w-3 h-3 rounded-full', statusColors[vm.status])} />
+              <span className={clsx('w-3 h-3 rounded-full shrink-0', statusColors[vm.status])} />
             </div>
 
             <div className="text-xs text-gray-500 mb-3 space-y-1">
@@ -97,7 +97,7 @@ export function VMGrid({ vms, onRefresh, onOpenConsole }: Props) {
               {vm.status === 'running' && stats ? (
                 <>
                   <div className="flex items-center gap-1">
-                    <Cpu className="w-3 h-3" />
+                    <Cpu className="w-3 h-3" title="CPU Usage" />
                     <span>{stats.cpu_percent.toFixed(1)}%</span>
                     <div className="flex-1 bg-gray-200 rounded h-1.5">
                       <div
@@ -107,7 +107,7 @@ export function VMGrid({ vms, onRefresh, onOpenConsole }: Props) {
                     </div>
                   </div>
                   <div className="flex items-center gap-1">
-                    <HardDrive className="w-3 h-3" />
+                    <HardDrive className="w-3 h-3" title="Memory Usage" />
                     <span>{stats.memory_percent.toFixed(1)}%</span>
                     <div className="flex-1 bg-gray-200 rounded h-1.5">
                       <div

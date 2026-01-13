@@ -121,9 +121,9 @@ export default function ExecutionConsole() {
       </div>
 
       {/* Main Content */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex overflow-hidden min-h-0">
         {/* Left Panel - VM Grid */}
-        <div className="flex-1 p-6 overflow-y-auto">
+        <div className="flex-1 min-w-0 p-4 lg:p-6 overflow-y-auto">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-medium">Virtual Machines</h2>
             <MSELUpload rangeId={rangeId} onMSELLoaded={handleMSELLoaded} />
@@ -141,7 +141,7 @@ export default function ExecutionConsole() {
         </div>
 
         {/* Right Panel - Tabbed View */}
-        <div className="w-[420px] border-l bg-gray-50 flex flex-col">
+        <div className="w-[280px] lg:w-[360px] xl:w-[420px] shrink-0 border-l bg-gray-50 flex flex-col">
           {/* Tabs */}
           <div className="flex border-b bg-white">
             <button
@@ -197,8 +197,8 @@ export default function ExecutionConsole() {
 
       {/* Console Modal */}
       {selectedVM && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg shadow-xl w-4/5 h-4/5 flex flex-col">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl w-full h-full max-w-6xl max-h-[90vh] flex flex-col">
             <div className="flex items-center justify-between px-4 py-2 border-b">
               <h3 className="font-medium">VM Console - {selectedVM.hostname}</h3>
               <button

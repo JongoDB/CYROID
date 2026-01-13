@@ -1,6 +1,6 @@
 // frontend/src/pages/Register.tsx
 import { useState, FormEvent } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import { useAuthStore } from '../stores/authStore'
 
 export default function Register() {
@@ -9,8 +9,8 @@ export default function Register() {
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [localError, setLocalError] = useState<string | null>(null)
+  const [registrationSuccess, setRegistrationSuccess] = useState(false)
   const { register, isLoading, error, clearError } = useAuthStore()
-  const navigate = useNavigate()
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
@@ -28,13 +28,46 @@ export default function Register() {
 
     try {
       await register({ username, email, password })
-      navigate('/login')
+      setRegistrationSuccess(true)
     } catch {
       // Error is handled by store
     }
   }
 
   const displayError = localError || error
+
+  // Show success message after registration
+  if (registrationSuccess) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4">
+        <div className="max-w-md w-full space-y-8">
+          <div>
+            <h1 className="text-center text-4xl font-bold text-primary-600">CYROID</h1>
+            <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
+              Registration Submitted
+            </h2>
+          </div>
+
+          <div className="bg-amber-50 border border-amber-200 text-amber-800 px-6 py-4 rounded-md">
+            <h3 className="font-semibold mb-2">Pending Approval</h3>
+            <p className="text-sm">
+              Your account has been created but requires administrator approval before you can sign in.
+              You will be notified once your account has been approved.
+            </p>
+          </div>
+
+          <div className="text-center">
+            <Link
+              to="/login"
+              className="font-medium text-primary-600 hover:text-primary-500"
+            >
+              Return to Sign In
+            </Link>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4">
@@ -50,6 +83,10 @@ export default function Register() {
               Sign in
             </Link>
           </p>
+        </div>
+
+        <div className="bg-blue-50 border border-blue-200 text-blue-800 px-4 py-3 rounded-md text-sm">
+          <strong>Note:</strong> New accounts require administrator approval before you can sign in.
         </div>
 
         <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
