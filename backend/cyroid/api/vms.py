@@ -207,18 +207,29 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
             if display_type == "desktop":
                 # Determine VNC port and scheme based on image type
                 base_image = template.base_image or ""
+                is_linuxserver = "linuxserver/" in base_image or "lscr.io/linuxserver" in base_image
+                is_kasmweb = "kasmweb/" in base_image
+
                 if base_image.startswith("iso:") or template.os_type == OSType.WINDOWS:
                     # qemus/qemu and dockur/windows use port 8006 over HTTP
                     vnc_port = "8006"
                     vnc_scheme = "http"
-                elif "kasmweb/" in base_image or "kasm" in base_image.lower():
-                    # KasmVNC containers use port 6901 over HTTPS
+                    needs_auth = False
+                elif is_linuxserver:
+                    # LinuxServer containers (webtop, etc.) use port 3000 over HTTP, no auth by default
+                    vnc_port = "3000"
+                    vnc_scheme = "http"
+                    needs_auth = False
+                elif is_kasmweb:
+                    # Official KasmVNC containers use port 6901 over HTTPS with auth
                     vnc_port = "6901"
                     vnc_scheme = "https"
+                    needs_auth = True
                 else:
                     # Default to 6901/HTTPS for other desktop containers
                     vnc_port = "6901"
                     vnc_scheme = "https"
+                    needs_auth = False
 
                 router_name = f"vnc-{vm_id_short}"
                 middlewares = [f"vnc-strip-{vm_id_short}"]
@@ -237,8 +248,8 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
                 if vnc_scheme == "https":
                     labels[f"traefik.http.services.{router_name}.loadbalancer.serversTransport"] = "insecure-transport@file"
 
-                # For KasmVNC containers, inject Basic Auth header to auto-login
-                if "kasmweb/" in base_image or "kasm" in base_image.lower():
+                # For official KasmVNC containers, inject Basic Auth header to auto-login
+                if needs_auth:
                     import base64
                     # Default KasmVNC credentials
                     auth_string = base64.b64encode(b"kasm_user:vncpassword").decode()
