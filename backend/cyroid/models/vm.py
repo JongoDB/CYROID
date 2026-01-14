@@ -46,9 +46,10 @@ class VM(Base, UUIDMixin, TimestampMixin):
     # Display type for Windows VMs: desktop (VNC/web console) or server (RDP only)
     display_type: Mapped[Optional[str]] = mapped_column(String(20), nullable=True, default="desktop")
 
-    # Extended dockur/windows configuration
     # Network configuration
     use_dhcp: Mapped[bool] = mapped_column(Boolean, default=False)  # DHCP vs static IP
+    gateway: Mapped[Optional[str]] = mapped_column(String(15), nullable=True)  # Gateway IP
+    dns_servers: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)  # Comma-separated DNS
 
     # Additional storage (shows as D:, E: drives in Windows)
     disk2_gb: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)

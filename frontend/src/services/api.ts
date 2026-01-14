@@ -231,8 +231,11 @@ export interface VMCreate {
   iso_url?: string
   iso_path?: string
   display_type?: 'desktop' | 'server'
-  // Extended dockur/windows configuration
+  // Network configuration
   use_dhcp?: boolean
+  gateway?: string
+  dns_servers?: string
+  // Extended configuration
   disk2_gb?: number | null
   disk3_gb?: number | null
   enable_shared_folder?: boolean

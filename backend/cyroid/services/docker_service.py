@@ -243,8 +243,11 @@ class DockerService:
         username: Optional[str] = None,
         password: Optional[str] = None,
         display_type: str = "desktop",
-        # Extended dockur/windows configuration
+        # Network configuration
         use_dhcp: bool = False,
+        gateway: Optional[str] = None,
+        dns_servers: Optional[str] = None,
+        # Extended dockur/windows configuration
         disk2_gb: Optional[int] = None,
         disk3_gb: Optional[int] = None,
         enable_shared_folder: bool = False,
@@ -333,10 +336,16 @@ class DockerService:
         if password:
             environment["PASSWORD"] = password
 
-        # Extended dockur/windows configuration
-        # DHCP mode
+        # Network configuration
         if use_dhcp:
             environment["DHCP"] = "Y"
+        else:
+            # Static IP configuration - gateway and DNS
+            if gateway:
+                environment["GATEWAY"] = gateway
+            if dns_servers:
+                # dockur/windows accepts comma-separated DNS servers
+                environment["DNS"] = dns_servers
 
         # Additional disks
         if disk2_gb:
@@ -497,6 +506,9 @@ class DockerService:
         storage_path: Optional[str] = None,
         clone_from: Optional[str] = None,
         display_type: str = "desktop",
+        # Network configuration (for reference - requires manual config in VM)
+        gateway: Optional[str] = None,
+        dns_servers: Optional[str] = None,
         # Extended qemus/qemu configuration
         boot_mode: str = "uefi",
         disk_type: str = "scsi",

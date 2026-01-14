@@ -50,14 +50,16 @@ export default function RangeDetail() {
     cpu: 2,
     ram_mb: 2048,
     disk_gb: 20,
-    // Windows-specific
+    // Windows-specific (version inherited from template)
     windows_version: '',
     windows_username: '',
     windows_password: '',
-    iso_url: '',
     display_type: 'desktop',
-    // Extended dockur/windows configuration
+    // Network configuration
     use_dhcp: false,
+    gateway: '',
+    dns_servers: '',
+    // Extended configuration
     disk2_gb: null,
     disk3_gb: null,
     enable_shared_folder: false,
@@ -173,12 +175,15 @@ export default function RangeDetail() {
     setError(null)
 
     try {
+      // For Windows with DHCP, ip_address can be empty
+      const usesDhcp = showWindowsOptions && vmForm.use_dhcp
+
       const vmData: VMCreate = {
         range_id: id,
         network_id: vmForm.network_id!,
         template_id: vmForm.template_id!,
         hostname: vmForm.hostname!,
-        ip_address: vmForm.ip_address!,
+        ip_address: usesDhcp ? '' : vmForm.ip_address!,
         cpu: vmForm.cpu!,
         ram_mb: vmForm.ram_mb!,
         disk_gb: vmForm.disk_gb!
@@ -186,13 +191,17 @@ export default function RangeDetail() {
 
       // Add Windows-specific settings if template is Windows
       if (showWindowsOptions) {
-        if (vmForm.windows_version) vmData.windows_version = vmForm.windows_version
+        // Windows version comes from template, not user selection
         if (vmForm.windows_username) vmData.windows_username = vmForm.windows_username
         if (vmForm.windows_password) vmData.windows_password = vmForm.windows_password
-        if (vmForm.iso_url) vmData.iso_url = vmForm.iso_url
         vmData.display_type = vmForm.display_type || 'desktop'
-        // Extended dockur/windows configuration
+        // Network configuration
         vmData.use_dhcp = vmForm.use_dhcp || false
+        if (!vmForm.use_dhcp) {
+          if (vmForm.gateway) vmData.gateway = vmForm.gateway
+          if (vmForm.dns_servers) vmData.dns_servers = vmForm.dns_servers
+        }
+        // Extended configuration
         if (vmForm.disk2_gb) vmData.disk2_gb = vmForm.disk2_gb
         if (vmForm.disk3_gb) vmData.disk3_gb = vmForm.disk3_gb
         vmData.enable_shared_folder = vmForm.enable_shared_folder || false
@@ -206,7 +215,10 @@ export default function RangeDetail() {
       // Add Linux ISO-specific settings
       if (showLinuxISOOptions) {
         vmData.display_type = vmForm.display_type || 'desktop'
-        if (vmForm.iso_url) vmData.iso_url = vmForm.iso_url
+        // Network configuration (static IP only for Linux)
+        if (vmForm.gateway) vmData.gateway = vmForm.gateway
+        if (vmForm.dns_servers) vmData.dns_servers = vmForm.dns_servers
+        // Extended configuration
         if (vmForm.disk2_gb) vmData.disk2_gb = vmForm.disk2_gb
         if (vmForm.disk3_gb) vmData.disk3_gb = vmForm.disk3_gb
         vmData.enable_shared_folder = vmForm.enable_shared_folder || false
@@ -218,10 +230,12 @@ export default function RangeDetail() {
       setVmForm({
         hostname: '', ip_address: '', network_id: '', template_id: '',
         cpu: 2, ram_mb: 2048, disk_gb: 20,
-        windows_version: '', windows_username: '', windows_password: '', iso_url: '',
+        windows_version: '', windows_username: '', windows_password: '',
         display_type: 'desktop',
-        // Extended dockur/windows configuration reset
-        use_dhcp: false, disk2_gb: null, disk3_gb: null,
+        // Network configuration reset
+        use_dhcp: false, gateway: '', dns_servers: '',
+        // Extended configuration reset
+        disk2_gb: null, disk3_gb: null,
         enable_shared_folder: false, enable_global_shared: false,
         language: null, keyboard: null, region: null, manual_install: false
       })
@@ -626,29 +640,16 @@ export default function RangeDetail() {
                     ))}
                   </select>
                 </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700">Hostname</label>
-                    <input
-                      type="text"
-                      required
-                      value={vmForm.hostname}
-                      onChange={(e) => setVmForm({ ...vmForm, hostname: e.target.value })}
-                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
-                      placeholder="web-server-01"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700">IP Address</label>
-                    <input
-                      type="text"
-                      required
-                      value={vmForm.ip_address}
-                      onChange={(e) => setVmForm({ ...vmForm, ip_address: e.target.value })}
-                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
-                      placeholder="10.0.1.10"
-                    />
-                  </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Hostname</label>
+                  <input
+                    type="text"
+                    required
+                    value={vmForm.hostname}
+                    onChange={(e) => setVmForm({ ...vmForm, hostname: e.target.value })}
+                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                    placeholder="web-server-01"
+                  />
                 </div>
                 <div className="grid grid-cols-3 gap-4">
                   <div>
@@ -685,6 +686,21 @@ export default function RangeDetail() {
                   </div>
                 </div>
 
+                {/* IP Address for non-Windows, non-Linux ISO templates (regular containers) */}
+                {!showWindowsOptions && !showLinuxISOOptions && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">IP Address</label>
+                    <input
+                      type="text"
+                      required
+                      value={vmForm.ip_address}
+                      onChange={(e) => setVmForm({ ...vmForm, ip_address: e.target.value })}
+                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                      placeholder="10.0.1.10"
+                    />
+                  </div>
+                )}
+
                 {/* Windows-specific options */}
                 {showWindowsOptions && (
                   <div className="border-t pt-4 space-y-4">
@@ -708,41 +724,6 @@ export default function RangeDetail() {
                           : 'Server mode is headless, use RDP (port 3389) to connect'}
                       </p>
                     </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700">Windows Version</label>
-                      <select
-                        value={vmForm.windows_version}
-                        onChange={(e) => setVmForm({ ...vmForm, windows_version: e.target.value })}
-                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
-                      >
-                        <optgroup label="Desktop">
-                          <option value="11">Windows 11 Pro (7.2 GB)</option>
-                          <option value="11l">Windows 11 LTSC (4.7 GB)</option>
-                          <option value="11e">Windows 11 Enterprise (6.6 GB)</option>
-                          <option value="10">Windows 10 Pro (5.7 GB)</option>
-                          <option value="10l">Windows 10 LTSC (4.6 GB)</option>
-                          <option value="10e">Windows 10 Enterprise (5.2 GB)</option>
-                          <option value="8e">Windows 8.1 Enterprise (3.7 GB)</option>
-                        </optgroup>
-                        <optgroup label="Server">
-                          <option value="2025">Windows Server 2025 (6.7 GB)</option>
-                          <option value="2022">Windows Server 2022 (6.0 GB)</option>
-                          <option value="2019">Windows Server 2019 (5.3 GB)</option>
-                          <option value="2016">Windows Server 2016 (6.5 GB)</option>
-                          <option value="2012">Windows Server 2012 (4.3 GB)</option>
-                          <option value="2008">Windows Server 2008 (3.0 GB)</option>
-                        </optgroup>
-                        <optgroup label="Legacy">
-                          <option value="7u">Windows 7 Ultimate (3.1 GB)</option>
-                          <option value="vu">Windows Vista Ultimate (3.0 GB)</option>
-                          <option value="xp">Windows XP Professional (0.6 GB)</option>
-                          <option value="2k">Windows 2000 Professional (0.4 GB)</option>
-                          <option value="2003">Windows Server 2003 (0.6 GB)</option>
-                        </optgroup>
-                      </select>
-                      <p className="mt-1 text-xs text-gray-500">ISO will be auto-downloaded by dockur/windows</p>
-                    </div>
-
                     {/* IP Assignment */}
                     <div>
                       <label className="block text-sm font-medium text-gray-700">IP Assignment</label>
@@ -751,15 +732,50 @@ export default function RangeDetail() {
                         onChange={(e) => setVmForm({ ...vmForm, use_dhcp: e.target.value === 'dhcp' })}
                         className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
                       >
-                        <option value="static">Static IP (use IP address field above)</option>
-                        <option value="dhcp">DHCP (Windows requests IP automatically)</option>
+                        <option value="static">Static IP</option>
+                        <option value="dhcp">DHCP</option>
                       </select>
-                      <p className="mt-1 text-xs text-gray-500">
-                        {vmForm.use_dhcp
-                          ? 'Windows will request an IP from the network DHCP server'
-                          : 'Windows will use the static IP address specified above'}
-                      </p>
                     </div>
+                    {!vmForm.use_dhcp && (
+                      <div className="grid grid-cols-3 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700">IP Address</label>
+                          <input
+                            type="text"
+                            required
+                            value={vmForm.ip_address}
+                            onChange={(e) => setVmForm({ ...vmForm, ip_address: e.target.value })}
+                            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                            placeholder="10.0.1.10"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700">Gateway</label>
+                          <input
+                            type="text"
+                            value={vmForm.gateway}
+                            onChange={(e) => setVmForm({ ...vmForm, gateway: e.target.value })}
+                            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                            placeholder="10.0.1.1"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700">DNS</label>
+                          <input
+                            type="text"
+                            value={vmForm.dns_servers}
+                            onChange={(e) => setVmForm({ ...vmForm, dns_servers: e.target.value })}
+                            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                            placeholder="8.8.8.8,8.8.4.4"
+                          />
+                        </div>
+                      </div>
+                    )}
+                    <p className="text-xs text-gray-500">
+                      {vmForm.use_dhcp
+                        ? 'Windows will request network configuration from DHCP server'
+                        : 'Configure static IP, gateway, and DNS servers for Windows'}
+                    </p>
 
                     <div className="grid grid-cols-2 gap-4">
                       <div>
@@ -836,18 +852,6 @@ export default function RangeDetail() {
                         </div>
                       </div>
                       <p className="mt-1 text-xs text-gray-500">Additional disks appear as D: and E: drives in Windows</p>
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700">Custom ISO URL (optional)</label>
-                      <input
-                        type="url"
-                        value={vmForm.iso_url}
-                        onChange={(e) => setVmForm({ ...vmForm, iso_url: e.target.value })}
-                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
-                        placeholder="https://example.com/custom.iso"
-                      />
-                      <p className="mt-1 text-xs text-gray-500">Overrides the automatic ISO download</p>
                     </div>
 
                     {/* Localization - Collapsible */}
@@ -946,17 +950,41 @@ export default function RangeDetail() {
                           : 'Server mode is headless, no GUI - use SSH to connect'}
                       </p>
                     </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700">Custom ISO URL (optional)</label>
-                      <input
-                        type="url"
-                        value={vmForm.iso_url}
-                        onChange={(e) => setVmForm({ ...vmForm, iso_url: e.target.value })}
-                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
-                        placeholder="https://example.com/custom-linux.iso"
-                      />
-                      <p className="mt-1 text-xs text-gray-500">Overrides the template's default ISO</p>
+                    {/* Network Configuration */}
+                    <div className="grid grid-cols-3 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700">IP Address</label>
+                        <input
+                          type="text"
+                          required
+                          value={vmForm.ip_address}
+                          onChange={(e) => setVmForm({ ...vmForm, ip_address: e.target.value })}
+                          className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                          placeholder="10.0.1.10"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700">Gateway</label>
+                        <input
+                          type="text"
+                          value={vmForm.gateway}
+                          onChange={(e) => setVmForm({ ...vmForm, gateway: e.target.value })}
+                          className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                          placeholder="10.0.1.1"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700">DNS</label>
+                        <input
+                          type="text"
+                          value={vmForm.dns_servers}
+                          onChange={(e) => setVmForm({ ...vmForm, dns_servers: e.target.value })}
+                          className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                          placeholder="8.8.8.8,8.8.4.4"
+                        />
+                      </div>
                     </div>
+                    <p className="text-xs text-gray-500">Static network configuration for the VM</p>
                     {/* Shared Folders */}
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">Shared Folders</label>

@@ -30,9 +30,10 @@ class VMCreate(VMBase):
     iso_path: Optional[str] = Field(None, max_length=512, description="Local ISO path for bind mount")
     display_type: Optional[str] = Field("desktop", description="Display type: 'desktop' (VNC/web console) or 'server' (RDP only)")
 
-    # Extended dockur/windows configuration
-    # Network mode
+    # Network configuration
     use_dhcp: bool = Field(default=False, description="Use DHCP instead of static IP assignment")
+    gateway: Optional[str] = Field(None, pattern=r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", description="Gateway IP address")
+    dns_servers: Optional[str] = Field(None, max_length=100, description="DNS servers (comma-separated)")
 
     # Additional storage (appears as D:, E: drives in Windows)
     disk2_gb: Optional[int] = Field(None, ge=1, le=1000, description="Second disk size in GB")
@@ -66,8 +67,11 @@ class VMUpdate(BaseModel):
     iso_url: Optional[str] = Field(None, max_length=512)
     iso_path: Optional[str] = Field(None, max_length=512)
     display_type: Optional[str] = Field(None, max_length=20)
-    # Extended dockur/windows configuration
+    # Network configuration
     use_dhcp: Optional[bool] = None
+    gateway: Optional[str] = Field(None, pattern=r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$")
+    dns_servers: Optional[str] = Field(None, max_length=100)
+    # Extended configuration
     disk2_gb: Optional[int] = Field(None, ge=1, le=1000)
     disk3_gb: Optional[int] = Field(None, ge=1, le=1000)
     enable_shared_folder: Optional[bool] = None
@@ -92,8 +96,11 @@ class VMResponse(VMBase):
     iso_url: Optional[str] = None
     iso_path: Optional[str] = None
     display_type: Optional[str] = "desktop"
-    # Extended dockur/windows configuration
+    # Network configuration
     use_dhcp: bool = False
+    gateway: Optional[str] = None
+    dns_servers: Optional[str] = None
+    # Extended configuration
     disk2_gb: Optional[int] = None
     disk3_gb: Optional[int] = None
     enable_shared_folder: bool = False

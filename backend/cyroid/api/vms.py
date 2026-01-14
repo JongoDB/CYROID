@@ -321,8 +321,11 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
                     username=vm.windows_username,
                     password=vm.windows_password,
                     display_type=vm.display_type or "desktop",
-                    # Extended dockur/windows configuration
+                    # Network configuration
                     use_dhcp=vm.use_dhcp,
+                    gateway=vm.gateway,
+                    dns_servers=vm.dns_servers,
+                    # Extended dockur/windows configuration
                     disk2_gb=vm.disk2_gb,
                     disk3_gb=vm.disk3_gb,
                     enable_shared_folder=vm.enable_shared_folder,
