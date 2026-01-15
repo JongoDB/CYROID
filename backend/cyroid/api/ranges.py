@@ -243,6 +243,7 @@ def deploy_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
 
                     if needs_auth:
                         import base64
+                        # Use hardcoded VNC credentials for seamless console auto-login
                         auth_string = base64.b64encode(b"kasm_user:vncpassword").decode()
                         auth_middleware = f"vnc-auth-{vm_id_short}"
                         labels[f"traefik.http.middlewares.{auth_middleware}.headers.customrequestheaders.Authorization"] = f"Basic {auth_string}"
@@ -333,10 +334,23 @@ def deploy_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
                         memory_limit_mb=vm.ram_mb,
                         hostname=vm.hostname,
                         labels=labels,
+                        linux_username=vm.linux_username,
+                        linux_password=vm.linux_password,
+                        linux_user_sudo=vm.linux_user_sudo,
                     )
 
                 vm.container_id = container_id
                 docker.start_container(container_id)
+
+                # Configure Linux user for KasmVNC containers
+                base_image = template.base_image or ""
+                if "kasmweb/" in base_image:
+                    # KasmVNC uses 'kasm-user' as the default user
+                    username = vm.linux_username or "kasm-user"
+                    if vm.linux_password:
+                        docker.set_linux_user_password(container_id, username, vm.linux_password)
+                    if vm.linux_user_sudo:
+                        docker.grant_sudo_privileges(container_id, username)
 
                 # Run config script if present
                 if template.config_script:

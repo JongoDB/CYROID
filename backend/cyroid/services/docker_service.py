@@ -187,10 +187,10 @@ class DockerService:
 
         # Configure user settings based on container image type
         if "kasmweb/" in image:
-            # KasmVNC containers - set VNC password (user is always kasm_user)
-            if linux_password:
-                environment["VNC_PW"] = linux_password
-                logger.info(f"Set VNC password for KasmVNC container {name}")
+            # KasmVNC containers - use hardcoded VNC password for seamless auto-login
+            # The linux_password field is for the actual OS user, not VNC auth
+            environment["VNC_PW"] = "vncpassword"
+            logger.info(f"Set default VNC password for KasmVNC container {name}")
         elif "linuxserver/" in image or "lscr.io/linuxserver" in image:
             # LinuxServer containers (webtop, etc.)
             if linux_username:
@@ -1063,7 +1063,83 @@ local-hostname: {name}
         except APIError as e:
             logger.error(f"Failed to exec in container {container_id}: {e}")
             raise
-    
+
+    def set_linux_user_password(
+        self,
+        container_id: str,
+        username: str,
+        password: str
+    ) -> bool:
+        """
+        Set the password for a Linux user in a running container.
+        Uses chpasswd to change the password.
+
+        Args:
+            container_id: The container ID
+            username: The Linux username (e.g., 'kasm-user')
+            password: The new password
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            # Use chpasswd to set the password
+            command = f'echo "{username}:{password}" | chpasswd'
+            exit_code, output = self.exec_command(
+                container_id,
+                f'/bin/sh -c \'{command}\'',
+                user="root"
+            )
+            if exit_code == 0:
+                logger.info(f"Set password for user {username} in container {container_id[:12]}")
+                return True
+            else:
+                logger.warning(f"Failed to set password for {username}: {output}")
+                return False
+        except Exception as e:
+            logger.warning(f"Failed to set password for {username} in {container_id[:12]}: {e}")
+            return False
+
+    def grant_sudo_privileges(
+        self,
+        container_id: str,
+        username: str,
+        nopasswd: bool = False
+    ) -> bool:
+        """
+        Grant sudo privileges to a Linux user in a running container.
+
+        Args:
+            container_id: The container ID
+            username: The Linux username (e.g., 'kasm-user')
+            nopasswd: If True, allows sudo without password. Default False requires password.
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            if nopasswd:
+                sudoers_line = f'{username} ALL=(ALL) NOPASSWD: ALL'
+            else:
+                sudoers_line = f'{username} ALL=(ALL) ALL'
+
+            # Add user to sudoers file
+            command = f'echo "{sudoers_line}" >> /etc/sudoers'
+            exit_code, output = self.exec_command(
+                container_id,
+                f'/bin/sh -c \'{command}\'',
+                user="root"
+            )
+            if exit_code == 0:
+                logger.info(f"Granted sudo privileges to {username} in container {container_id[:12]}")
+                return True
+            else:
+                logger.warning(f"Failed to grant sudo to {username}: {output}")
+                return False
+        except Exception as e:
+            logger.warning(f"Failed to grant sudo to {username} in {container_id[:12]}: {e}")
+            return False
+
     def copy_to_container(
         self,
         container_id: str,

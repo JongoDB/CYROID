@@ -1147,18 +1147,30 @@ export default function RangeDetail() {
                     {linuxContainerType === 'kasmvnc' ? (
                       <>
                         <div>
-                          <label className="block text-sm font-medium text-gray-700">VNC Password (optional)</label>
+                          <label className="block text-sm font-medium text-gray-700">User Password (optional)</label>
                           <input
                             type="password"
                             value={vmForm.linux_password}
                             onChange={(e) => setVmForm({ ...vmForm, linux_password: e.target.value })}
                             className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
-                            placeholder="Leave empty for no password"
+                            placeholder="Leave empty for default"
                           />
                           <p className="mt-1 text-xs text-gray-500">
-                            Sets the VNC password for kasm_user (username cannot be changed)
+                            Sets the Linux password for kasm-user (for sudo, terminal, etc.)
                           </p>
                         </div>
+                        <label className="flex items-center">
+                          <input
+                            type="checkbox"
+                            checked={vmForm.linux_user_sudo ?? false}
+                            onChange={(e) => setVmForm({ ...vmForm, linux_user_sudo: e.target.checked })}
+                            className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
+                          />
+                          <span className="ml-2 text-sm text-gray-700">Grant sudo privileges</span>
+                        </label>
+                        <p className="text-xs text-gray-500">
+                          Allows kasm-user to run commands as root (password required)
+                        </p>
                       </>
                     ) : (
                       <>
