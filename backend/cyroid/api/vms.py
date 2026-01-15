@@ -237,10 +237,19 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
                 labels.update({
                     "traefik.enable": "true",
                     "traefik.docker.network": "traefik-routing",  # Use traefik-routing network
-                    f"traefik.http.routers.{router_name}.rule": f"PathPrefix(`/vnc/{vm.id}`)",
-                    f"traefik.http.routers.{router_name}.entrypoints": "web",
+                    # Service (shared by both routers)
                     f"traefik.http.services.{router_name}.loadbalancer.server.port": vnc_port,
                     f"traefik.http.services.{router_name}.loadbalancer.server.scheme": vnc_scheme,
+                    # HTTP router
+                    f"traefik.http.routers.{router_name}.rule": f"PathPrefix(`/vnc/{vm.id}`)",
+                    f"traefik.http.routers.{router_name}.entrypoints": "web",
+                    f"traefik.http.routers.{router_name}.service": router_name,
+                    # HTTPS router
+                    f"traefik.http.routers.{router_name}-secure.rule": f"PathPrefix(`/vnc/{vm.id}`)",
+                    f"traefik.http.routers.{router_name}-secure.entrypoints": "websecure",
+                    f"traefik.http.routers.{router_name}-secure.tls": "true",
+                    f"traefik.http.routers.{router_name}-secure.service": router_name,
+                    # Middleware
                     f"traefik.http.middlewares.vnc-strip-{vm_id_short}.stripprefix.prefixes": f"/vnc/{vm.id}",
                 })
 
@@ -257,8 +266,9 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
                     labels[f"traefik.http.middlewares.{auth_middleware}.headers.customrequestheaders.Authorization"] = f"Basic {auth_string}"
                     middlewares.append(auth_middleware)
 
-                # Set all middlewares
+                # Set all middlewares (for both HTTP and HTTPS routers)
                 labels[f"traefik.http.routers.{router_name}.middlewares"] = ",".join(middlewares)
+                labels[f"traefik.http.routers.{router_name}-secure.middlewares"] = ",".join(middlewares)
 
             if template.os_type == OSType.WINDOWS:
                 settings = get_settings()

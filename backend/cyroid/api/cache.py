@@ -1644,14 +1644,13 @@ def delete_custom_iso(filename: str, current_user: AdminUser):
 # Recommended images for cyber ranges - categorized
 #
 # Categories:
-# - desktop: Images with GUI desktop environment (VNC/RDP/X11 accessible)
-# - workstation: Base OS images suitable for workstation use (no GUI pre-installed)
-# - server: Headless server images
+# - desktop: Images with GUI desktop environment (VNC/web accessible)
+# - server: Headless server/CLI images
 # - services: Purpose-built service containers
 
 RECOMMENDED_DOCKER_IMAGES = {
     "desktop": [
-        # Desktop images with built-in VNC/RDP access
+        # Desktop images with built-in VNC/web access
         {"image": "linuxserver/webtop:ubuntu-xfce", "description": "Ubuntu + XFCE desktop via web browser", "category": "desktop", "access": "web"},
         {"image": "linuxserver/webtop:debian-kde", "description": "Debian + KDE desktop via web browser", "category": "desktop", "access": "web"},
         {"image": "linuxserver/webtop:fedora-xfce", "description": "Fedora + XFCE desktop via web browser", "category": "desktop", "access": "web"},
@@ -1661,20 +1660,17 @@ RECOMMENDED_DOCKER_IMAGES = {
         {"image": "consol/ubuntu-xfce-vnc", "description": "Ubuntu + XFCE with VNC server", "category": "desktop", "access": "vnc"},
         {"image": "dorowu/ubuntu-desktop-lxde-vnc", "description": "Ubuntu + LXDE with VNC server", "category": "desktop", "access": "vnc"},
     ],
-    "workstation": [
-        # Base OS images for workstation use (CLI or install GUI manually)
-        {"image": "ubuntu:22.04", "description": "Ubuntu 22.04 LTS - Base workstation image", "category": "workstation"},
-        {"image": "ubuntu:20.04", "description": "Ubuntu 20.04 LTS - Stable base", "category": "workstation"},
-        {"image": "debian:12", "description": "Debian 12 Bookworm - Stable base", "category": "workstation"},
-        {"image": "fedora:39", "description": "Fedora 39 - Modern base", "category": "workstation"},
-        {"image": "kalilinux/kali-rolling", "description": "Kali Linux - Security tools (CLI)", "category": "workstation"},
-    ],
     "server": [
-        {"image": "ubuntu:22.04", "description": "Ubuntu 22.04 LTS - Server", "category": "server"},
-        {"image": "debian:11", "description": "Debian 11 Bullseye - Stable server", "category": "server"},
-        {"image": "rockylinux:9", "description": "Rocky Linux 9 - RHEL compatible server", "category": "server"},
-        {"image": "centos:7", "description": "CentOS 7 - Legacy server support", "category": "server"},
-        {"image": "alpine:3.19", "description": "Alpine Linux - Lightweight server", "category": "server"},
+        # Headless server/CLI images
+        {"image": "ubuntu:22.04", "description": "Ubuntu 22.04 LTS - Server/CLI", "category": "server"},
+        {"image": "ubuntu:20.04", "description": "Ubuntu 20.04 LTS - Server/CLI", "category": "server"},
+        {"image": "debian:12", "description": "Debian 12 Bookworm - Server/CLI", "category": "server"},
+        {"image": "debian:11", "description": "Debian 11 Bullseye - Server/CLI", "category": "server"},
+        {"image": "fedora:39", "description": "Fedora 39 - Server/CLI", "category": "server"},
+        {"image": "rockylinux:9", "description": "Rocky Linux 9 - RHEL compatible", "category": "server"},
+        {"image": "centos:7", "description": "CentOS 7 - Legacy support", "category": "server"},
+        {"image": "alpine:3.19", "description": "Alpine Linux - Lightweight", "category": "server"},
+        {"image": "kalilinux/kali-rolling", "description": "Kali Linux - Security tools (CLI)", "category": "server"},
     ],
     "services": [
         {"image": "nginx:latest", "description": "Nginx web server", "category": "services"},
@@ -1696,9 +1692,8 @@ def get_recommended_images(current_user: CurrentUser):
     These are commonly used images that can be pre-cached.
 
     Categories:
-    - desktop: Images with GUI desktop environment (VNC/RDP/X11 accessible)
-    - workstation: Base OS images suitable for workstation use (CLI, no GUI pre-installed)
-    - server: Headless server images
+    - desktop: Images with GUI desktop environment (VNC/web accessible)
+    - server: Headless server/CLI images
     - services: Purpose-built service containers
     """
     # Get cached images to mark which are already cached
@@ -1718,12 +1713,9 @@ def get_recommended_images(current_user: CurrentUser):
 
     return {
         "desktop": add_cached_status(RECOMMENDED_DOCKER_IMAGES["desktop"]),
-        "workstation": add_cached_status(RECOMMENDED_DOCKER_IMAGES["workstation"]),
         "server": add_cached_status(RECOMMENDED_DOCKER_IMAGES["server"]),
         "services": add_cached_status(RECOMMENDED_DOCKER_IMAGES["services"]),
-        "linux": add_cached_status(
-            RECOMMENDED_DOCKER_IMAGES["workstation"] + RECOMMENDED_DOCKER_IMAGES["server"]
-        ),  # Backwards compat - base OS images
+        "linux": add_cached_status(RECOMMENDED_DOCKER_IMAGES["server"]),  # Backwards compat
         "windows": DOCKUR_WINDOWS_VERSIONS,
     }
 

@@ -1,6 +1,27 @@
-# Traefik dynamic configuration for VNC proxy
+# Traefik dynamic configuration
 http:
   serversTransports:
-    # Transport for KasmVNC containers with self-signed certs
+    # Transport for containers with self-signed certs (KasmVNC, etc.)
     insecure-transport:
       insecureSkipVerify: true
+
+tls:
+  # Default certificate store
+  stores:
+    default:
+      defaultCertificate:
+        certFile: /etc/traefik/certs/cert.pem
+        keyFile: /etc/traefik/certs/key.pem
+
+  # Certificate configuration
+  certificates:
+    - certFile: /etc/traefik/certs/cert.pem
+      keyFile: /etc/traefik/certs/key.pem
+      stores:
+        - default
+
+  # TLS options
+  options:
+    default:
+      minVersion: VersionTLS12
+      sniStrict: false

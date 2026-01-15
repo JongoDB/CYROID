@@ -651,17 +651,12 @@ export default function Templates() {
                           </optgroup>
                         )}
 
-                        {/* Server - ISOs and containers for server use */}
-                        {((linuxVersions && linuxVersions.server.some(v => !v.cached)) || (recommendedImages && (recommendedImages.server.some(s => !s.cached) || recommendedImages.workstation.some(w => !w.cached)))) && (
-                          <optgroup label="Server">
+                        {/* Server - ISOs and containers for server/CLI use */}
+                        {((linuxVersions && linuxVersions.server.some(v => !v.cached)) || (recommendedImages && recommendedImages.server.some(s => !s.cached))) && (
+                          <optgroup label="Server/CLI">
                             {linuxVersions?.server.filter(v => !v.cached).map(v => (
                               <option key={`iso-${v.version}`} value={`iso:${v.version}`}>
                                 {v.name} (ISO) - {v.size_gb} GB
-                              </option>
-                            ))}
-                            {recommendedImages?.workstation.filter(w => !w.cached).map(rec => (
-                              <option key={rec.image} value={rec.image!}>
-                                {rec.image} (Container) - {rec.description}
                               </option>
                             ))}
                             {recommendedImages?.server.filter(s => !s.cached).map(rec => (

@@ -798,8 +798,7 @@ export default function ImageCache() {
   // Categorize cached Docker images
   const categorizeImages = () => {
     const desktop: CachedImage[] = []       // GUI desktop environments with VNC/RDP/web access
-    const workstation: CachedImage[] = []   // Base OS images for workstation use
-    const server: CachedImage[] = []        // Headless server images
+    const server: CachedImage[] = []        // Headless server/CLI images
     const services: CachedImage[] = []      // Purpose-built service containers
     const other: CachedImage[] = []
 
@@ -807,9 +806,8 @@ export default function ImageCache() {
     const servicePatterns = ['nginx', 'httpd', 'apache', 'mysql', 'postgres', 'redis', 'mongo', 'mariadb', 'elasticsearch', 'rabbitmq', 'memcached']
     // Desktop = images with GUI/VNC/RDP/web access
     const desktopPatterns = ['webtop', 'vnc', 'xfce', 'kde', 'lxde', 'xrdp', 'kasm', 'guacamole', 'x11', 'desktop']
-    // Workstation = base OS images suitable for workstation use
-    const workstationPatterns = ['kali', 'fedora:', 'debian:', 'ubuntu:']
-    const serverPatterns = ['alpine', 'centos', 'rocky', 'server']
+    // Server/CLI = headless base OS images
+    const serverPatterns = ['alpine', 'centos', 'rocky', 'server', 'kali', 'fedora:', 'debian:', 'ubuntu:']
 
     images.forEach(img => {
       const tags = img.tags.join(' ').toLowerCase()
@@ -821,8 +819,6 @@ export default function ImageCache() {
         services.push(img)
       } else if (desktopPatterns.some(p => tags.includes(p))) {
         desktop.push(img)
-      } else if (workstationPatterns.some(p => tags.includes(p))) {
-        workstation.push(img)
       } else if (serverPatterns.some(p => tags.includes(p))) {
         server.push(img)
       } else {
@@ -830,7 +826,7 @@ export default function ImageCache() {
       }
     })
 
-    return { desktop, workstation, server, services, other }
+    return { desktop, server, services, other }
   }
 
   if (loading) {
@@ -1039,28 +1035,10 @@ export default function ImageCache() {
             isAdmin={isAdmin}
           />
 
-          {/* Workstation Images Section */}
-          {recommended.workstation && recommended.workstation.length > 0 && (
-            <DockerImageSection
-              title="Workstation"
-              description="Base OS images for workstation use (CLI)"
-              images={recommended.workstation}
-              cachedImages={images}
-              icon={Terminal}
-              colorClass="cyan"
-              onPull={handlePullDockerImage}
-              onRemove={handleRemoveImage}
-              onCancel={handleCancelDockerPull}
-              pullStatus={dockerPullStatus}
-              actionLoading={actionLoading}
-              isAdmin={isAdmin}
-            />
-          )}
-
-          {/* Server Images Section */}
+          {/* Server/CLI Images Section */}
           <DockerImageSection
-            title="Server"
-            description="Headless server and infrastructure images"
+            title="Server/CLI"
+            description="Headless server and CLI images"
             images={recommended.server}
             cachedImages={images}
             icon={Server}
@@ -1806,23 +1784,11 @@ export default function ImageCache() {
                   </div>
                 </div>
 
-                {/* Workstation Images */}
+                {/* Server/CLI Images */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    <Terminal className="inline h-4 w-4 mr-1" /> Workstation Images
-                    <span className="text-xs text-gray-500 ml-2">(base OS, CLI)</span>
-                  </label>
-                  <div className="grid grid-cols-2 gap-2">
-                    {recommended.workstation?.map((img) => (
-                      <ImageCheckbox key={img.image} img={img} selected={selectedRecommended} setSelected={setSelectedRecommended} />
-                    ))}
-                  </div>
-                </div>
-
-                {/* Server Images */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    <Server className="inline h-4 w-4 mr-1" /> Server Images
+                    <Server className="inline h-4 w-4 mr-1" /> Server/CLI Images
+                    <span className="text-xs text-gray-500 ml-2">(headless)</span>
                   </label>
                   <div className="grid grid-cols-2 gap-2">
                     {recommended.server.map((img) => (

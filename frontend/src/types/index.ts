@@ -433,14 +433,13 @@ export interface RecommendedImage {
   image?: string
   version?: string
   description: string
-  category?: 'desktop' | 'workstation' | 'server' | 'services'
+  category?: 'desktop' | 'server' | 'services'
   access?: 'web' | 'vnc' | 'rdp'  // Access method for desktop images
   cached?: boolean
 }
 
 export interface RecommendedImages {
   desktop: RecommendedImage[]
-  workstation: RecommendedImage[]
   server: RecommendedImage[]
   services: RecommendedImage[]
   linux: RecommendedImage[]

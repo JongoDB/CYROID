@@ -65,14 +65,27 @@ services:
       - /data/cyroid/template-storage:/data/cyroid/template-storage
       - /data/cyroid/vm-storage:/data/cyroid/vm-storage
       - /data/cyroid/shared:/data/cyroid/shared
-    ports:
-      - "8000:8000"
+    expose:
+      - "8000"
     depends_on:
       db:
         condition: service_healthy
       redis:
         condition: service_healthy
     command: bash -c "alembic upgrade head && uvicorn cyroid.main:app --host 0.0.0.0 --port 8000 --reload"
+    labels:
+      - "traefik.enable=true"
+      # API service
+      - "traefik.http.services.api.loadbalancer.server.port=8000"
+      # HTTP router
+      - "traefik.http.routers.api.rule=PathPrefix(`/api`)"
+      - "traefik.http.routers.api.entrypoints=web"
+      - "traefik.http.routers.api.service=api"
+      # HTTPS router
+      - "traefik.http.routers.api-secure.rule=PathPrefix(`/api`)"
+      - "traefik.http.routers.api-secure.entrypoints=websecure"
+      - "traefik.http.routers.api-secure.tls=true"
+      - "traefik.http.routers.api-secure.service=api"
 
   worker:
     build:
@@ -110,10 +123,25 @@ services:
     volumes:
       - ./frontend:/app
       - /app/node_modules
-    ports:
-      - "5173:5173"
+    expose:
+      - "5173"
     environment:
       - CHOKIDAR_USEPOLLING=true
+    labels:
+      - "traefik.enable=true"
+      # Frontend service
+      - "traefik.http.services.frontend.loadbalancer.server.port=5173"
+      # HTTP router (lowest priority, catch-all)
+      - "traefik.http.routers.frontend.rule=PathPrefix(`/`)"
+      - "traefik.http.routers.frontend.entrypoints=web"
+      - "traefik.http.routers.frontend.priority=1"
+      - "traefik.http.routers.frontend.service=frontend"
+      # HTTPS router (lowest priority, catch-all)
+      - "traefik.http.routers.frontend-secure.rule=PathPrefix(`/`)"
+      - "traefik.http.routers.frontend-secure.entrypoints=websecure"
+      - "traefik.http.routers.frontend-secure.tls=true"
+      - "traefik.http.routers.frontend-secure.priority=1"
+      - "traefik.http.routers.frontend-secure.service=frontend"
 
   traefik:
     image: traefik:v3.0
@@ -121,14 +149,23 @@ services:
       - "--api.insecure=true"
       - "--providers.docker=true"
       - "--providers.docker.exposedbydefault=false"
+      # HTTP entrypoint
       - "--entrypoints.web.address=:80"
+      # HTTPS entrypoint
+      - "--entrypoints.websecure.address=:443"
+      # File provider for dynamic config (serversTransport, default certs)
       - "--providers.file.filename=/etc/traefik/dynamic.yml"
+      - "--providers.file.watch=true"
+      # Enable debug logging (optional, remove in production)
+      # - "--log.level=DEBUG"
     ports:
       - "80:80"
+      - "443:443"
       - "8080:8080"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./traefik-dynamic.yml:/etc/traefik/dynamic.yml:ro
+      - ./certs:/etc/traefik/certs:ro
     networks:
       - default
       - traefik-routing

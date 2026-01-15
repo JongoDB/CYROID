@@ -7,6 +7,7 @@ export default defineConfig({
   server: {
     port: 5173,
     host: true,
+    allowedHosts: process.env.VITE_ALLOWED_HOSTS?.split(',') || true,
     proxy: {
       '/api': {
         target: 'http://api:8000',

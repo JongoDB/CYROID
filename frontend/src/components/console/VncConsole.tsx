@@ -40,21 +40,21 @@ export function VncConsole({ vmId, vmHostname, token, onClose }: VncConsoleProps
         }
 
         const data = await response.json()
-        // Build URL using browser's hostname (not the Docker internal hostname)
-        const browserHostname = window.location.hostname
-        const traefikPort = data.traefik_port || 80
+        // Build URL using browser's origin (same protocol, host, and port as the frontend)
+        // This ensures VNC works through the unified traefik ingress
+        const origin = window.location.origin
 
         // Build VNC URL with proper WebSocket path for KasmVNC
         // The 'path' parameter tells the client where to connect for WebSocket
         // We need to include the full path so WebSocket connects to the correct proxied endpoint
         const wsPath = `${data.path}/`.replace(/^\//, '') // Remove leading slash for path param
-        const vncUrl = `http://${browserHostname}:${traefikPort}${data.path}/?autoconnect=1&resize=scale&path=${wsPath}`
+        const vncUrl = `${origin}${data.path}/?autoconnect=1&resize=scale&path=${wsPath}`
 
         setVncInfo({
           url: vncUrl,
           path: data.path,
           hostname: data.hostname,
-          traefik_port: traefikPort,
+          traefik_port: window.location.port ? parseInt(window.location.port) : (window.location.protocol === 'https:' ? 443 : 80),
         })
         setLoading(false)
       } catch (err) {
