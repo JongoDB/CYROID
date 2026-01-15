@@ -57,7 +57,7 @@ Current overall progress: **Phase 4 of 7 Complete (57%)**
 | 3 | Templates & Artifacts | ✅ Complete | 100% |
 | 4 | Execution & Monitoring | ✅ Complete | 100% |
 | 5 | Evidence & Scoring | 🟡 In Progress | 40% |
-| 6 | Automation & Intelligence | ⏳ Planned | 0% |
+| 6 | Automation & Intelligence | 🟡 In Progress | 17% |
 | 7 | Advanced Features | ⏳ Planned | 0% |
 
 ### Phase 5 Checklist (Current Focus)
@@ -78,7 +78,7 @@ Current overall progress: **Phase 4 of 7 Complete (57%)**
 - [ ] Attack scenario automation (scripts)
 - [ ] Advanced scoring (timeline reconstruction)
 - [ ] CAC/PKI authentication
-- [ ] Offline/air-gap deployment mode
+- [x] Offline/air-gap deployment mode (via comprehensive export with Docker images)
 
 ### Phase 7 Planned Items
 
@@ -108,6 +108,8 @@ Current overall progress: **Phase 4 of 7 Complete (57%)**
 | Dynamic Network Attach | ✅ | Add/remove NICs on running VMs |
 | VNC Console | ✅ | Via Traefik proxy |
 | Range Templating | ✅ | Import/export/clone |
+| Comprehensive Range Export | ✅ | Full config, artifacts, MSEL, offline Docker images |
+| Range Import with Validation | ✅ | Conflict detection, template resolution |
 | Artifact Repository | ✅ | MinIO-backed with SHA256 |
 | Snapshot Management | ✅ | Golden images for Windows |
 | Event Logging | ✅ | Real-time WebSocket streaming |

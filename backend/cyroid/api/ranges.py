@@ -1,4 +1,5 @@
 # backend/cyroid/api/ranges.py
+from datetime import datetime
 from typing import List
 from uuid import UUID
 import logging
@@ -14,6 +15,7 @@ from cyroid.models.network import Network, IsolationLevel
 from cyroid.models.vm import VM, VMStatus
 from cyroid.models.template import VMTemplate, OSType
 from cyroid.models.resource_tag import ResourceTag
+from cyroid.models.user import User
 from cyroid.schemas.range import (
     RangeCreate, RangeUpdate, RangeResponse, RangeDetailResponse,
     RangeTemplateExport, RangeTemplateImport, NetworkTemplateData, VMTemplateData
@@ -693,6 +695,353 @@ def clone_range(
 
     db.refresh(cloned_range)
     return cloned_range
+
+
+# ============================================================================
+# Comprehensive Export/Import Endpoints (v2.0)
+# ============================================================================
+
+from pathlib import Path
+from typing import Union
+from fastapi import UploadFile, File, BackgroundTasks
+from fastapi.responses import FileResponse
+import tempfile
+import redis
+import json as json_module
+
+from cyroid.schemas.export import (
+    ExportRequest,
+    ExportJobStatus,
+    ImportValidationResult,
+    ImportOptions,
+    ImportResult,
+    RangeExportFull,
+)
+
+
+def get_redis_client():
+    """Get Redis client for job status tracking."""
+    settings = get_settings()
+    return redis.from_url(settings.redis_url)
+
+
+@router.post("/{range_id}/export/full")
+def export_range_full(
+    range_id: UUID,
+    options: ExportRequest,
+    background_tasks: BackgroundTasks,
+    db: DBSession,
+    current_user: CurrentUser,
+):
+    """
+    Export range with full configuration (all VM settings, templates, MSEL, artifacts).
+
+    For online exports (include_docker_images=False): Returns file directly.
+    For offline exports (include_docker_images=True): Starts background job and returns job ID.
+    """
+    from cyroid.services.export_service import get_export_service
+
+    # Verify range exists and user has access
+    range_obj = db.query(Range).filter(Range.id == range_id).first()
+    if not range_obj:
+        raise HTTPException(status_code=404, detail="Range not found")
+
+    check_resource_access('range', range_id, current_user, db, range_obj.created_by)
+
+    export_service = get_export_service()
+
+    if options.include_docker_images:
+        # Offline export - run as background task
+        import uuid
+        job_id = str(uuid.uuid4())
+
+        # Store initial job status in Redis
+        redis_client = get_redis_client()
+        job_status = ExportJobStatus(
+            job_id=job_id,
+            status="pending",
+            progress_percent=0,
+            current_step="Initializing...",
+            created_at=datetime.utcnow(),
+        )
+        redis_client.setex(
+            f"export_job:{job_id}",
+            3600 * 24,  # 24 hour TTL
+            job_status.model_dump_json()
+        )
+
+        # Schedule background task
+        background_tasks.add_task(
+            _run_offline_export,
+            range_id=range_id,
+            job_id=job_id,
+            options=options,
+            user_id=current_user.id,
+        )
+
+        return job_status
+
+    else:
+        # Online export - return file directly
+        try:
+            archive_path, filename = export_service.export_range_online(
+                range_id=range_id,
+                options=options,
+                user=current_user,
+                db=db,
+            )
+            return FileResponse(
+                path=str(archive_path),
+                filename=filename,
+                media_type="application/zip",
+                background=BackgroundTasks()  # Cleanup after response
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+        except Exception as e:
+            logger.exception("Export failed")
+            raise HTTPException(status_code=500, detail=f"Export failed: {str(e)}")
+
+
+def _run_offline_export(range_id: UUID, job_id: str, options: ExportRequest, user_id: UUID):
+    """Background task for offline export with Docker images."""
+    from cyroid.services.export_service import get_export_service
+    from cyroid.database import SessionLocal
+
+    redis_client = get_redis_client()
+
+    def update_progress(percent: int, step: str):
+        job_data = redis_client.get(f"export_job:{job_id}")
+        if job_data:
+            job_status = ExportJobStatus.model_validate_json(job_data)
+            job_status.status = "in_progress"
+            job_status.progress_percent = percent
+            job_status.current_step = step
+            redis_client.setex(
+                f"export_job:{job_id}",
+                3600 * 24,
+                job_status.model_dump_json()
+            )
+
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            raise ValueError("User not found")
+
+        export_service = get_export_service()
+        archive_path, filename = export_service.export_range_offline(
+            range_id=range_id,
+            options=options,
+            user=user,
+            db=db,
+            progress_callback=update_progress,
+        )
+
+        # Update job with download info
+        file_size = os.path.getsize(archive_path)
+        job_status = ExportJobStatus(
+            job_id=job_id,
+            status="completed",
+            progress_percent=100,
+            current_step="Export complete",
+            download_url=f"/ranges/export/jobs/{job_id}/download",
+            file_size_bytes=file_size,
+            created_at=datetime.utcnow(),
+            completed_at=datetime.utcnow(),
+        )
+        # Store the archive path for download
+        redis_client.setex(f"export_job:{job_id}:path", 3600 * 24, str(archive_path))
+        redis_client.setex(f"export_job:{job_id}:filename", 3600 * 24, filename)
+        redis_client.setex(f"export_job:{job_id}", 3600 * 24, job_status.model_dump_json())
+
+    except Exception as e:
+        logger.exception(f"Offline export failed for job {job_id}")
+        job_status = ExportJobStatus(
+            job_id=job_id,
+            status="failed",
+            progress_percent=0,
+            current_step="Export failed",
+            error_message=str(e),
+            created_at=datetime.utcnow(),
+        )
+        redis_client.setex(f"export_job:{job_id}", 3600 * 24, job_status.model_dump_json())
+    finally:
+        db.close()
+
+
+@router.get("/export/jobs/{job_id}", response_model=ExportJobStatus)
+def get_export_job_status(job_id: str, current_user: CurrentUser):
+    """Get status of a background export job."""
+    redis_client = get_redis_client()
+    job_data = redis_client.get(f"export_job:{job_id}")
+
+    if not job_data:
+        raise HTTPException(status_code=404, detail="Export job not found")
+
+    return ExportJobStatus.model_validate_json(job_data)
+
+
+@router.get("/export/jobs/{job_id}/download")
+def download_export(job_id: str, current_user: CurrentUser):
+    """Download a completed export archive."""
+    redis_client = get_redis_client()
+
+    # Check job status
+    job_data = redis_client.get(f"export_job:{job_id}")
+    if not job_data:
+        raise HTTPException(status_code=404, detail="Export job not found")
+
+    job_status = ExportJobStatus.model_validate_json(job_data)
+    if job_status.status != "completed":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Export not ready. Status: {job_status.status}"
+        )
+
+    # Get archive path
+    archive_path = redis_client.get(f"export_job:{job_id}:path")
+    filename = redis_client.get(f"export_job:{job_id}:filename")
+
+    if not archive_path or not filename:
+        raise HTTPException(status_code=404, detail="Export file not found")
+
+    archive_path = archive_path.decode() if isinstance(archive_path, bytes) else archive_path
+    filename = filename.decode() if isinstance(filename, bytes) else filename
+
+    if not os.path.exists(archive_path):
+        raise HTTPException(status_code=404, detail="Export file has been deleted")
+
+    return FileResponse(
+        path=archive_path,
+        filename=filename,
+        media_type="application/gzip",
+    )
+
+
+@router.post("/import/validate", response_model=ImportValidationResult)
+async def validate_import(
+    file: UploadFile = File(...),
+    db: DBSession = None,
+    current_user: CurrentUser = None,
+):
+    """
+    Validate an import archive and preview conflicts.
+
+    Upload a .zip or .tar.gz export archive to validate before importing.
+    Returns validation results including any conflicts with existing templates or networks.
+    """
+    from cyroid.services.export_service import get_export_service
+
+    # Save uploaded file to temp location
+    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=file.filename)
+    try:
+        content = await file.read()
+        temp_file.write(content)
+        temp_file.close()
+
+        export_service = get_export_service()
+        result = export_service.validate_import(Path(temp_file.name), db)
+        return result
+
+    finally:
+        # Cleanup temp file
+        if os.path.exists(temp_file.name):
+            os.unlink(temp_file.name)
+
+
+@router.post("/import/execute", response_model=ImportResult)
+async def execute_import(
+    file: UploadFile = File(...),
+    name_override: str = None,
+    template_conflict_action: str = "use_existing",
+    skip_artifacts: bool = False,
+    skip_msel: bool = False,
+    db: DBSession = None,
+    current_user: CurrentUser = None,
+):
+    """
+    Execute a range import from an archive.
+
+    Upload a .zip or .tar.gz export archive to import.
+
+    Options:
+    - name_override: Override the range name (required if name conflicts)
+    - template_conflict_action: "use_existing", "create_new", or "skip"
+    - skip_artifacts: Don't import artifacts
+    - skip_msel: Don't import MSEL/injects
+    """
+    from cyroid.services.export_service import get_export_service
+
+    # Save uploaded file to temp location
+    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=file.filename)
+    try:
+        content = await file.read()
+        temp_file.write(content)
+        temp_file.close()
+
+        options = ImportOptions(
+            name_override=name_override,
+            template_conflict_action=template_conflict_action,
+            skip_artifacts=skip_artifacts,
+            skip_msel=skip_msel,
+        )
+
+        export_service = get_export_service()
+        result = export_service.import_range(
+            archive_path=Path(temp_file.name),
+            options=options,
+            user=current_user,
+            db=db,
+        )
+        return result
+
+    finally:
+        # Cleanup temp file
+        if os.path.exists(temp_file.name):
+            os.unlink(temp_file.name)
+
+
+@router.post("/import/load-images")
+async def load_docker_images(
+    file: UploadFile = File(...),
+    current_user: CurrentUser = None,
+):
+    """
+    Load Docker images from an offline export archive.
+
+    Use this endpoint to pre-load Docker images before importing a range
+    on an air-gapped system.
+    """
+    from cyroid.services.export_service import get_export_service
+
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    # Save uploaded file to temp location
+    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=file.filename)
+    try:
+        content = await file.read()
+        temp_file.write(content)
+        temp_file.close()
+
+        export_service = get_export_service()
+        loaded_images = export_service.load_docker_images(Path(temp_file.name))
+
+        return {
+            "success": True,
+            "images_loaded": loaded_images,
+            "count": len(loaded_images),
+        }
+
+    except Exception as e:
+        logger.exception("Failed to load Docker images")
+        raise HTTPException(status_code=500, detail=f"Failed to load images: {str(e)}")
+
+    finally:
+        # Cleanup temp file
+        if os.path.exists(temp_file.name):
+            os.unlink(temp_file.name)
 
 
 # ============================================================================

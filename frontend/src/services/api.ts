@@ -182,6 +182,14 @@ export interface RangeCreate {
   description?: string
 }
 
+import type {
+  ExportRequest,
+  ExportJobStatus,
+  ImportValidationResult,
+  ImportResult,
+  LoadImagesResult,
+} from '../types'
+
 export const rangesApi = {
   list: () => api.get<Range[]>('/ranges'),
   get: (id: string) => api.get<Range>(`/ranges/${id}`),
@@ -192,6 +200,61 @@ export const rangesApi = {
   start: (id: string) => api.post<Range>(`/ranges/${id}/start`),
   stop: (id: string) => api.post<Range>(`/ranges/${id}/stop`),
   teardown: (id: string) => api.post<Range>(`/ranges/${id}/teardown`),
+
+  // Comprehensive Export/Import (v2.0)
+  exportFull: async (id: string, options: ExportRequest) => {
+    if (options.include_docker_images) {
+      // Offline export returns job status
+      return api.post<ExportJobStatus>(`/ranges/${id}/export/full`, options)
+    } else {
+      // Online export returns file blob
+      const response = await api.post(`/ranges/${id}/export/full`, options, {
+        responseType: 'blob',
+      })
+      return response
+    }
+  },
+  getExportJobStatus: (jobId: string) =>
+    api.get<ExportJobStatus>(`/ranges/export/jobs/${jobId}`),
+  downloadExport: (jobId: string) =>
+    api.get(`/ranges/export/jobs/${jobId}/download`, { responseType: 'blob' }),
+
+  validateImport: async (file: File) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    return api.post<ImportValidationResult>('/ranges/import/validate', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  },
+  executeImport: async (
+    file: File,
+    options: {
+      name_override?: string
+      template_conflict_action?: 'use_existing' | 'create_new' | 'skip'
+      skip_artifacts?: boolean
+      skip_msel?: boolean
+    } = {}
+  ) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    const params = new URLSearchParams()
+    if (options.name_override) params.append('name_override', options.name_override)
+    if (options.template_conflict_action) params.append('template_conflict_action', options.template_conflict_action)
+    if (options.skip_artifacts) params.append('skip_artifacts', 'true')
+    if (options.skip_msel) params.append('skip_msel', 'true')
+    const queryString = params.toString()
+    const url = queryString ? `/ranges/import/execute?${queryString}` : '/ranges/import/execute'
+    return api.post<ImportResult>(url, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  },
+  loadDockerImages: async (file: File) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    return api.post<LoadImagesResult>('/ranges/import/load-images', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  },
 }
 
 // Networks API

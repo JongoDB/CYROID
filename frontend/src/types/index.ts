@@ -502,3 +502,90 @@ export interface CustomISOStatusResponse {
   message?: string
   downloaded_at?: string
 }
+
+// Range Export/Import Types
+export interface ExportRequest {
+  include_templates: boolean
+  include_msel: boolean
+  include_artifacts: boolean
+  include_snapshots: boolean
+  include_docker_images: boolean
+  encrypt_passwords: boolean
+}
+
+export interface ExportJobStatus {
+  job_id: string
+  status: 'pending' | 'in_progress' | 'completed' | 'failed'
+  progress_percent: number
+  current_step: string
+  download_url?: string
+  error_message?: string
+  file_size_bytes?: number
+  created_at: string
+  completed_at?: string
+}
+
+export interface TemplateConflict {
+  template_name: string
+  existing_template_id: string
+  action: 'use_existing' | 'create_new' | 'skip'
+}
+
+export interface NetworkConflict {
+  network_name: string
+  subnet: string
+  overlapping_range_name: string
+  overlapping_network_name: string
+}
+
+export interface ImportConflicts {
+  template_conflicts: TemplateConflict[]
+  network_conflicts: NetworkConflict[]
+  name_conflict: boolean
+}
+
+export interface ImportSummary {
+  range_name: string
+  networks_count: number
+  vms_count: number
+  templates_to_create: number
+  templates_existing: number
+  artifacts_count: number
+  artifact_placements_count: number
+  injects_count: number
+  estimated_size_mb?: number
+}
+
+export interface ImportValidationResult {
+  valid: boolean
+  warnings: string[]
+  errors: string[]
+  conflicts: ImportConflicts
+  summary: ImportSummary
+}
+
+export interface ImportOptions {
+  name_override?: string
+  template_conflict_action: 'use_existing' | 'create_new' | 'skip'
+  skip_artifacts: boolean
+  skip_msel: boolean
+  dry_run: boolean
+}
+
+export interface ImportResult {
+  success: boolean
+  range_id?: string
+  range_name?: string
+  networks_created: number
+  vms_created: number
+  templates_created: number
+  artifacts_imported: number
+  errors: string[]
+  warnings: string[]
+}
+
+export interface LoadImagesResult {
+  success: boolean
+  images_loaded: string[]
+  count: number
+}

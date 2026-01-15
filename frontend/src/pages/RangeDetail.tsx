@@ -5,11 +5,12 @@ import { rangesApi, networksApi, vmsApi, templatesApi, NetworkCreate, VMCreate }
 import type { Range, Network, VM, VMTemplate } from '../types'
 import {
   ArrowLeft, Plus, Loader2, X, Play, Square, RotateCw,
-  Network as NetworkIcon, Server, Trash2, Rocket, Activity, Monitor, Shield
+  Network as NetworkIcon, Server, Trash2, Rocket, Activity, Monitor, Shield, Download
 } from 'lucide-react'
 import clsx from 'clsx'
 import { VncConsole } from '../components/console/VncConsole'
 import { useAuthStore } from '../stores/authStore'
+import ExportRangeDialog from '../components/export/ExportRangeDialog'
 
 const statusColors: Record<string, string> = {
   draft: 'bg-gray-100 text-gray-800',
@@ -82,6 +83,9 @@ export default function RangeDetail() {
   // Console modal state
   const [consoleVm, setConsoleVm] = useState<VM | null>(null)
   const token = useAuthStore((state) => state.token)
+
+  // Export dialog state
+  const [showExportDialog, setShowExportDialog] = useState(false)
 
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -383,6 +387,15 @@ export default function RangeDetail() {
                 </button>
               </>
             )}
+            {/* Export button - available in any status */}
+            <button
+              onClick={() => setShowExportDialog(true)}
+              className="inline-flex items-center px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+              title="Export Range"
+            >
+              <Download className="h-4 w-4 mr-1" />
+              Export
+            </button>
           </div>
         </div>
       </div>
@@ -1268,6 +1281,16 @@ export default function RangeDetail() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Export Range Dialog */}
+      {range && (
+        <ExportRangeDialog
+          isOpen={showExportDialog}
+          onClose={() => setShowExportDialog(false)}
+          rangeId={range.id}
+          rangeName={range.name}
+        />
       )}
     </div>
   )
