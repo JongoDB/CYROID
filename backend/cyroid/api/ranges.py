@@ -221,9 +221,12 @@ def deploy_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
                     router_name = f"vnc-{vm_id_short}"
                     middlewares = [f"vnc-strip-{vm_id_short}"]
 
+                    # Use range network for routing (traefik connects to range networks, not VMs to traefik-routing)
+                    range_network_name = f"cyroid-{network.name}-{str(network.id)[:8]}"
+
                     labels.update({
                         "traefik.enable": "true",
-                        "traefik.docker.network": "traefik-routing",
+                        "traefik.docker.network": range_network_name,  # Use range network for routing
                         f"traefik.http.services.{router_name}.loadbalancer.server.port": vnc_port,
                         f"traefik.http.services.{router_name}.loadbalancer.server.scheme": vnc_scheme,
                         f"traefik.http.routers.{router_name}.rule": f"PathPrefix(`/vnc/{vm.id}`)",

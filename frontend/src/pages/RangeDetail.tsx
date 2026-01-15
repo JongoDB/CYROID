@@ -5,7 +5,7 @@ import { rangesApi, networksApi, vmsApi, templatesApi, NetworkCreate, VMCreate }
 import type { Range, Network, VM, VMTemplate } from '../types'
 import {
   ArrowLeft, Plus, Loader2, X, Play, Square, RotateCw,
-  Network as NetworkIcon, Server, Trash2, Rocket, Activity, Monitor
+  Network as NetworkIcon, Server, Trash2, Rocket, Activity, Monitor, Shield
 } from 'lucide-react'
 import clsx from 'clsx'
 import { VncConsole } from '../components/console/VncConsole'
@@ -172,6 +172,19 @@ export default function RangeDetail() {
       fetchData()
     } catch (err: any) {
       alert(err.response?.data?.detail || 'Failed to delete network')
+    }
+  }
+
+  const handleIsolateNetwork = async (network: Network) => {
+    if (!network.docker_network_id) {
+      alert('Network must be provisioned first (deploy the range)')
+      return
+    }
+    try {
+      await networksApi.isolate(network.id)
+      alert(`Applied isolation rules to "${network.name}". VMs can no longer access host/infrastructure.`)
+    } catch (err: any) {
+      alert(err.response?.data?.detail || 'Failed to apply isolation')
     }
   }
 
@@ -397,7 +410,12 @@ export default function RangeDetail() {
                     <NetworkIcon className="h-5 w-5 text-gray-400 mr-3" />
                     <div>
                       <p className="text-sm font-medium text-gray-900">{network.name}</p>
-                      <p className="text-xs text-gray-500">{network.subnet} • Gateway: {network.gateway}</p>
+                      <p className="text-xs text-gray-500">
+                        {network.subnet} • Gateway: {network.gateway}
+                        {network.docker_network_id && (
+                          <span className="ml-2 text-green-600">• provisioned</span>
+                        )}
+                      </p>
                     </div>
                   </div>
                   <div className="flex items-center space-x-2">
@@ -409,6 +427,15 @@ export default function RangeDetail() {
                     )}>
                       {network.isolation_level}
                     </span>
+                    {network.docker_network_id && (
+                      <button
+                        onClick={() => handleIsolateNetwork(network)}
+                        className="p-1 text-gray-400 hover:text-blue-600"
+                        title="Apply firewall isolation (blocks VM access to host/infrastructure)"
+                      >
+                        <Shield className="h-4 w-4" />
+                      </button>
+                    )}
                     <button
                       onClick={() => handleDeleteNetwork(network)}
                       className="p-1 text-gray-400 hover:text-red-600"

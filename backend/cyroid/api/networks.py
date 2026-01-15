@@ -164,11 +164,58 @@ def provision_network(network_id: UUID, db: DBSession, current_user: CurrentUser
         db.commit()
         db.refresh(network)
 
+        # Connect traefik to this network for VNC/web console routing
+        # This allows management access without exposing VMs to traefik-routing
+        docker.connect_traefik_to_network(docker_network_id)
+
+        # Set up iptables rules to isolate this network from host/infrastructure
+        # This prevents VMs from accessing CYROID services or the host
+        docker.setup_network_isolation(docker_network_id, network.subnet)
+
+        logger.info(f"Provisioned and isolated network {network.name} for VM routing")
+
     except Exception as e:
         logger.error(f"Failed to provision network {network_id}: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to provision network: {str(e)}",
+        )
+
+    return network
+
+
+@router.post("/{network_id}/isolate", response_model=NetworkResponse)
+def isolate_network(network_id: UUID, db: DBSession, current_user: CurrentUser):
+    """Apply iptables isolation rules to an existing provisioned network."""
+    network = db.query(Network).filter(Network.id == network_id).first()
+    if not network:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Network not found",
+        )
+
+    if not network.docker_network_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Network not provisioned",
+        )
+
+    try:
+        docker = get_docker_service()
+
+        # Connect traefik if not already connected
+        docker.connect_traefik_to_network(network.docker_network_id)
+
+        # Set up iptables rules
+        docker.setup_network_isolation(network.docker_network_id, network.subnet)
+
+        logger.info(f"Applied isolation rules to network {network.name}")
+
+    except Exception as e:
+        logger.error(f"Failed to isolate network {network_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to isolate network: {str(e)}",
         )
 
     return network
@@ -200,6 +247,13 @@ def teardown_network(network_id: UUID, db: DBSession, current_user: CurrentUser)
 
     try:
         docker = get_docker_service()
+
+        # Remove iptables isolation rules
+        docker.teardown_network_isolation(network.docker_network_id, network.subnet)
+
+        # Disconnect traefik from the network before deleting
+        docker.disconnect_traefik_from_network(network.docker_network_id)
+
         docker.delete_network(network.docker_network_id)
 
         network.docker_network_id = None

@@ -89,18 +89,11 @@ export function NetworkInterfaces({ rangeId, vms, networks: propNetworks }: Prop
     return networks.filter(net => !connectedNetworkIds.has(net.id))
   }
 
-  // Calculate total interfaces
+  // Calculate total interfaces (all are range networks now - VMs isolated from management)
   const totalInterfaces = vmNetworks.reduce(
     (acc, vm) => acc + vm.interfaces.length,
     0
   )
-
-  const managementCount = vmNetworks.reduce(
-    (acc, vm) => acc + vm.interfaces.filter(i => i.is_management).length,
-    0
-  )
-
-  const rangeCount = totalInterfaces - managementCount
 
   return (
     <div className="bg-white rounded-lg shadow">
@@ -108,21 +101,15 @@ export function NetworkInterfaces({ rangeId, vms, networks: propNetworks }: Prop
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <NetworkIcon className="w-5 h-5 text-gray-500" />
-            <h3 className="font-medium">Network Interfaces</h3>
+            <h3 className="font-medium">Network Connections</h3>
           </div>
           <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2 text-xs">
-              <span className="flex items-center gap-1">
-                <span className="w-2 h-2 bg-blue-500 rounded-full" />
-                {managementCount} mgmt
-              </span>
-              <span className="flex items-center gap-1">
-                <span className="w-2 h-2 bg-green-500 rounded-full" />
-                {rangeCount} range
-              </span>
-            </div>
+            <span className="flex items-center gap-1 text-xs">
+              <span className="w-2 h-2 bg-green-500 rounded-full" />
+              {totalInterfaces} interface{totalInterfaces !== 1 ? 's' : ''}
+            </span>
             <button
-              onClick={loadNetworkData}
+              onClick={() => loadNetworkData()}
               className="p-1 hover:bg-gray-100 rounded"
               title="Refresh"
             >
@@ -171,52 +158,51 @@ export function NetworkInterfaces({ rangeId, vms, networks: propNetworks }: Prop
                     <div className="text-xs text-gray-400 ml-6">No network interfaces</div>
                   ) : (
                     <div className="space-y-1.5 ml-6">
-                      {vmNet.interfaces.map((iface, idx) => (
-                        <div
-                          key={`${vmNet.vm_id}-${iface.network_name}-${idx}`}
-                          className="flex items-center justify-between text-xs bg-gray-50 rounded px-2 py-1.5"
-                        >
-                          <div className="flex items-center gap-2">
-                            <Wifi className={clsx(
-                              'w-3 h-3',
-                              iface.is_management ? 'text-blue-500' : 'text-green-500'
-                            )} />
-                            <div>
-                              <span className={clsx(
-                                'font-medium',
-                                iface.is_management ? 'text-blue-700' : 'text-gray-700'
-                              )}>
-                                {iface.cyroid_network_name || iface.network_name}
-                              </span>
-                              {iface.is_management && (
-                                <span className="ml-1 text-[10px] bg-blue-100 text-blue-600 px-1 rounded">
-                                  mgmt
+                      {vmNet.interfaces.map((iface, idx) => {
+                        // Determine if this is the primary network (can't be removed)
+                        const isPrimary = iface.cyroid_network_id === vm.network_id
+
+                        return (
+                          <div
+                            key={`${vmNet.vm_id}-${iface.network_name}-${idx}`}
+                            className="flex items-center justify-between text-xs bg-gray-50 rounded px-2 py-1.5"
+                          >
+                            <div className="flex items-center gap-2">
+                              <Wifi className="w-3 h-3 text-green-500" />
+                              <div>
+                                <span className="font-medium text-gray-700">
+                                  {iface.cyroid_network_name || iface.network_name}
                                 </span>
+                                {isPrimary && (
+                                  <span className="ml-1 text-[10px] bg-green-100 text-green-600 px-1 rounded">
+                                    primary
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-mono text-gray-600">
+                                {iface.ip_address || 'No IP'}
+                              </span>
+                              {iface.subnet && (
+                                <span className="text-gray-400" title="Subnet">
+                                  ({iface.subnet})
+                                </span>
+                              )}
+                              {/* Allow removing non-primary networks from running VMs */}
+                              {!isPrimary && iface.cyroid_network_id && vmNet.status === 'running' && (
+                                <button
+                                  onClick={() => handleRemoveNetwork(vmNet.vm_id, iface.cyroid_network_id!)}
+                                  className="p-0.5 hover:bg-red-100 rounded text-red-500"
+                                  title="Remove network"
+                                >
+                                  <Trash2 className="w-3 h-3" />
+                                </button>
                               )}
                             </div>
                           </div>
-                          <div className="flex items-center gap-2">
-                            <span className="font-mono text-gray-600">
-                              {iface.ip_address || 'No IP'}
-                            </span>
-                            {iface.subnet && (
-                              <span className="text-gray-400" title="Subnet">
-                                ({iface.subnet})
-                              </span>
-                            )}
-                            {/* Don't show remove for management or primary network */}
-                            {!iface.is_management && iface.cyroid_network_id && vm.network_id !== iface.cyroid_network_id && vmNet.status === 'running' && (
-                              <button
-                                onClick={() => handleRemoveNetwork(vmNet.vm_id, iface.cyroid_network_id!)}
-                                className="p-0.5 hover:bg-red-100 rounded text-red-500"
-                                title="Remove network"
-                              >
-                                <Trash2 className="w-3 h-3" />
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      ))}
+                        )
+                      })}
                     </div>
                   )}
 

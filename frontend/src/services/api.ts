@@ -210,6 +210,9 @@ export const networksApi = {
   create: (data: NetworkCreate) => api.post<Network>('/networks', data),
   update: (id: string, data: Partial<NetworkCreate>) => api.put<Network>(`/networks/${id}`, data),
   delete: (id: string) => api.delete(`/networks/${id}`),
+  provision: (id: string) => api.post<Network>(`/networks/${id}/provision`),
+  teardown: (id: string) => api.post<Network>(`/networks/${id}/teardown`),
+  isolate: (id: string) => api.post<Network>(`/networks/${id}/isolate`),
 }
 
 // VMs API

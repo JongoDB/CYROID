@@ -114,28 +114,253 @@ class DockerService:
 
     def _connect_to_traefik_network(self, container_id: str) -> None:
         """
-        Connect a container to the traefik-routing network for VNC proxy support.
-        This allows traefik to route requests to VMs regardless of their primary network.
-        """
-        traefik_network_name = "traefik-routing"
-        try:
-            # Try to get or create the traefik-routing network
-            try:
-                traefik_network = self.client.networks.get(traefik_network_name)
-            except NotFound:
-                # Create the network if it doesn't exist (e.g., if running outside docker-compose)
-                logger.info(f"Creating {traefik_network_name} network for traefik routing")
-                traefik_network = self.client.networks.create(
-                    traefik_network_name,
-                    driver="bridge"
-                )
+        DEPRECATED: VMs should NOT be connected to traefik-routing for security.
+        Instead, traefik is connected to range networks via connect_traefik_to_network().
 
-            # Connect the container to the traefik network
-            traefik_network.connect(container_id)
-            logger.info(f"Connected container {container_id[:12]} to {traefik_network_name}")
+        This method is kept for backwards compatibility but logs a warning.
+        """
+        logger.warning(f"_connect_to_traefik_network is deprecated - VMs should not be on management network")
+        # Do nothing - VMs should not be on traefik-routing
+
+    def connect_traefik_to_network(self, network_id: str) -> bool:
+        """
+        Connect the traefik container to a range network.
+        This allows traefik to route to VMs on that network without exposing
+        the management network to VMs.
+
+        Args:
+            network_id: Docker network ID to connect traefik to
+
+        Returns:
+            True if successful, False if traefik not found or already connected
+        """
+        try:
+            # Find the traefik container
+            traefik_container = None
+            for container in self.client.containers.list():
+                if 'traefik' in container.name.lower():
+                    traefik_container = container
+                    break
+
+            if not traefik_container:
+                logger.warning("Traefik container not found - VNC routing may not work")
+                return False
+
+            # Get the network
+            network = self.client.networks.get(network_id)
+
+            # Check if traefik is already connected
+            connected_containers = network.attrs.get("Containers", {})
+            if traefik_container.id in connected_containers:
+                logger.debug(f"Traefik already connected to network {network.name}")
+                return True
+
+            # Connect traefik to the network
+            network.connect(traefik_container.id)
+            logger.info(f"Connected traefik to network {network.name} for VM routing")
+            return True
+
+        except NotFound as e:
+            logger.warning(f"Network not found when connecting traefik: {e}")
+            return False
         except APIError as e:
-            # Log but don't fail - VNC routing is optional functionality
-            logger.warning(f"Failed to connect container to traefik network: {e}")
+            logger.warning(f"Failed to connect traefik to network: {e}")
+            return False
+
+    def disconnect_traefik_from_network(self, network_id: str) -> bool:
+        """
+        Disconnect the traefik container from a range network.
+        Called during network teardown.
+
+        Args:
+            network_id: Docker network ID to disconnect traefik from
+
+        Returns:
+            True if successful
+        """
+        try:
+            # Find the traefik container
+            traefik_container = None
+            for container in self.client.containers.list():
+                if 'traefik' in container.name.lower():
+                    traefik_container = container
+                    break
+
+            if not traefik_container:
+                return True  # Nothing to disconnect
+
+            # Get the network
+            network = self.client.networks.get(network_id)
+
+            # Disconnect traefik from the network
+            network.disconnect(traefik_container.id)
+            logger.info(f"Disconnected traefik from network {network.name}")
+            return True
+
+        except NotFound:
+            return True  # Already disconnected
+        except APIError as e:
+            logger.warning(f"Failed to disconnect traefik from network: {e}")
+            return False
+
+    def setup_network_isolation(self, network_id: str, subnet: str) -> bool:
+        """
+        Set up iptables rules to isolate a range network from the host and CYROID infrastructure.
+
+        This prevents VMs from:
+        - Accessing the Docker host (localhost, host gateway)
+        - Accessing CYROID services (backend, database, traefik-routing network)
+        - Accessing other range networks
+
+        Args:
+            network_id: Docker network ID (used for rule comments/identification)
+            subnet: Network subnet in CIDR notation (e.g., "10.0.1.0/24")
+
+        Returns:
+            True if successful
+        """
+        import subprocess
+
+        try:
+            # Get the network to find its bridge interface
+            network = self.client.networks.get(network_id)
+            network_name = network.name
+
+            # Get host IPs to block (Docker gateway IPs and host interfaces)
+            # These are common Docker/host IPs that should be blocked
+            blocked_destinations = [
+                "172.17.0.0/16",      # Default Docker bridge network
+                "172.18.0.0/16",      # Docker networks range
+                "172.19.0.0/16",      # Docker networks range
+                "172.20.0.0/16",      # Docker networks range
+                "127.0.0.0/8",        # Localhost
+                "10.0.0.0/8",         # Private networks (except our subnet)
+                "192.168.0.0/16",     # Private networks
+            ]
+
+            # Create a unique chain for this network
+            chain_name = f"CYROID-{network_id[:12]}"
+
+            # Create the chain (ignore error if exists)
+            subprocess.run(
+                ["iptables", "-N", chain_name],
+                capture_output=True
+            )
+
+            # Flush existing rules in the chain
+            subprocess.run(
+                ["iptables", "-F", chain_name],
+                capture_output=True
+            )
+
+            # Add rules to block access to infrastructure
+            for dest in blocked_destinations:
+                # Skip if destination overlaps with our own subnet
+                if self._subnets_overlap(subnet, dest):
+                    continue
+
+                subprocess.run([
+                    "iptables", "-A", chain_name,
+                    "-s", subnet,
+                    "-d", dest,
+                    "-j", "DROP"
+                ], check=True, capture_output=True)
+
+            # Block access to host's physical interfaces
+            # Get host IP addresses
+            result = subprocess.run(
+                ["hostname", "-I"],
+                capture_output=True,
+                text=True
+            )
+            if result.returncode == 0:
+                host_ips = result.stdout.strip().split()
+                for host_ip in host_ips:
+                    if host_ip and not host_ip.startswith(subnet.split('/')[0].rsplit('.', 1)[0]):
+                        subprocess.run([
+                            "iptables", "-A", chain_name,
+                            "-s", subnet,
+                            "-d", f"{host_ip}/32",
+                            "-j", "DROP"
+                        ], capture_output=True)
+
+            # Allow traffic within the same subnet (for VM-to-VM communication)
+            subprocess.run([
+                "iptables", "-I", chain_name, "1",
+                "-s", subnet,
+                "-d", subnet,
+                "-j", "ACCEPT"
+            ], check=True, capture_output=True)
+
+            # Add jump to our chain from DOCKER-USER (at the beginning)
+            # First check if rule already exists
+            check_result = subprocess.run([
+                "iptables", "-C", "DOCKER-USER",
+                "-s", subnet,
+                "-j", chain_name
+            ], capture_output=True)
+
+            if check_result.returncode != 0:
+                # Rule doesn't exist, add it
+                subprocess.run([
+                    "iptables", "-I", "DOCKER-USER", "1",
+                    "-s", subnet,
+                    "-j", chain_name
+                ], check=True, capture_output=True)
+
+            logger.info(f"Set up network isolation for {network_name} ({subnet})")
+            return True
+
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Failed to set up network isolation: {e}")
+            return False
+        except Exception as e:
+            logger.error(f"Failed to set up network isolation: {e}")
+            return False
+
+    def teardown_network_isolation(self, network_id: str, subnet: str) -> bool:
+        """
+        Remove iptables rules for a range network.
+
+        Args:
+            network_id: Docker network ID
+            subnet: Network subnet in CIDR notation
+
+        Returns:
+            True if successful
+        """
+        import subprocess
+
+        try:
+            chain_name = f"CYROID-{network_id[:12]}"
+
+            # Remove jump from DOCKER-USER
+            subprocess.run([
+                "iptables", "-D", "DOCKER-USER",
+                "-s", subnet,
+                "-j", chain_name
+            ], capture_output=True)  # Ignore errors if rule doesn't exist
+
+            # Flush and delete the chain
+            subprocess.run(["iptables", "-F", chain_name], capture_output=True)
+            subprocess.run(["iptables", "-X", chain_name], capture_output=True)
+
+            logger.info(f"Removed network isolation rules for {subnet}")
+            return True
+
+        except Exception as e:
+            logger.warning(f"Failed to remove network isolation rules: {e}")
+            return False
+
+    def _subnets_overlap(self, subnet1: str, subnet2: str) -> bool:
+        """Check if two subnets overlap."""
+        import ipaddress
+        try:
+            net1 = ipaddress.ip_network(subnet1, strict=False)
+            net2 = ipaddress.ip_network(subnet2, strict=False)
+            return net1.overlaps(net2)
+        except ValueError:
+            return False
 
     # Container Operations (Linux VMs)
 
@@ -201,23 +426,20 @@ class DockerService:
                 environment["SUDO_ACCESS"] = "true"
             logger.info(f"Set user config for LinuxServer container {name}: user={linux_username}, sudo={linux_user_sudo}")
 
-        # Get Range network for attachment (will be connected after creation)
+        # Get Range network for attachment
+        # NOTE: VMs are created ONLY on the range network for security.
+        # Traefik connects to range networks to route traffic - VMs never see traefik-routing.
         try:
             range_network = self.client.networks.get(network_id)
         except NotFound:
             raise ValueError(f"Network not found: {network_id}")
 
-        # Get or create traefik-routing network (primary for VNC proxy)
-        traefik_network_name = "traefik-routing"
-        try:
-            traefik_network = self.client.networks.get(traefik_network_name)
-        except NotFound:
-            logger.info(f"Creating {traefik_network_name} network for traefik routing")
-            traefik_network = self.client.networks.create(traefik_network_name, driver="bridge")
-
-        # Create on traefik-routing first (so traefik uses this IP for routing)
+        # Create container directly on the range network with static IP
+        # This ensures VMs cannot access the management network
         networking_config = self.client.api.create_networking_config({
-            traefik_network.name: self.client.api.create_endpoint_config()
+            range_network.name: self.client.api.create_endpoint_config(
+                ipv4_address=ip_address
+            )
         })
 
         # Create container
@@ -241,11 +463,7 @@ class DockerService:
                 labels=labels or {}
             )
             container_id = container["Id"]
-            logger.info(f"Created container: {name} ({container_id[:12]})")
-
-            # Connect to Range network with static IP
-            range_network.connect(container_id, ipv4_address=ip_address)
-            logger.info(f"Connected container to {range_network.name} with IP {ip_address}")
+            logger.info(f"Created container: {name} ({container_id[:12]}) on {range_network.name} with IP {ip_address}")
 
             return container_id
         except APIError as e:
@@ -507,10 +725,8 @@ class DockerService:
                 labels=labels or {}
             )
             container_id = container["Id"]
-            logger.info(f"Created Windows container: {name} ({container_id[:12]})")
-
-            # Connect to traefik network for VNC proxy routing
-            self._connect_to_traefik_network(container_id)
+            logger.info(f"Created Windows container: {name} ({container_id[:12]}) on range network")
+            # NOTE: No traefik-routing connection - traefik connects to range networks for routing
 
             return container_id
         except APIError as e:
@@ -803,10 +1019,8 @@ local-hostname: {name}
                 labels=labels or {}
             )
             container_id = container["Id"]
-            logger.info(f"Created Linux VM container: {name} ({container_id[:12]})")
-
-            # Connect to traefik network for VNC proxy routing
-            self._connect_to_traefik_network(container_id)
+            logger.info(f"Created Linux VM container: {name} ({container_id[:12]}) on range network")
+            # NOTE: No traefik-routing connection - traefik connects to range networks for routing
 
             return container_id
         except APIError as e:

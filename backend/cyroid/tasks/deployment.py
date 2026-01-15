@@ -52,7 +52,14 @@ def deploy_range_task(range_id: str):
                 )
                 network.docker_network_id = docker_network_id
                 db.commit()
-                logger.info(f"Provisioned network {network.name}")
+
+                # Connect traefik to this network for VNC/web console routing
+                docker.connect_traefik_to_network(docker_network_id)
+
+                # Set up iptables rules to isolate this network from host/infrastructure
+                docker.setup_network_isolation(docker_network_id, network.subnet)
+
+                logger.info(f"Provisioned and isolated network {network.name}")
 
         # Step 2: Create and start all VMs
         vms = db.query(VM).filter(VM.range_id == UUID(range_id)).all()
@@ -159,6 +166,10 @@ def teardown_range_task(range_id: str):
         for network in networks:
             if network.docker_network_id:
                 try:
+                    # Remove iptables isolation rules
+                    docker.teardown_network_isolation(network.docker_network_id, network.subnet)
+                    # Disconnect traefik before deleting network
+                    docker.disconnect_traefik_from_network(network.docker_network_id)
                     docker.delete_network(network.docker_network_id)
                 except Exception as e:
                     logger.warning(f"Failed to delete network {network.id}: {e}")

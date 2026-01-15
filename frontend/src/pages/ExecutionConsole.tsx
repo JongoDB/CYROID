@@ -8,7 +8,6 @@ import { EventLogComponent } from '../components/execution/EventLog'
 import { VMConsole } from '../components/console/VMConsole'
 import { MSELUpload } from '../components/execution/MSELUpload'
 import { InjectTimeline } from '../components/execution/InjectTimeline'
-import { ConnectionMonitor } from '../components/execution/ConnectionMonitor'
 import { NetworkInterfaces } from '../components/execution/NetworkInterfaces'
 import { Activity, Server, ArrowLeft, X, FileText } from 'lucide-react'
 import clsx from 'clsx'
@@ -141,11 +140,6 @@ export default function ExecutionConsole() {
           {/* Network Interfaces - Below VM Grid */}
           <div className="mt-6">
             <NetworkInterfaces rangeId={rangeId} vms={vms} networks={networks} />
-          </div>
-
-          {/* Connection Monitor - Network Traffic */}
-          <div className="mt-4">
-            <ConnectionMonitor rangeId={rangeId} vms={vms} />
           </div>
         </div>
 

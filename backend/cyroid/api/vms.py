@@ -234,9 +234,13 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
                 router_name = f"vnc-{vm_id_short}"
                 middlewares = [f"vnc-strip-{vm_id_short}"]
 
+                # Use range network for routing (traefik connects to range networks, not VMs to traefik-routing)
+                # This ensures VMs cannot access the management network
+                range_network_name = f"cyroid-{network.name}-{str(network.id)[:8]}"
+
                 labels.update({
                     "traefik.enable": "true",
-                    "traefik.docker.network": "traefik-routing",  # Use traefik-routing network
+                    "traefik.docker.network": range_network_name,  # Use range network for routing
                     # Service (shared by both routers)
                     f"traefik.http.services.{router_name}.loadbalancer.server.port": vnc_port,
                     f"traefik.http.services.{router_name}.loadbalancer.server.scheme": vnc_scheme,
