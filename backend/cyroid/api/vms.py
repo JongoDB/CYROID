@@ -285,7 +285,8 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
 
                 # Determine Windows version (VM setting takes priority over template)
                 # Version codes: 11, 11l, 11e, 10, 10l, 10e, 8e, 7u, vu, xp, 2k, 2025, 2022, 2019, 2016, 2012, 2008, 2003
-                windows_version = vm.windows_version or template.os_variant or "11"
+                # Use base_image for version code (e.g., "2019"), NOT os_variant (e.g., "Windows Server 2019")
+                windows_version = vm.windows_version or template.base_image or "11"
 
                 # Determine ISO path (VM setting takes priority)
                 iso_path = vm.iso_path or (template.cached_iso_path if hasattr(template, 'cached_iso_path') and template.cached_iso_path else None)
