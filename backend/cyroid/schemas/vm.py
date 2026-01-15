@@ -51,6 +51,11 @@ class VMCreate(VMBase):
     # Installation mode
     manual_install: bool = Field(default=False, description="Enable manual/interactive installation mode")
 
+    # Linux user configuration (for cloud-init in qemus/qemu, env vars in KasmVNC/LinuxServer)
+    linux_username: Optional[str] = Field(None, max_length=64, description="Linux username")
+    linux_password: Optional[str] = Field(None, max_length=128, description="Linux password")
+    linux_user_sudo: bool = Field(default=True, description="Grant sudo/admin privileges to the user")
+
 
 class VMUpdate(BaseModel):
     hostname: Optional[str] = Field(None, min_length=1, max_length=63)
@@ -80,6 +85,10 @@ class VMUpdate(BaseModel):
     keyboard: Optional[str] = Field(None, max_length=20)
     region: Optional[str] = Field(None, max_length=20)
     manual_install: Optional[bool] = None
+    # Linux user configuration
+    linux_username: Optional[str] = Field(None, max_length=64)
+    linux_password: Optional[str] = Field(None, max_length=128)
+    linux_user_sudo: Optional[bool] = None
 
 
 class VMResponse(VMBase):
@@ -109,6 +118,9 @@ class VMResponse(VMBase):
     keyboard: Optional[str] = None
     region: Optional[str] = None
     manual_install: bool = False
+    # Linux user configuration (password excluded for security)
+    linux_username: Optional[str] = None
+    linux_user_sudo: bool = True
     created_at: datetime
     updated_at: datetime
 

@@ -51,7 +51,7 @@ export default function Dashboard() {
 
       <div className="mt-8 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
         {/* Stats cards */}
-        <div className="bg-white overflow-hidden shadow rounded-lg">
+        <Link to="/ranges" className="bg-white overflow-hidden shadow rounded-lg hover:shadow-md transition-shadow cursor-pointer">
           <div className="p-5">
             <div className="flex items-center">
               <div className="flex-shrink-0">
@@ -67,7 +67,7 @@ export default function Dashboard() {
               </div>
             </div>
           </div>
-        </div>
+        </Link>
 
         <div className="bg-white overflow-hidden shadow rounded-lg">
           <div className="p-5">
@@ -89,7 +89,7 @@ export default function Dashboard() {
           </div>
         </div>
 
-        <div className="bg-white overflow-hidden shadow rounded-lg">
+        <Link to="/templates" className="bg-white overflow-hidden shadow rounded-lg hover:shadow-md transition-shadow cursor-pointer">
           <div className="p-5">
             <div className="flex items-center">
               <div className="flex-shrink-0">
@@ -105,7 +105,7 @@ export default function Dashboard() {
               </div>
             </div>
           </div>
-        </div>
+        </Link>
       </div>
 
       <div className="mt-8">

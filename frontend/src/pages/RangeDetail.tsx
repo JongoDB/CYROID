@@ -67,10 +67,17 @@ export default function RangeDetail() {
     language: null,
     keyboard: null,
     region: null,
-    manual_install: false
+    manual_install: false,
+    // Linux user configuration
+    linux_username: '',
+    linux_password: '',
+    linux_user_sudo: true
   })
   const [showWindowsOptions, setShowWindowsOptions] = useState(false)
   const [showLinuxISOOptions, setShowLinuxISOOptions] = useState(false)
+  const [showLinuxContainerOptions, setShowLinuxContainerOptions] = useState(false)
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [linuxContainerType, setLinuxContainerType] = useState<'kasmvnc' | 'linuxserver' | null>(null)
 
   // Console modal state
   const [consoleVm, setConsoleVm] = useState<VM | null>(null)
@@ -223,6 +230,18 @@ export default function RangeDetail() {
         if (vmForm.disk3_gb) vmData.disk3_gb = vmForm.disk3_gb
         vmData.enable_shared_folder = vmForm.enable_shared_folder || false
         vmData.enable_global_shared = vmForm.enable_global_shared || false
+        // Linux user configuration (cloud-init)
+        if (vmForm.linux_username) vmData.linux_username = vmForm.linux_username
+        if (vmForm.linux_password) vmData.linux_password = vmForm.linux_password
+        vmData.linux_user_sudo = vmForm.linux_user_sudo ?? true
+      }
+
+      // Add Linux container settings (KasmVNC, LinuxServer)
+      if (showLinuxContainerOptions) {
+        // Linux user configuration (env vars)
+        if (vmForm.linux_username) vmData.linux_username = vmForm.linux_username
+        if (vmForm.linux_password) vmData.linux_password = vmForm.linux_password
+        vmData.linux_user_sudo = vmForm.linux_user_sudo ?? true
       }
 
       await vmsApi.create(vmData)
@@ -237,10 +256,14 @@ export default function RangeDetail() {
         // Extended configuration reset
         disk2_gb: null, disk3_gb: null,
         enable_shared_folder: false, enable_global_shared: false,
-        language: null, keyboard: null, region: null, manual_install: false
+        language: null, keyboard: null, region: null, manual_install: false,
+        // Linux user configuration reset
+        linux_username: '', linux_password: '', linux_user_sudo: true
       })
       setShowWindowsOptions(false)
       setShowLinuxISOOptions(false)
+      setShowLinuxContainerOptions(false)
+      setLinuxContainerType(null)
       fetchData()
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to create VM')
@@ -606,8 +629,15 @@ export default function RangeDetail() {
                       const template = templates.find(t => t.id === e.target.value)
                       const isWindows = template?.os_type === 'windows'
                       const isLinuxISO = template?.os_type === 'linux' && template?.base_image?.startsWith('iso:')
+                      // Detect KasmVNC and LinuxServer containers
+                      const baseImage = template?.base_image?.toLowerCase() || ''
+                      const isKasmVNC = baseImage.includes('kasmweb/')
+                      const isLinuxServer = baseImage.includes('linuxserver/') || baseImage.includes('lscr.io/linuxserver')
+                      const isLinuxContainer = (isKasmVNC || isLinuxServer) && !isLinuxISO
                       setShowWindowsOptions(isWindows)
                       setShowLinuxISOOptions(isLinuxISO)
+                      setShowLinuxContainerOptions(isLinuxContainer)
+                      setLinuxContainerType(isKasmVNC ? 'kasmvnc' : isLinuxServer ? 'linuxserver' : null)
                       setVmForm({
                         ...vmForm,
                         template_id: e.target.value,
@@ -615,7 +645,11 @@ export default function RangeDetail() {
                         ram_mb: template?.default_ram_mb || (isWindows ? 8192 : 2048),
                         disk_gb: template?.default_disk_gb || (isWindows ? 64 : 20),
                         windows_version: isWindows ? template?.os_variant || '11' : '',
-                        display_type: 'desktop'
+                        display_type: 'desktop',
+                        // Reset Linux user config
+                        linux_username: '',
+                        linux_password: '',
+                        linux_user_sudo: true
                       })
                     }}
                     className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
@@ -998,6 +1032,41 @@ export default function RangeDetail() {
                       </div>
                     </div>
                     <p className="text-xs text-gray-500">Static network configuration for the VM</p>
+                    {/* User Configuration */}
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700">Username (optional)</label>
+                        <input
+                          type="text"
+                          value={vmForm.linux_username}
+                          onChange={(e) => setVmForm({ ...vmForm, linux_username: e.target.value })}
+                          className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                          placeholder="user"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700">Password (optional)</label>
+                        <input
+                          type="password"
+                          value={vmForm.linux_password}
+                          onChange={(e) => setVmForm({ ...vmForm, linux_password: e.target.value })}
+                          className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                          placeholder="Leave empty for no password"
+                        />
+                      </div>
+                    </div>
+                    <label className="flex items-center">
+                      <input
+                        type="checkbox"
+                        checked={vmForm.linux_user_sudo ?? true}
+                        onChange={(e) => setVmForm({ ...vmForm, linux_user_sudo: e.target.checked })}
+                        className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
+                      />
+                      <span className="ml-2 text-sm text-gray-700">Grant sudo privileges</span>
+                    </label>
+                    <p className="text-xs text-gray-500">
+                      User will be created via cloud-init during installation
+                    </p>
                     {/* Shared Folders */}
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">Shared Folders</label>
@@ -1049,6 +1118,86 @@ export default function RangeDetail() {
                       </div>
                       <p className="mt-1 text-xs text-gray-500">Additional virtual disks for the VM</p>
                     </div>
+                  </div>
+                )}
+
+                {/* Linux Container options (KasmVNC, LinuxServer) */}
+                {showLinuxContainerOptions && (
+                  <div className="border-t pt-4 space-y-4">
+                    <h4 className="text-sm font-medium text-gray-900 flex items-center">
+                      <Server className="h-4 w-4 mr-2 text-green-500" />
+                      Linux Container Settings
+                      <span className="ml-2 text-xs text-gray-500">
+                        ({linuxContainerType === 'kasmvnc' ? 'KasmVNC' : 'LinuxServer'})
+                      </span>
+                    </h4>
+                    {/* IP Address for containers */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">IP Address</label>
+                      <input
+                        type="text"
+                        required
+                        value={vmForm.ip_address}
+                        onChange={(e) => setVmForm({ ...vmForm, ip_address: e.target.value })}
+                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                        placeholder="10.0.1.10"
+                      />
+                    </div>
+                    {/* User Configuration */}
+                    {linuxContainerType === 'kasmvnc' ? (
+                      <>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700">VNC Password (optional)</label>
+                          <input
+                            type="password"
+                            value={vmForm.linux_password}
+                            onChange={(e) => setVmForm({ ...vmForm, linux_password: e.target.value })}
+                            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                            placeholder="Leave empty for no password"
+                          />
+                          <p className="mt-1 text-xs text-gray-500">
+                            Sets the VNC password for kasm_user (username cannot be changed)
+                          </p>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700">Username (optional)</label>
+                            <input
+                              type="text"
+                              value={vmForm.linux_username}
+                              onChange={(e) => setVmForm({ ...vmForm, linux_username: e.target.value })}
+                              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                              placeholder="abc"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700">Password (optional)</label>
+                            <input
+                              type="password"
+                              value={vmForm.linux_password}
+                              onChange={(e) => setVmForm({ ...vmForm, linux_password: e.target.value })}
+                              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                              placeholder="Leave empty for no password"
+                            />
+                          </div>
+                        </div>
+                        <label className="flex items-center">
+                          <input
+                            type="checkbox"
+                            checked={vmForm.linux_user_sudo ?? true}
+                            onChange={(e) => setVmForm({ ...vmForm, linux_user_sudo: e.target.checked })}
+                            className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
+                          />
+                          <span className="ml-2 text-sm text-gray-700">Grant sudo privileges</span>
+                        </label>
+                        <p className="text-xs text-gray-500">
+                          Creates a custom user with the specified credentials
+                        </p>
+                      </>
+                    )}
                   </div>
                 )}
 

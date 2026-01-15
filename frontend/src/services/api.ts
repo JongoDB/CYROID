@@ -245,6 +245,10 @@ export interface VMCreate {
   keyboard?: string | null
   region?: string | null
   manual_install?: boolean
+  // Linux user configuration (for cloud-init in qemus/qemu, env vars in KasmVNC/LinuxServer)
+  linux_username?: string
+  linux_password?: string
+  linux_user_sudo?: boolean
 }
 
 // Network interface types

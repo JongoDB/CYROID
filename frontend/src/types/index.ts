@@ -86,6 +86,9 @@ export interface VM {
   keyboard: string | null
   region: string | null
   manual_install: boolean
+  // Linux user configuration
+  linux_username: string | null
+  linux_user_sudo: boolean
   position_x: number
   position_y: number
   created_at: string

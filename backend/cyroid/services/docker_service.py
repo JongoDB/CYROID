@@ -151,11 +151,14 @@ class DockerService:
         environment: Optional[Dict[str, str]] = None,
         labels: Optional[Dict[str, str]] = None,
         privileged: bool = False,
-        hostname: Optional[str] = None
+        hostname: Optional[str] = None,
+        linux_username: Optional[str] = None,
+        linux_password: Optional[str] = None,
+        linux_user_sudo: bool = True
     ) -> str:
         """
         Create a Docker container for a Linux VM.
-        
+
         Args:
             name: Container name
             image: Docker image (e.g., "ubuntu:22.04")
@@ -168,12 +171,35 @@ class DockerService:
             labels: Container labels
             privileged: Run in privileged mode
             hostname: Container hostname
-            
+            linux_username: Linux username (for KasmVNC/LinuxServer containers)
+            linux_password: Linux password (for KasmVNC/LinuxServer containers)
+            linux_user_sudo: Grant sudo privileges (for LinuxServer containers)
+
         Returns:
             Container ID
         """
         # Pull image if not present
         self._ensure_image(image)
+
+        # Initialize environment dict if not provided
+        if environment is None:
+            environment = {}
+
+        # Configure user settings based on container image type
+        if "kasmweb/" in image:
+            # KasmVNC containers - set VNC password (user is always kasm_user)
+            if linux_password:
+                environment["VNC_PW"] = linux_password
+                logger.info(f"Set VNC password for KasmVNC container {name}")
+        elif "linuxserver/" in image or "lscr.io/linuxserver" in image:
+            # LinuxServer containers (webtop, etc.)
+            if linux_username:
+                environment["CUSTOM_USER"] = linux_username
+            if linux_password:
+                environment["PASSWORD"] = linux_password
+            if linux_user_sudo:
+                environment["SUDO_ACCESS"] = "true"
+            logger.info(f"Set user config for LinuxServer container {name}: user={linux_username}, sudo={linux_user_sudo}")
 
         # Get Range network for attachment (will be connected after creation)
         try:
@@ -518,6 +544,10 @@ class DockerService:
         shared_folder_path: Optional[str] = None,
         enable_global_shared: bool = False,
         global_shared_path: Optional[str] = None,
+        # Linux user configuration (for cloud-init)
+        linux_username: Optional[str] = None,
+        linux_password: Optional[str] = None,
+        linux_user_sudo: bool = True,
     ) -> str:
         """
         Create a Linux VM container using qemus/qemu.
@@ -676,6 +706,75 @@ class DockerService:
             os.makedirs(global_shared_path, exist_ok=True)
             binds.append(f"{global_shared_path}:/global:ro")
             logger.info(f"Using global shared folder: {global_shared_path}")
+
+        # Cloud-init user configuration
+        # Creates a seed ISO with user-data for automatic user setup during Linux installation
+        if linux_username and linux_password and storage_path:
+            import subprocess
+            import crypt
+
+            cloud_init_dir = os.path.join(storage_path, "cloud-init")
+            os.makedirs(cloud_init_dir, exist_ok=True)
+
+            # Generate password hash for security
+            password_hash = crypt.crypt(linux_password, crypt.mksalt(crypt.METHOD_SHA512))
+
+            # Create user-data file for cloud-init
+            sudo_config = "sudo: ALL=(ALL) NOPASSWD:ALL" if linux_user_sudo else ""
+            groups_config = "sudo,adm,cdrom,plugdev" if linux_user_sudo else "cdrom,plugdev"
+
+            user_data = f"""#cloud-config
+users:
+  - name: {linux_username}
+    hashed_passwd: {password_hash}
+    lock_passwd: false
+    shell: /bin/bash
+    {sudo_config}
+    groups: {groups_config}
+
+hostname: {name}
+
+# Disable cloud-init after first run
+runcmd:
+  - touch /etc/cloud/cloud-init.disabled
+"""
+            user_data_path = os.path.join(cloud_init_dir, "user-data")
+            with open(user_data_path, "w") as f:
+                f.write(user_data)
+
+            # Create meta-data file
+            meta_data = f"""instance-id: {name}
+local-hostname: {name}
+"""
+            meta_data_path = os.path.join(cloud_init_dir, "meta-data")
+            with open(meta_data_path, "w") as f:
+                f.write(meta_data)
+
+            # Generate cloud-init seed ISO
+            seed_iso_path = os.path.join(cloud_init_dir, "seed.iso")
+            try:
+                result = subprocess.run(
+                    [
+                        "genisoimage", "-output", seed_iso_path,
+                        "-volid", "cidata", "-joliet", "-rock",
+                        user_data_path, meta_data_path
+                    ],
+                    check=True,
+                    capture_output=True,
+                    text=True
+                )
+                # Mount cloud-init ISO for the VM
+                binds.append(f"{seed_iso_path}:/cloud-init.iso:ro")
+                # Add QEMU argument to attach cloud-init ISO as a CD-ROM drive
+                if "ARGUMENTS" in environment:
+                    environment["ARGUMENTS"] += " -cdrom /cloud-init.iso"
+                else:
+                    environment["ARGUMENTS"] = "-cdrom /cloud-init.iso"
+                logger.info(f"Created cloud-init configuration for user: {linux_username}")
+            except subprocess.CalledProcessError as e:
+                logger.warning(f"Failed to create cloud-init ISO: {e.stderr}. User will need manual setup.")
+            except FileNotFoundError:
+                logger.warning("genisoimage not found. Cloud-init ISO creation skipped. User will need manual setup.")
 
         # Linux VM containers need privileged mode for KVM
         try:

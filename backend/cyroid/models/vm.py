@@ -74,6 +74,11 @@ class VM(Base, UUIDMixin, TimestampMixin):
     boot_mode: Mapped[Optional[str]] = mapped_column(String(10), nullable=True, default="uefi")  # uefi or legacy
     disk_type: Mapped[Optional[str]] = mapped_column(String(10), nullable=True, default="scsi")  # scsi, blk, or ide
 
+    # Linux user configuration (for cloud-init in qemus/qemu, env vars in KasmVNC/LinuxServer)
+    linux_username: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    linux_password: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    linux_user_sudo: Mapped[bool] = mapped_column(Boolean, default=True)
+
     # Position in visual builder (for UI)
     position_x: Mapped[int] = mapped_column(Integer, default=0)
     position_y: Mapped[int] = mapped_column(Integer, default=0)

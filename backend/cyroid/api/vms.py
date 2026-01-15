@@ -380,6 +380,10 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
                     # Extended configuration
                     disk2_gb=vm.disk2_gb,
                     disk3_gb=vm.disk3_gb,
+                    # Linux user configuration (cloud-init)
+                    linux_username=vm.linux_username,
+                    linux_password=vm.linux_password,
+                    linux_user_sudo=vm.linux_user_sudo if vm.linux_user_sudo is not None else True,
                 )
             else:
                 container_id = docker.create_container(
@@ -391,6 +395,10 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
                     memory_limit_mb=vm.ram_mb,
                     hostname=vm.hostname,
                     labels=labels,
+                    # Linux user configuration (KasmVNC/LinuxServer env vars)
+                    linux_username=vm.linux_username,
+                    linux_password=vm.linux_password,
+                    linux_user_sudo=vm.linux_user_sudo if vm.linux_user_sudo is not None else True,
                 )
 
             vm.container_id = container_id

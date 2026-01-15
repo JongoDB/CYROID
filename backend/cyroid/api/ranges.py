@@ -2,14 +2,17 @@
 from typing import List
 from uuid import UUID
 import logging
+import os
 
 from fastapi import APIRouter, HTTPException, status
+
+from cyroid.config import get_settings
 
 from cyroid.api.deps import DBSession, CurrentUser, filter_by_visibility, check_resource_access
 from cyroid.models.range import Range, RangeStatus
 from cyroid.models.network import Network, IsolationLevel
 from cyroid.models.vm import VM, VMStatus
-from cyroid.models.template import VMTemplate
+from cyroid.models.template import VMTemplate, OSType
 from cyroid.models.resource_tag import ResourceTag
 from cyroid.schemas.range import (
     RangeCreate, RangeUpdate, RangeResponse, RangeDetailResponse,
@@ -182,13 +185,81 @@ def deploy_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
                     logger.warning(f"Skipping VM {vm.id}: network not provisioned")
                     continue
 
+                vm_id_short = str(vm.id)[:8]
                 labels = {
                     "cyroid.range_id": str(range_id),
                     "cyroid.vm_id": str(vm.id),
                     "cyroid.hostname": vm.hostname,
                 }
 
-                if template.os_type == "windows":
+                # Add traefik labels for VNC web console routing
+                display_type = vm.display_type or "desktop"
+                if display_type == "desktop":
+                    base_image = template.base_image or ""
+                    is_linuxserver = "linuxserver/" in base_image or "lscr.io/linuxserver" in base_image
+                    is_kasmweb = "kasmweb/" in base_image
+
+                    if base_image.startswith("iso:") or template.os_type == OSType.WINDOWS or template.os_type == OSType.CUSTOM:
+                        vnc_port = "8006"
+                        vnc_scheme = "http"
+                        needs_auth = False
+                    elif is_linuxserver:
+                        vnc_port = "3000"
+                        vnc_scheme = "http"
+                        needs_auth = False
+                    elif is_kasmweb:
+                        vnc_port = "6901"
+                        vnc_scheme = "https"
+                        needs_auth = True
+                    else:
+                        vnc_port = "6901"
+                        vnc_scheme = "https"
+                        needs_auth = False
+
+                    router_name = f"vnc-{vm_id_short}"
+                    middlewares = [f"vnc-strip-{vm_id_short}"]
+
+                    labels.update({
+                        "traefik.enable": "true",
+                        "traefik.docker.network": "traefik-routing",
+                        f"traefik.http.services.{router_name}.loadbalancer.server.port": vnc_port,
+                        f"traefik.http.services.{router_name}.loadbalancer.server.scheme": vnc_scheme,
+                        f"traefik.http.routers.{router_name}.rule": f"PathPrefix(`/vnc/{vm.id}`)",
+                        f"traefik.http.routers.{router_name}.entrypoints": "web",
+                        f"traefik.http.routers.{router_name}.service": router_name,
+                        f"traefik.http.routers.{router_name}.priority": "100",
+                        f"traefik.http.routers.{router_name}-secure.rule": f"PathPrefix(`/vnc/{vm.id}`)",
+                        f"traefik.http.routers.{router_name}-secure.entrypoints": "websecure",
+                        f"traefik.http.routers.{router_name}-secure.tls": "true",
+                        f"traefik.http.routers.{router_name}-secure.service": router_name,
+                        f"traefik.http.routers.{router_name}-secure.priority": "100",
+                        f"traefik.http.middlewares.vnc-strip-{vm_id_short}.stripprefix.prefixes": f"/vnc/{vm.id}",
+                    })
+
+                    if vnc_scheme == "https":
+                        labels[f"traefik.http.services.{router_name}.loadbalancer.serversTransport"] = "insecure-transport@file"
+
+                    if needs_auth:
+                        import base64
+                        auth_string = base64.b64encode(b"kasm_user:vncpassword").decode()
+                        auth_middleware = f"vnc-auth-{vm_id_short}"
+                        labels[f"traefik.http.middlewares.{auth_middleware}.headers.customrequestheaders.Authorization"] = f"Basic {auth_string}"
+                        middlewares.append(auth_middleware)
+
+                    labels[f"traefik.http.routers.{router_name}.middlewares"] = ",".join(middlewares)
+                    labels[f"traefik.http.routers.{router_name}-secure.middlewares"] = ",".join(middlewares)
+
+                if template.os_type == OSType.WINDOWS:
+                    settings = get_settings()
+                    vm_storage_path = os.path.join(
+                        settings.vm_storage_dir,
+                        str(vm.range_id),
+                        str(vm.id),
+                        "storage"
+                    )
+                    windows_version = vm.windows_version or template.os_variant or "11"
+                    iso_path = vm.iso_path or (template.cached_iso_path if hasattr(template, 'cached_iso_path') and template.cached_iso_path else None)
+
                     container_id = docker.create_windows_container(
                         name=f"cyroid-{vm.hostname}-{str(vm.id)[:8]}",
                         network_id=network.docker_network_id,
@@ -196,9 +267,61 @@ def deploy_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
                         cpu_limit=vm.cpu,
                         memory_limit_mb=vm.ram_mb,
                         disk_size_gb=vm.disk_gb,
+                        windows_version=windows_version,
                         labels=labels,
+                        iso_path=iso_path,
+                        storage_path=vm_storage_path,
+                        display_type=vm.display_type or "desktop",
+                    )
+                elif template.os_type == OSType.CUSTOM:
+                    # Custom ISO VMs use qemux/qemu
+                    settings = get_settings()
+                    vm_storage_path = os.path.join(
+                        settings.vm_storage_dir,
+                        str(vm.range_id),
+                        str(vm.id),
+                        "storage"
+                    )
+                    iso_path = template.cached_iso_path if hasattr(template, 'cached_iso_path') and template.cached_iso_path else None
+
+                    container_id = docker.create_linux_vm_container(
+                        name=f"cyroid-{vm.hostname}-{str(vm.id)[:8]}",
+                        network_id=network.docker_network_id,
+                        ip_address=vm.ip_address,
+                        cpu_limit=vm.cpu,
+                        memory_limit_mb=vm.ram_mb,
+                        disk_size_gb=vm.disk_gb,
+                        linux_distro="custom",
+                        labels=labels,
+                        iso_path=iso_path,
+                        storage_path=vm_storage_path,
+                        display_type=vm.display_type or "desktop",
+                    )
+                elif template.base_image.startswith("iso:"):
+                    # Linux ISO VMs use qemux/qemu
+                    settings = get_settings()
+                    vm_storage_path = os.path.join(
+                        settings.vm_storage_dir,
+                        str(vm.range_id),
+                        str(vm.id),
+                        "storage"
+                    )
+                    linux_distro = template.base_image.replace("iso:", "")
+
+                    container_id = docker.create_linux_vm_container(
+                        name=f"cyroid-{vm.hostname}-{str(vm.id)[:8]}",
+                        network_id=network.docker_network_id,
+                        ip_address=vm.ip_address,
+                        cpu_limit=vm.cpu,
+                        memory_limit_mb=vm.ram_mb,
+                        disk_size_gb=vm.disk_gb,
+                        linux_distro=linux_distro,
+                        labels=labels,
+                        storage_path=vm_storage_path,
+                        display_type=vm.display_type or "desktop",
                     )
                 else:
+                    # Docker container
                     container_id = docker.create_container(
                         name=f"cyroid-{vm.hostname}-{str(vm.id)[:8]}",
                         image=template.base_image,
