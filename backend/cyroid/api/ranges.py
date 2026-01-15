@@ -182,11 +182,69 @@ def deploy_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
                     logger.warning(f"Skipping VM {vm.id}: network not provisioned")
                     continue
 
+                vm_id_short = str(vm.id)[:8]
                 labels = {
                     "cyroid.range_id": str(range_id),
                     "cyroid.vm_id": str(vm.id),
                     "cyroid.hostname": vm.hostname,
                 }
+
+                # Add traefik labels for VNC web console routing
+                display_type = vm.display_type or "desktop"
+                if display_type == "desktop":
+                    base_image = template.base_image or ""
+                    is_linuxserver = "linuxserver/" in base_image or "lscr.io/linuxserver" in base_image
+                    is_kasmweb = "kasmweb/" in base_image
+
+                    if base_image.startswith("iso:") or template.os_type == "windows":
+                        vnc_port = "8006"
+                        vnc_scheme = "http"
+                        needs_auth = False
+                    elif is_linuxserver:
+                        vnc_port = "3000"
+                        vnc_scheme = "http"
+                        needs_auth = False
+                    elif is_kasmweb:
+                        vnc_port = "6901"
+                        vnc_scheme = "https"
+                        needs_auth = True
+                    else:
+                        vnc_port = "6901"
+                        vnc_scheme = "https"
+                        needs_auth = False
+
+                    router_name = f"vnc-{vm_id_short}"
+                    middlewares = [f"vnc-strip-{vm_id_short}"]
+
+                    labels.update({
+                        "traefik.enable": "true",
+                        "traefik.docker.network": "traefik-routing",
+                        f"traefik.http.services.{router_name}.loadbalancer.server.port": vnc_port,
+                        f"traefik.http.services.{router_name}.loadbalancer.server.scheme": vnc_scheme,
+                        f"traefik.http.routers.{router_name}.rule": f"PathPrefix(`/vnc/{vm.id}`)",
+                        f"traefik.http.routers.{router_name}.entrypoints": "web",
+                        f"traefik.http.routers.{router_name}.service": router_name,
+                        f"traefik.http.routers.{router_name}.priority": "100",
+                        f"traefik.http.routers.{router_name}-secure.rule": f"PathPrefix(`/vnc/{vm.id}`)",
+                        f"traefik.http.routers.{router_name}-secure.entrypoints": "websecure",
+                        f"traefik.http.routers.{router_name}-secure.tls": "true",
+                        f"traefik.http.routers.{router_name}-secure.service": router_name,
+                        f"traefik.http.routers.{router_name}-secure.priority": "100",
+                        f"traefik.http.middlewares.vnc-strip-{vm_id_short}.stripprefix.prefixes": f"/vnc/{vm.id}",
+                    })
+
+                    if vnc_scheme == "https":
+                        labels[f"traefik.http.services.{router_name}.loadbalancer.serversTransport"] = "insecure-transport@file"
+
+                    if needs_auth:
+                        import base64
+                        auth_string = base64.b64encode(b"kasm_user:vncpassword").decode()
+                        auth_middleware = f"vnc-auth-{vm_id_short}"
+                        labels[f"traefik.http.middlewares.{auth_middleware}.headers.customrequestheaders.Authorization"] = f"Basic {auth_string}"
+                        middlewares.append(auth_middleware)
+
+                    labels[f"traefik.http.routers.{router_name}.middlewares"] = ",".join(middlewares)
+                    labels[f"traefik.http.routers.{router_name}-secure.middlewares"] = ",".join(middlewares)
 
                 if template.os_type == "windows":
                     container_id = docker.create_windows_container(
