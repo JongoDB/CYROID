@@ -45,10 +45,17 @@ export function VncConsole({ vmId, vmHostname, token, onClose }: VncConsoleProps
         const origin = window.location.origin
 
         // Build VNC URL with proper WebSocket path
-        // The 'path' parameter tells noVNC where to connect for WebSocket RELATIVE to current page
-        // Since page loads at /vnc/{vm_id}/, path should just be 'websockify' (not full path)
-        // noVNC will then connect to ws://{host}/vnc/{vm_id}/websockify
-        const vncUrl = `${origin}${data.path}/?autoconnect=1&resize=scale&path=websockify`
+        // The 'path' parameter tells noVNC/KasmVNC where to connect for WebSocket
+        // - KasmVNC containers: use the proxy path (e.g., 'vnc/{vm-id}') so WebSocket connects through Traefik
+        // - qemu/dockur containers: use 'websockify' (relative to current page)
+        // Use nullish coalescing - empty string means use the proxy path for KasmVNC
+        const websocketPath = data.websocket_path ?? 'websockify'
+        // For KasmVNC (empty websocket_path), use the proxy path without leading slash
+        // This makes WebSocket connect to wss://host/vnc/{vm-id} which Traefik proxies correctly
+        const pathParam = websocketPath === ''
+          ? `&path=${data.path.replace(/^\//, '')}`
+          : `&path=${websocketPath}`
+        const vncUrl = `${origin}${data.path}/?autoconnect=1&resize=scale${pathParam}`
 
         setVncInfo({
           url: vncUrl,
