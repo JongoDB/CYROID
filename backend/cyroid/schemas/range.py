@@ -31,9 +31,26 @@ class RangeResponse(RangeBase):
     created_by: UUID
     created_at: datetime
     updated_at: datetime
+    network_count: int = 0
+    vm_count: int = 0
 
     class Config:
         from_attributes = True
+
+    @classmethod
+    def from_orm_with_counts(cls, range_obj):
+        """Create response with network and VM counts."""
+        return cls(
+            id=range_obj.id,
+            name=range_obj.name,
+            description=range_obj.description,
+            status=range_obj.status,
+            created_by=range_obj.created_by,
+            created_at=range_obj.created_at,
+            updated_at=range_obj.updated_at,
+            network_count=len(range_obj.networks) if range_obj.networks else 0,
+            vm_count=len(range_obj.vms) if range_obj.vms else 0,
+        )
 
 
 class RangeDetailResponse(RangeResponse):

@@ -160,9 +160,9 @@ export default function Ranges() {
                           {range.description || 'No description'}
                         </p>
                         <div className="mt-1 flex items-center text-xs text-gray-400">
-                          <span>{range.networks?.length || 0} networks</span>
+                          <span>{range.network_count} networks</span>
                           <span className="mx-2">•</span>
-                          <span>{range.vms?.length || 0} VMs</span>
+                          <span>{range.vm_count} VMs</span>
                         </div>
                       </div>
                     </div>

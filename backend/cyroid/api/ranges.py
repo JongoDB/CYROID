@@ -18,6 +18,7 @@ from cyroid.schemas.range import (
     RangeCreate, RangeUpdate, RangeResponse, RangeDetailResponse,
     RangeTemplateExport, RangeTemplateImport, NetworkTemplateData, VMTemplateData
 )
+from sqlalchemy.orm import joinedload
 from cyroid.schemas.user import ResourceTagCreate, ResourceTagsResponse
 
 logger = logging.getLogger(__name__)
@@ -42,26 +43,27 @@ def list_ranges(db: DBSession, current_user: CurrentUser):
     - Users see ranges with matching tags (if they have tags)
     - Users see untagged ranges (public)
     """
-    # Start with user's own ranges
-    query = db.query(Range).filter(Range.created_by == current_user.id)
+    # Start with user's own ranges - eager load networks and vms for counts
+    base_options = [joinedload(Range.networks), joinedload(Range.vms)]
 
     if current_user.is_admin:
         # Admins see all ranges
-        query = db.query(Range)
+        query = db.query(Range).options(*base_options)
     else:
         # Non-admins: own ranges + visibility-filtered shared ranges
         from sqlalchemy import or_
         shared_query = db.query(Range).filter(Range.created_by != current_user.id)
         shared_query = filter_by_visibility(shared_query, 'range', current_user, db, Range)
 
-        query = db.query(Range).filter(
+        query = db.query(Range).options(*base_options).filter(
             or_(
                 Range.created_by == current_user.id,
                 Range.id.in_(shared_query.with_entities(Range.id).subquery())
             )
         )
 
-    return query.all()
+    ranges = query.all()
+    return [RangeResponse.from_orm_with_counts(r) for r in ranges]
 
 
 @router.post("", response_model=RangeResponse, status_code=status.HTTP_201_CREATED)

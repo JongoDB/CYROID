@@ -41,6 +41,8 @@ export interface Range {
   created_by: string
   created_at: string
   updated_at: string
+  network_count: number
+  vm_count: number
   networks?: Network[]
   vms?: VM[]
 }
