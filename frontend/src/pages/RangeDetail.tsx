@@ -1257,8 +1257,8 @@ export default function RangeDetail() {
       {consoleVm && token && (
         <div className="fixed inset-0 z-50 overflow-hidden">
           <div className="absolute inset-0 bg-gray-900/80" onClick={() => setConsoleVm(null)} />
-          <div className="relative flex items-center justify-center min-h-screen p-4">
-            <div className="w-full max-w-5xl">
+          <div className="relative flex items-center justify-center h-full p-4">
+            <div className="w-full max-w-6xl h-[90vh]">
               <VncConsole
                 vmId={consoleVm.id}
                 vmHostname={consoleVm.hostname}

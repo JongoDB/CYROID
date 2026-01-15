@@ -125,7 +125,7 @@ export function VMConsole({ vmId, vmHostname, token, onClose }: VMConsoleProps) 
     <div
       className={clsx(
         'flex flex-col bg-gray-900 rounded-lg overflow-hidden shadow-xl',
-        isFullscreen ? 'fixed inset-4 z-50' : 'h-[400px]'
+        isFullscreen ? 'fixed inset-4 z-50' : 'h-full'
       )}
     >
       {/* Header */}

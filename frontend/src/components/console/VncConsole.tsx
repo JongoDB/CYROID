@@ -77,9 +77,18 @@ export function VncConsole({ vmId, vmHostname, token, onClose }: VncConsoleProps
     setIsFullscreen(!isFullscreen)
   }
 
-  const openInNewTab = () => {
+  const openInNewWindow = () => {
     if (vncInfo) {
-      window.open(vncInfo.url, '_blank')
+      // Open in a new browser window (not tab) with specific dimensions
+      const width = 1280
+      const height = 800
+      const left = (window.screen.width - width) / 2
+      const top = (window.screen.height - height) / 2
+      window.open(
+        vncInfo.url,
+        `vnc_${vmId}`,
+        `width=${width},height=${height},left=${left},top=${top},menubar=no,toolbar=no,location=no,status=no,resizable=yes,scrollbars=no`
+      )
     }
   }
 
@@ -95,7 +104,7 @@ export function VncConsole({ vmId, vmHostname, token, onClose }: VncConsoleProps
     <div
       className={clsx(
         'flex flex-col bg-gray-900 rounded-lg overflow-hidden shadow-xl',
-        isFullscreen ? 'fixed inset-4 z-50' : 'h-[600px]'
+        isFullscreen ? 'fixed inset-4 z-50' : 'h-full'
       )}
     >
       {/* Header */}
@@ -121,9 +130,9 @@ export function VncConsole({ vmId, vmHostname, token, onClose }: VncConsoleProps
         <div className="flex items-center gap-1">
           {vncInfo && (
             <button
-              onClick={openInNewTab}
+              onClick={openInNewWindow}
               className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 rounded"
-              title="Open in new tab"
+              title="Open in new window"
             >
               <ExternalLink className="w-4 h-4" />
             </button>
