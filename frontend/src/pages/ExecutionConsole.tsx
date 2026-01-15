@@ -1,14 +1,15 @@
 // frontend/src/pages/ExecutionConsole.tsx
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { Range, VM, MSEL } from '../types'
-import { rangesApi, vmsApi, mselApi } from '../services/api'
+import { Range, VM, MSEL, Network as NetworkType } from '../types'
+import { rangesApi, vmsApi, mselApi, networksApi } from '../services/api'
 import { VMGrid } from '../components/execution/VMGrid'
 import { EventLogComponent } from '../components/execution/EventLog'
 import { VMConsole } from '../components/console/VMConsole'
 import { MSELUpload } from '../components/execution/MSELUpload'
 import { InjectTimeline } from '../components/execution/InjectTimeline'
 import { ConnectionMonitor } from '../components/execution/ConnectionMonitor'
+import { NetworkInterfaces } from '../components/execution/NetworkInterfaces'
 import { Activity, Server, ArrowLeft, X, FileText } from 'lucide-react'
 import clsx from 'clsx'
 
@@ -19,6 +20,7 @@ export default function ExecutionConsole() {
   const navigate = useNavigate()
   const [range, setRange] = useState<Range | null>(null)
   const [vms, setVMs] = useState<VM[]>([])
+  const [networks, setNetworks] = useState<NetworkType[]>([])
   const [msel, setMSEL] = useState<MSEL | null>(null)
   const [loading, setLoading] = useState(true)
   const [selectedVM, setSelectedVM] = useState<{ id: string; hostname: string } | null>(null)
@@ -36,12 +38,14 @@ export default function ExecutionConsole() {
   const loadRangeData = async () => {
     if (!rangeId) return
     try {
-      const [rangeData, vmsData] = await Promise.all([
+      const [rangeData, vmsData, networksData] = await Promise.all([
         rangesApi.get(rangeId),
         vmsApi.list(rangeId),
+        networksApi.list(rangeId),
       ])
       setRange(rangeData.data)
       setVMs(vmsData.data)
+      setNetworks(networksData.data)
     } catch (error) {
       console.error('Failed to load range data:', error)
     } finally {
@@ -134,8 +138,13 @@ export default function ExecutionConsole() {
             onOpenConsole={handleOpenConsole}
           />
 
-          {/* Connection Monitor - Below VM Grid */}
+          {/* Network Interfaces - Below VM Grid */}
           <div className="mt-6">
+            <NetworkInterfaces rangeId={rangeId} vms={vms} networks={networks} />
+          </div>
+
+          {/* Connection Monitor - Network Traffic */}
+          <div className="mt-4">
             <ConnectionMonitor rangeId={rangeId} vms={vms} />
           </div>
         </div>

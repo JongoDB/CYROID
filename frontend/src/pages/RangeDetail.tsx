@@ -927,6 +927,19 @@ export default function RangeDetail() {
                   </div>
                 )}
 
+                {/* Additional Networks Info */}
+                {networks.length > 1 && vmForm.network_id && (
+                  <div className="bg-blue-50 border border-blue-200 rounded-md p-3">
+                    <p className="text-xs text-blue-700">
+                      <strong>Multiple Networks:</strong> Additional network interfaces can be added after the VM is started.
+                      Go to the <span className="font-medium">Execution Console</span> and use the <span className="font-medium">Network Interfaces</span> panel to connect this VM to other networks.
+                    </p>
+                    <p className="text-xs text-blue-600 mt-1">
+                      Available networks: {networks.filter(n => n.id !== vmForm.network_id).map(n => n.name).join(', ')}
+                    </p>
+                  </div>
+                )}
+
                 {/* Linux ISO-specific options */}
                 {showLinuxISOOptions && (
                   <div className="border-t pt-4 space-y-4">

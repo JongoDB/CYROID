@@ -790,6 +790,101 @@ class DockerService:
         except NotFound:
             return None
 
+    def get_container_networks(self, container_id: str) -> Optional[List[Dict[str, Any]]]:
+        """
+        Get all network interfaces for a container.
+
+        Returns:
+            List of network interface dicts with:
+            - network_id: Docker network ID
+            - network_name: Network name
+            - ip_address: IP address on this network
+            - mac_address: MAC address
+            - gateway: Gateway IP (if available)
+            - is_management: True if this is the traefik-routing (management) network
+        """
+        try:
+            container = self.client.containers.get(container_id)
+            networks_settings = container.attrs.get("NetworkSettings", {}).get("Networks", {})
+
+            interfaces = []
+            for net_name, net_config in networks_settings.items():
+                interface = {
+                    "network_id": net_config.get("NetworkID", ""),
+                    "network_name": net_name,
+                    "ip_address": net_config.get("IPAddress", ""),
+                    "mac_address": net_config.get("MacAddress", ""),
+                    "gateway": net_config.get("Gateway", ""),
+                    "is_management": net_name == "traefik-routing",
+                }
+                interfaces.append(interface)
+
+            return interfaces
+        except NotFound:
+            return None
+        except APIError as e:
+            logger.error(f"Failed to get network interfaces for container {container_id}: {e}")
+            return None
+
+    def connect_container_to_network(
+        self,
+        container_id: str,
+        network_id: str,
+        ip_address: Optional[str] = None
+    ) -> bool:
+        """
+        Connect a container to an additional network.
+
+        Args:
+            container_id: Container ID
+            network_id: Docker network ID to connect to
+            ip_address: Optional static IP address
+
+        Returns:
+            True if successful
+        """
+        try:
+            network = self.client.networks.get(network_id)
+            if ip_address:
+                network.connect(container_id, ipv4_address=ip_address)
+            else:
+                network.connect(container_id)
+            logger.info(f"Connected container {container_id[:12]} to network {network.name} with IP {ip_address or 'DHCP'}")
+            return True
+        except NotFound as e:
+            logger.error(f"Container or network not found: {e}")
+            return False
+        except APIError as e:
+            logger.error(f"Failed to connect container to network: {e}")
+            raise
+
+    def disconnect_container_from_network(
+        self,
+        container_id: str,
+        network_id: str
+    ) -> bool:
+        """
+        Disconnect a container from a network.
+
+        Args:
+            container_id: Container ID
+            network_id: Docker network ID to disconnect from
+
+        Returns:
+            True if successful
+        """
+        try:
+            network = self.client.networks.get(network_id)
+            network.disconnect(container_id)
+            logger.info(f"Disconnected container {container_id[:12]} from network {network.name}")
+            return True
+        except NotFound as e:
+            logger.warning(f"Container or network not found: {e}")
+            return False
+        except APIError as e:
+            logger.error(f"Failed to disconnect container from network: {e}")
+            raise
+
     def get_container_stats(self, container_id: str) -> Optional[Dict[str, Any]]:
         """
         Get real-time resource statistics for a container.

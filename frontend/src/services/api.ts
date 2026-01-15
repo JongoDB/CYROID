@@ -247,6 +247,37 @@ export interface VMCreate {
   manual_install?: boolean
 }
 
+// Network interface types
+export interface NetworkInterface {
+  network_id: string
+  network_name: string
+  ip_address: string
+  mac_address: string
+  gateway: string
+  is_management: boolean
+  cyroid_network_id?: string
+  cyroid_network_name?: string
+  subnet?: string
+}
+
+export interface VMNetworkInfo {
+  vm_id: string
+  hostname: string
+  status: string
+  interfaces: NetworkInterface[]
+}
+
+export interface RangeNetworkInfo {
+  range_id: string
+  vms: VMNetworkInfo[]
+}
+
+export interface AddNetworkResponse {
+  success: boolean
+  message: string
+  interfaces: NetworkInterface[]
+}
+
 export const vmsApi = {
   list: (rangeId: string) => api.get<VM[]>(`/vms?range_id=${rangeId}`),
   get: (id: string) => api.get<VM>(`/vms/${id}`),
@@ -257,6 +288,15 @@ export const vmsApi = {
   stop: (id: string) => api.post<VM>(`/vms/${id}/stop`),
   restart: (id: string) => api.post<VM>(`/vms/${id}/restart`),
   getStats: (id: string) => api.get<VMStatsResponse>(`/vms/${id}/stats`),
+  // Network interface management
+  getNetworks: (id: string) => api.get<VMNetworkInfo>(`/vms/${id}/networks`),
+  getRangeNetworks: (rangeId: string) => api.get<RangeNetworkInfo>(`/vms/range/${rangeId}/networks`),
+  addNetwork: (vmId: string, networkId: string, ipAddress?: string) =>
+    api.post<AddNetworkResponse>(`/vms/${vmId}/networks/${networkId}`, null, {
+      params: ipAddress ? { ip_address: ipAddress } : undefined
+    }),
+  removeNetwork: (vmId: string, networkId: string) =>
+    api.delete<AddNetworkResponse>(`/vms/${vmId}/networks/${networkId}`),
 }
 
 // Events API

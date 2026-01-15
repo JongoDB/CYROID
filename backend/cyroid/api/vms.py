@@ -596,6 +596,247 @@ def get_vm_vnc_info(vm_id: UUID, db: DBSession, current_user: CurrentUser, reque
         )
 
 
+@router.get("/{vm_id}/networks")
+def get_vm_networks(vm_id: UUID, db: DBSession, current_user: CurrentUser):
+    """Get all network interfaces for a VM from Docker"""
+    vm = db.query(VM).filter(VM.id == vm_id).first()
+    if not vm:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="VM not found",
+        )
+
+    if not vm.container_id:
+        return {
+            "vm_id": str(vm.id),
+            "hostname": vm.hostname,
+            "status": vm.status.value,
+            "interfaces": []
+        }
+
+    try:
+        docker = get_docker_service()
+        interfaces = docker.get_container_networks(vm.container_id)
+
+        # Enrich with cyroid network info
+        if interfaces:
+            for iface in interfaces:
+                # Try to match with cyroid networks by docker_network_id
+                network = db.query(Network).filter(
+                    Network.docker_network_id == iface.get("network_id")
+                ).first()
+                if network:
+                    iface["cyroid_network_id"] = str(network.id)
+                    iface["cyroid_network_name"] = network.name
+                    iface["subnet"] = network.subnet
+
+        return {
+            "vm_id": str(vm.id),
+            "hostname": vm.hostname,
+            "status": vm.status.value,
+            "interfaces": interfaces or []
+        }
+    except Exception as e:
+        logger.warning(f"Failed to get network interfaces for VM {vm_id}: {e}")
+        return {
+            "vm_id": str(vm.id),
+            "hostname": vm.hostname,
+            "status": vm.status.value,
+            "interfaces": []
+        }
+
+
+@router.get("/range/{range_id}/networks")
+def get_range_vm_networks(range_id: UUID, db: DBSession, current_user: CurrentUser):
+    """Get all network interfaces for all VMs in a range"""
+    # Verify range exists
+    range_obj = db.query(Range).filter(Range.id == range_id).first()
+    if not range_obj:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Range not found",
+        )
+
+    # Get all VMs in the range
+    vms = db.query(VM).filter(VM.range_id == range_id).all()
+
+    docker = None
+    try:
+        docker = get_docker_service()
+    except Exception as e:
+        logger.warning(f"Could not connect to Docker: {e}")
+
+    # Get networks for the range for matching
+    networks = db.query(Network).filter(Network.range_id == range_id).all()
+    network_map = {n.docker_network_id: n for n in networks if n.docker_network_id}
+
+    result = []
+    for vm in vms:
+        vm_data = {
+            "vm_id": str(vm.id),
+            "hostname": vm.hostname,
+            "status": vm.status.value,
+            "interfaces": []
+        }
+
+        if vm.container_id and docker:
+            try:
+                interfaces = docker.get_container_networks(vm.container_id)
+                if interfaces:
+                    for iface in interfaces:
+                        # Match with cyroid networks
+                        docker_net_id = iface.get("network_id")
+                        if docker_net_id in network_map:
+                            network = network_map[docker_net_id]
+                            iface["cyroid_network_id"] = str(network.id)
+                            iface["cyroid_network_name"] = network.name
+                            iface["subnet"] = network.subnet
+                    vm_data["interfaces"] = interfaces
+            except Exception as e:
+                logger.warning(f"Failed to get networks for VM {vm.id}: {e}")
+
+        result.append(vm_data)
+
+    return {"vms": result, "range_id": str(range_id)}
+
+
+@router.post("/{vm_id}/networks/{network_id}")
+def add_vm_network(
+    vm_id: UUID,
+    network_id: UUID,
+    db: DBSession,
+    current_user: CurrentUser,
+    ip_address: str = None
+):
+    """Add a network interface to a running VM"""
+    vm = db.query(VM).filter(VM.id == vm_id).first()
+    if not vm:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="VM not found",
+        )
+
+    if vm.status != VMStatus.RUNNING:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="VM must be running to add network interfaces",
+        )
+
+    if not vm.container_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="VM has no container",
+        )
+
+    # Get the network
+    network = db.query(Network).filter(Network.id == network_id).first()
+    if not network:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Network not found",
+        )
+
+    if not network.docker_network_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Network is not provisioned",
+        )
+
+    try:
+        docker = get_docker_service()
+        docker.connect_container_to_network(
+            vm.container_id,
+            network.docker_network_id,
+            ip_address=ip_address
+        )
+
+        # Get updated interfaces
+        interfaces = docker.get_container_networks(vm.container_id)
+
+        return {
+            "success": True,
+            "message": f"Added network {network.name} to VM {vm.hostname}",
+            "interfaces": interfaces or []
+        }
+    except Exception as e:
+        logger.error(f"Failed to add network to VM: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to add network: {str(e)}",
+        )
+
+
+@router.delete("/{vm_id}/networks/{network_id}")
+def remove_vm_network(
+    vm_id: UUID,
+    network_id: UUID,
+    db: DBSession,
+    current_user: CurrentUser,
+):
+    """Remove a network interface from a running VM"""
+    vm = db.query(VM).filter(VM.id == vm_id).first()
+    if not vm:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="VM not found",
+        )
+
+    if vm.status != VMStatus.RUNNING:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="VM must be running to remove network interfaces",
+        )
+
+    if not vm.container_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="VM has no container",
+        )
+
+    # Get the network
+    network = db.query(Network).filter(Network.id == network_id).first()
+    if not network:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Network not found",
+        )
+
+    if not network.docker_network_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Network is not provisioned",
+        )
+
+    # Don't allow removing the primary network
+    if str(network.id) == str(vm.network_id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot remove the primary network interface",
+        )
+
+    try:
+        docker = get_docker_service()
+        docker.disconnect_container_from_network(
+            vm.container_id,
+            network.docker_network_id
+        )
+
+        # Get updated interfaces
+        interfaces = docker.get_container_networks(vm.container_id)
+
+        return {
+            "success": True,
+            "message": f"Removed network {network.name} from VM {vm.hostname}",
+            "interfaces": interfaces or []
+        }
+    except Exception as e:
+        logger.error(f"Failed to remove network from VM: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to remove network: {str(e)}",
+        )
+
+
 @router.post("/{vm_id}/restart", response_model=VMResponse)
 def restart_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
     """Restart a running VM"""
