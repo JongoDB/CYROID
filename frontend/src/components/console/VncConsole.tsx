@@ -44,11 +44,11 @@ export function VncConsole({ vmId, vmHostname, token, onClose }: VncConsoleProps
         // This ensures VNC works through the unified traefik ingress
         const origin = window.location.origin
 
-        // Build VNC URL with proper WebSocket path for KasmVNC
-        // The 'path' parameter tells the client where to connect for WebSocket
-        // We need to include the full path so WebSocket connects to the correct proxied endpoint
-        const wsPath = `${data.path}/`.replace(/^\//, '') // Remove leading slash for path param
-        const vncUrl = `${origin}${data.path}/?autoconnect=1&resize=scale&path=${wsPath}`
+        // Build VNC URL with proper WebSocket path
+        // The 'path' parameter tells noVNC where to connect for WebSocket RELATIVE to current page
+        // Since page loads at /vnc/{vm_id}/, path should just be 'websockify' (not full path)
+        // noVNC will then connect to ws://{host}/vnc/{vm_id}/websockify
+        const vncUrl = `${origin}${data.path}/?autoconnect=1&resize=scale&path=websockify`
 
         setVncInfo({
           url: vncUrl,

@@ -430,6 +430,7 @@ export interface LinuxISODownloadStatus {
 }
 
 export interface RecommendedImage {
+  name?: string  // Human-readable title
   image?: string
   version?: string
   description: string

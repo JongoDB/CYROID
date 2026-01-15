@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react'
 import { templatesApi, cacheApi, VMTemplateCreate } from '../services/api'
 import type { VMTemplate, CachedImage, WindowsVersionsResponse, LinuxVersionsResponse, LinuxVersion, CustomISOList, RecommendedImages, WindowsVersion, WindowsISODownloadStatus, LinuxISODownloadStatus } from '../types'
-import { Plus, Pencil, Trash2, Copy, Loader2, X, Server, Monitor, Info, RefreshCw, Tag, Download, Check } from 'lucide-react'
+import { Plus, Pencil, Trash2, Copy, Loader2, X, Server, Monitor, Info, RefreshCw, Tag, Download, Check, LayoutGrid, List } from 'lucide-react'
 import clsx from 'clsx'
 
 // Core CYROID service images to exclude from the dropdown
@@ -52,6 +52,7 @@ const WINDOWS_DEFAULTS = {
 export default function Templates() {
   const [templates, setTemplates] = useState<VMTemplate[]>([])
   const [loading, setLoading] = useState(true)
+  const [viewMode, setViewMode] = useState<'tile' | 'list'>('tile')
   const [showModal, setShowModal] = useState(false)
   const [editingTemplate, setEditingTemplate] = useState<VMTemplate | null>(null)
   const [formData, setFormData] = useState<TemplateFormData>(defaultFormData)
@@ -247,6 +248,36 @@ export default function Templates() {
 
   const filteredCachedImages = filterServiceImages(cachedImages)
 
+  // Helper to get human-readable name for a cached container image
+  const getContainerImageName = (tag: string): string => {
+    if (!recommendedImages) return tag
+    // Search all categories for matching image
+    const allImages = [
+      ...(recommendedImages.desktop || []),
+      ...(recommendedImages.server || []),
+      ...(recommendedImages.services || []),
+    ]
+    const match = allImages.find(img => img.image === tag)
+    return match?.name || tag
+  }
+
+  // Helper to get the category of a cached container image
+  const getContainerImageCategory = (tag: string): 'desktop' | 'server' | 'services' | null => {
+    if (!recommendedImages) return null
+    if (recommendedImages.desktop?.some(img => img.image === tag)) return 'desktop'
+    if (recommendedImages.server?.some(img => img.image === tag)) return 'server'
+    if (recommendedImages.services?.some(img => img.image === tag)) return 'services'
+    return null
+  }
+
+  // Get cached container images by category
+  const getCachedContainersByCategory = (category: 'desktop' | 'server' | 'services') => {
+    return filteredCachedImages.flatMap(img =>
+      img.tags.filter(tag => !tag.includes('windows') && getContainerImageCategory(tag) === category)
+        .map(tag => ({ tag, size_gb: img.size_gb }))
+    )
+  }
+
   const openCreateModal = () => {
     setEditingTemplate(null)
     setFormData(defaultFormData)
@@ -371,7 +402,34 @@ export default function Templates() {
             Create and manage VM templates for your cyber ranges
           </p>
         </div>
-        <div className="mt-4 sm:mt-0">
+        <div className="mt-4 sm:mt-0 flex items-center space-x-3">
+          {/* View Toggle */}
+          <div className="flex items-center bg-gray-100 rounded-lg p-1">
+            <button
+              onClick={() => setViewMode('tile')}
+              className={clsx(
+                "p-2 rounded-md transition-colors",
+                viewMode === 'tile'
+                  ? "bg-white text-primary-600 shadow-sm"
+                  : "text-gray-500 hover:text-gray-700"
+              )}
+              title="Tile view"
+            >
+              <LayoutGrid className="h-4 w-4" />
+            </button>
+            <button
+              onClick={() => setViewMode('list')}
+              className={clsx(
+                "p-2 rounded-md transition-colors",
+                viewMode === 'list'
+                  ? "bg-white text-primary-600 shadow-sm"
+                  : "text-gray-500 hover:text-gray-700"
+              )}
+              title="List view"
+            >
+              <List className="h-4 w-4" />
+            </button>
+          </div>
           <button
             onClick={openCreateModal}
             className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500"
@@ -397,7 +455,8 @@ export default function Templates() {
             </button>
           </div>
         </div>
-      ) : (
+      ) : viewMode === 'tile' ? (
+        /* Tile View */
         <div className="mt-8 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
           {templates.map((template) => (
             <div
@@ -482,6 +541,112 @@ export default function Templates() {
               </div>
             </div>
           ))}
+        </div>
+      ) : (
+        /* List View */
+        <div className="mt-8 bg-white shadow rounded-lg overflow-hidden">
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50">
+              <tr>
+                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Template
+                </th>
+                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  OS
+                </th>
+                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Resources
+                </th>
+                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Tags
+                </th>
+                <th scope="col" className="relative px-6 py-3">
+                  <span className="sr-only">Actions</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody className="bg-white divide-y divide-gray-200">
+              {templates.map((template) => (
+                <tr key={template.id} className="hover:bg-gray-50">
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <div className="flex items-center">
+                      <div className={clsx(
+                        "flex-shrink-0 rounded-md p-2",
+                        template.os_type === 'linux' ? 'bg-orange-100' : 'bg-blue-100'
+                      )}>
+                        {template.os_type === 'linux' ? (
+                          <Server className="h-5 w-5 text-orange-600" />
+                        ) : (
+                          <Monitor className="h-5 w-5 text-blue-600" />
+                        )}
+                      </div>
+                      <div className="ml-4">
+                        <div className="text-sm font-medium text-gray-900">{template.name}</div>
+                        {template.description && (
+                          <div className="text-sm text-gray-500 truncate max-w-xs">{template.description}</div>
+                        )}
+                      </div>
+                    </div>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <div className="text-sm text-gray-900">{template.os_variant}</div>
+                    <div className="text-xs text-gray-500 capitalize">{template.os_type}</div>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                    <div className="flex items-center space-x-4">
+                      <span>{template.default_cpu} CPU</span>
+                      <span>{template.default_ram_mb / 1024} GB RAM</span>
+                      <span>{template.default_disk_gb} GB Disk</span>
+                    </div>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    {template.tags.length > 0 ? (
+                      <div className="flex flex-wrap gap-1">
+                        {template.tags.slice(0, 3).map((tag) => (
+                          <span
+                            key={tag}
+                            className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800"
+                          >
+                            {tag}
+                          </span>
+                        ))}
+                        {template.tags.length > 3 && (
+                          <span className="text-xs text-gray-500">+{template.tags.length - 3}</span>
+                        )}
+                      </div>
+                    ) : (
+                      <span className="text-gray-400 text-sm">—</span>
+                    )}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                    <div className="flex justify-end space-x-2">
+                      <button
+                        onClick={() => handleClone(template)}
+                        className="p-1.5 text-gray-400 hover:text-gray-600 rounded"
+                        title="Clone"
+                      >
+                        <Copy className="h-4 w-4" />
+                      </button>
+                      <button
+                        onClick={() => openEditModal(template)}
+                        className="p-1.5 text-gray-400 hover:text-primary-600 rounded"
+                        title="Edit"
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </button>
+                      <button
+                        onClick={() => handleDelete(template)}
+                        className="p-1.5 text-gray-400 hover:text-red-600 rounded"
+                        title="Delete"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
 
@@ -619,25 +784,76 @@ export default function Templates() {
                       >
                         <option value="">Select an image...</option>
 
-                        {/* Cached - everything ready to use */}
-                        {((linuxVersions && linuxVersions.all.some(v => v.cached)) || filteredCachedImages.length > 0) && (
-                          <optgroup label="Cached">
-                            {linuxVersions?.all.filter(v => v.cached).map(v => (
+                        {/* ===== CACHED SECTION ===== */}
+
+                        {/* Cached - Desktop */}
+                        {((linuxVersions?.desktop.some(v => v.cached)) || getCachedContainersByCategory('desktop').length > 0) && (
+                          <optgroup label="✓ Cached - Desktop">
+                            {linuxVersions?.desktop.filter(v => v.cached).map(v => (
                               <option key={`iso-${v.version}`} value={`iso:${v.version}`}>
                                 {v.name} (ISO) - {v.size_gb} GB
                               </option>
                             ))}
-                            {filteredCachedImages.map(img =>
-                              img.tags.filter(tag => !tag.includes('windows')).map(tag => (
-                                <option key={tag} value={tag}>{tag} (Container) - {img.size_gb} GB</option>
-                              ))
-                            )}
+                            {getCachedContainersByCategory('desktop').map(({ tag, size_gb }) => {
+                              const displayName = getContainerImageName(tag)
+                              return (
+                                <option key={tag} value={tag}>
+                                  {displayName} ({tag}) - {size_gb} GB
+                                </option>
+                              )
+                            })}
                           </optgroup>
                         )}
 
-                        {/* Desktop - ISOs and containers with GUI */}
-                        {((linuxVersions && linuxVersions.desktop.some(v => !v.cached)) || (recommendedImages && recommendedImages.desktop.some(d => !d.cached))) && (
-                          <optgroup label="Desktop">
+                        {/* Cached - Server/CLI */}
+                        {((linuxVersions?.server.some(v => v.cached)) || getCachedContainersByCategory('server').length > 0) && (
+                          <optgroup label="✓ Cached - Server/CLI">
+                            {linuxVersions?.server.filter(v => v.cached).map(v => (
+                              <option key={`iso-${v.version}`} value={`iso:${v.version}`}>
+                                {v.name} (ISO) - {v.size_gb} GB
+                              </option>
+                            ))}
+                            {getCachedContainersByCategory('server').map(({ tag, size_gb }) => {
+                              const displayName = getContainerImageName(tag)
+                              return (
+                                <option key={tag} value={tag}>
+                                  {displayName} ({tag}) - {size_gb} GB
+                                </option>
+                              )
+                            })}
+                          </optgroup>
+                        )}
+
+                        {/* Cached - Security */}
+                        {linuxVersions?.security.some(v => v.cached) && (
+                          <optgroup label="✓ Cached - Security">
+                            {linuxVersions.security.filter(v => v.cached).map(v => (
+                              <option key={`iso-${v.version}`} value={`iso:${v.version}`}>
+                                {v.name} (ISO) - {v.size_gb} GB
+                              </option>
+                            ))}
+                          </optgroup>
+                        )}
+
+                        {/* Cached - Services */}
+                        {getCachedContainersByCategory('services').length > 0 && (
+                          <optgroup label="✓ Cached - Services">
+                            {getCachedContainersByCategory('services').map(({ tag, size_gb }) => {
+                              const displayName = getContainerImageName(tag)
+                              return (
+                                <option key={tag} value={tag}>
+                                  {displayName} ({tag}) - {size_gb} GB
+                                </option>
+                              )
+                            })}
+                          </optgroup>
+                        )}
+
+                        {/* ===== AVAILABLE (NOT CACHED) SECTION ===== */}
+
+                        {/* Available - Desktop */}
+                        {((linuxVersions?.desktop.some(v => !v.cached)) || recommendedImages?.desktop.some(d => !d.cached)) && (
+                          <optgroup label="Available - Desktop">
                             {linuxVersions?.desktop.filter(v => !v.cached).map(v => (
                               <option key={`iso-${v.version}`} value={`iso:${v.version}`}>
                                 {v.name} (ISO) - {v.size_gb} GB
@@ -645,15 +861,15 @@ export default function Templates() {
                             ))}
                             {recommendedImages?.desktop.filter(d => !d.cached).map(rec => (
                               <option key={rec.image} value={rec.image!}>
-                                {rec.image} (Container) - {rec.description}
+                                {rec.name || rec.image} ({rec.image})
                               </option>
                             ))}
                           </optgroup>
                         )}
 
-                        {/* Server - ISOs and containers for server/CLI use */}
-                        {((linuxVersions && linuxVersions.server.some(v => !v.cached)) || (recommendedImages && recommendedImages.server.some(s => !s.cached))) && (
-                          <optgroup label="Server/CLI">
+                        {/* Available - Server/CLI */}
+                        {((linuxVersions?.server.some(v => !v.cached)) || recommendedImages?.server.some(s => !s.cached)) && (
+                          <optgroup label="Available - Server/CLI">
                             {linuxVersions?.server.filter(v => !v.cached).map(v => (
                               <option key={`iso-${v.version}`} value={`iso:${v.version}`}>
                                 {v.name} (ISO) - {v.size_gb} GB
@@ -661,15 +877,15 @@ export default function Templates() {
                             ))}
                             {recommendedImages?.server.filter(s => !s.cached).map(rec => (
                               <option key={rec.image} value={rec.image!}>
-                                {rec.image} (Container) - {rec.description}
+                                {rec.name || rec.image} ({rec.image})
                               </option>
                             ))}
                           </optgroup>
                         )}
 
-                        {/* Security - security-focused distributions */}
-                        {linuxVersions && linuxVersions.security.some(v => !v.cached) && (
-                          <optgroup label="Security">
+                        {/* Available - Security */}
+                        {linuxVersions?.security.some(v => !v.cached) && (
+                          <optgroup label="Available - Security">
                             {linuxVersions.security.filter(v => !v.cached).map(v => (
                               <option key={`iso-${v.version}`} value={`iso:${v.version}`}>
                                 {v.name} (ISO) - {v.size_gb} GB
@@ -678,12 +894,12 @@ export default function Templates() {
                           </optgroup>
                         )}
 
-                        {/* Services - purpose-built service containers */}
-                        {recommendedImages && recommendedImages.services.some(s => !s.cached) && (
-                          <optgroup label="Services">
+                        {/* Available - Services */}
+                        {recommendedImages?.services.some(s => !s.cached) && (
+                          <optgroup label="Available - Services">
                             {recommendedImages.services.filter(s => !s.cached).map(rec => (
                               <option key={rec.image} value={rec.image!}>
-                                {rec.image} (Container) - {rec.description}
+                                {rec.name || rec.image} ({rec.image})
                               </option>
                             ))}
                           </optgroup>

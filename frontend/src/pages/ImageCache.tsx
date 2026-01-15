@@ -1890,7 +1890,8 @@ function DockerImageSection({ title, description, images, cachedImages, icon: Ic
             )}>
               <div className="flex items-start justify-between">
                 <div className="flex-1 min-w-0">
-                  <p className="font-medium text-gray-900 truncate" title={imageName}>{imageName}</p>
+                  <p className="font-medium text-gray-900 truncate" title={img.name || imageName}>{img.name || imageName}</p>
+                  <p className="text-xs text-gray-600 truncate" title={imageName}>{imageName}</p>
                   <p className="text-xs text-gray-500 mt-1 line-clamp-2">{img.description}</p>
                 </div>
                 <div className="flex items-center gap-1 ml-2 flex-shrink-0">
@@ -2172,7 +2173,7 @@ function WindowsVersionSection({ title, versions, icon: Icon, colorClass, onDele
 }
 
 function ImageCheckbox({ img, selected, setSelected }: {
-  img: { image?: string; description: string; cached?: boolean }
+  img: { name?: string; image?: string; description: string; cached?: boolean }
   selected: string[]
   setSelected: (s: string[]) => void
 }) {
@@ -2200,8 +2201,8 @@ function ImageCheckbox({ img, selected, setSelected }: {
         className="mr-2"
       />
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium truncate">{img.image}</p>
-        <p className="text-xs text-gray-500 truncate">{img.description}</p>
+        <p className="text-sm font-medium truncate" title={img.name || img.image}>{img.name || img.image}</p>
+        <p className="text-xs text-gray-500 truncate" title={img.image}>{img.image}</p>
       </div>
       {isCached && (
         <Check className="h-4 w-4 text-green-600 ml-2 flex-shrink-0" />
