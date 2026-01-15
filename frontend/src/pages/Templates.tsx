@@ -1,8 +1,8 @@
 // frontend/src/pages/Templates.tsx
 import { useEffect, useState } from 'react'
 import { templatesApi, cacheApi, VMTemplateCreate } from '../services/api'
-import type { VMTemplate, CachedImage, WindowsVersionsResponse, LinuxVersionsResponse, LinuxVersion, CustomISOList, RecommendedImages, WindowsVersion, WindowsISODownloadStatus, LinuxISODownloadStatus } from '../types'
-import { Plus, Pencil, Trash2, Copy, Loader2, X, Server, Monitor, Info, RefreshCw, Tag, Download, Check, LayoutGrid, List } from 'lucide-react'
+import type { VMTemplate, CachedImage, WindowsVersionsResponse, LinuxVersionsResponse, CustomISOList, RecommendedImages } from '../types'
+import { Plus, Pencil, Trash2, Copy, Loader2, X, Server, Monitor, Info, RefreshCw, Tag, LayoutGrid, List, Disc } from 'lucide-react'
 import clsx from 'clsx'
 
 // Core CYROID service images to exclude from the dropdown
@@ -19,7 +19,7 @@ const CYROID_SERVICE_IMAGES = [
 interface TemplateFormData {
   name: string
   description: string
-  os_type: 'windows' | 'linux'
+  os_type: 'windows' | 'linux' | 'custom'
   os_variant: string
   base_image: string
   default_cpu: number
@@ -27,6 +27,7 @@ interface TemplateFormData {
   default_disk_gb: number
   config_script: string
   tags: string
+  custom_iso: string  // For custom ISO selection
 }
 
 const defaultFormData: TemplateFormData = {
@@ -39,7 +40,15 @@ const defaultFormData: TemplateFormData = {
   default_ram_mb: 2048,
   default_disk_gb: 20,
   config_script: '',
-  tags: ''
+  tags: '',
+  custom_iso: ''
+}
+
+const CUSTOM_DEFAULTS = {
+  default_cpu: 2,
+  default_ram_mb: 4096,
+  default_disk_gb: 32,
+  base_image: 'qemux/qemu'  // Use qemu for custom ISOs
 }
 
 const WINDOWS_DEFAULTS = {
@@ -72,13 +81,6 @@ export default function Templates() {
   const [newVisibilityTag, setNewVisibilityTag] = useState('')
   const [visibilityTagsLoading, setVisibilityTagsLoading] = useState(false)
 
-  // Windows ISO download state
-  const [downloadingVersion, setDownloadingVersion] = useState<string | null>(null)
-  const [downloadStatus, setDownloadStatus] = useState<WindowsISODownloadStatus | null>(null)
-
-  // Linux ISO download state
-  const [downloadingLinuxVersion, setDownloadingLinuxVersion] = useState<string | null>(null)
-  const [linuxDownloadStatus, setLinuxDownloadStatus] = useState<LinuxISODownloadStatus | null>(null)
 
   const fetchTemplates = async () => {
     try {
@@ -153,87 +155,6 @@ export default function Templates() {
     }
   }
 
-  // Windows ISO download
-  const handleDownloadWindowsISO = async (version: string) => {
-    setDownloadingVersion(version)
-    setDownloadStatus(null)
-    try {
-      await cacheApi.downloadWindowsISO(version)
-      // Poll for download status
-      const pollInterval = setInterval(async () => {
-        try {
-          const statusRes = await cacheApi.getWindowsISODownloadStatus(version)
-          setDownloadStatus(statusRes.data)
-          if (statusRes.data.status === 'completed' || statusRes.data.status === 'failed') {
-            clearInterval(pollInterval)
-            setDownloadingVersion(null)
-            if (statusRes.data.status === 'completed') {
-              // Refresh cache data to update cached status
-              fetchCacheData()
-            }
-          }
-        } catch {
-          clearInterval(pollInterval)
-          setDownloadingVersion(null)
-        }
-      }, 2000)
-    } catch (err: any) {
-      setDownloadingVersion(null)
-      alert(err.response?.data?.detail || 'Failed to start download')
-    }
-  }
-
-  // Get selected Windows version info
-  const getSelectedWindowsVersion = (): WindowsVersion | null => {
-    if (!windowsVersions || !formData.os_variant) return null
-    return windowsVersions.all.find(v => v.version === formData.os_variant) || null
-  }
-
-  const selectedWindowsVersion = getSelectedWindowsVersion()
-
-  // Linux ISO download
-  const handleDownloadLinuxISO = async (version: string) => {
-    setDownloadingLinuxVersion(version)
-    setLinuxDownloadStatus(null)
-    try {
-      await cacheApi.downloadLinuxISO(version)
-      // Poll for download status
-      const pollInterval = setInterval(async () => {
-        try {
-          const statusRes = await cacheApi.getLinuxISODownloadStatus(version)
-          setLinuxDownloadStatus(statusRes.data)
-          if (statusRes.data.status === 'completed' || statusRes.data.status === 'failed') {
-            clearInterval(pollInterval)
-            setDownloadingLinuxVersion(null)
-            if (statusRes.data.status === 'completed') {
-              // Refresh cache data to update cached status
-              fetchCacheData()
-            }
-          }
-        } catch {
-          clearInterval(pollInterval)
-          setDownloadingLinuxVersion(null)
-        }
-      }, 2000)
-    } catch (err: any) {
-      setDownloadingLinuxVersion(null)
-      alert(err.response?.data?.detail || 'Failed to start download')
-    }
-  }
-
-  // Get selected Linux version info
-  const getSelectedLinuxVersion = (): LinuxVersion | null => {
-    if (!linuxVersions || !formData.base_image) return null
-    // Check if base_image is a Linux ISO (starts with 'iso:' or matches a version)
-    const isoMatch = formData.base_image.match(/^iso:(.+)$/)
-    if (isoMatch) {
-      return linuxVersions.all.find(v => v.version === isoMatch[1]) || null
-    }
-    return linuxVersions.all.find(v => v.version === formData.base_image) || null
-  }
-
-  const selectedLinuxVersion = getSelectedLinuxVersion()
-
   // Helper to filter out CYROID service images
   const filterServiceImages = (images: CachedImage[]): CachedImage[] => {
     return images.filter(img => {
@@ -299,7 +220,8 @@ export default function Templates() {
       default_ram_mb: template.default_ram_mb,
       default_disk_gb: template.default_disk_gb,
       config_script: template.config_script || '',
-      tags: template.tags.join(', ')
+      tags: template.tags.join(', '),
+      custom_iso: ''  // Will be populated if editing a custom template
     })
     setNewVisibilityTag('')
     setError(null)
@@ -308,7 +230,7 @@ export default function Templates() {
     fetchVisibilityTags(template.id)
   }
 
-  const handleOsTypeChange = (newOsType: 'windows' | 'linux') => {
+  const handleOsTypeChange = (newOsType: 'windows' | 'linux' | 'custom') => {
     if (newOsType === 'windows') {
       setFormData({
         ...formData,
@@ -318,6 +240,18 @@ export default function Templates() {
         default_cpu: WINDOWS_DEFAULTS.default_cpu,
         default_ram_mb: WINDOWS_DEFAULTS.default_ram_mb,
         default_disk_gb: WINDOWS_DEFAULTS.default_disk_gb,
+        custom_iso: '',
+      })
+    } else if (newOsType === 'custom') {
+      setFormData({
+        ...formData,
+        os_type: newOsType,
+        os_variant: '',
+        base_image: CUSTOM_DEFAULTS.base_image,
+        default_cpu: CUSTOM_DEFAULTS.default_cpu,
+        default_ram_mb: CUSTOM_DEFAULTS.default_ram_mb,
+        default_disk_gb: CUSTOM_DEFAULTS.default_disk_gb,
+        custom_iso: '',
       })
     } else {
       setFormData({
@@ -328,6 +262,7 @@ export default function Templates() {
         default_cpu: 2,
         default_ram_mb: 2048,
         default_disk_gb: 20,
+        custom_iso: '',
       })
     }
   }
@@ -336,6 +271,13 @@ export default function Templates() {
     e.preventDefault()
     setSubmitting(true)
     setError(null)
+
+    // For custom ISOs, find the path from the selected ISO
+    let cachedIsoPath: string | undefined
+    if (formData.os_type === 'custom' && formData.custom_iso && customISOs) {
+      const selectedIso = customISOs.isos.find(iso => iso.filename === formData.custom_iso)
+      cachedIsoPath = selectedIso?.path
+    }
 
     const data: VMTemplateCreate = {
       name: formData.name,
@@ -347,7 +289,8 @@ export default function Templates() {
       default_ram_mb: formData.default_ram_mb,
       default_disk_gb: formData.default_disk_gb,
       config_script: formData.config_script || undefined,
-      tags: formData.tags ? formData.tags.split(',').map(t => t.trim()).filter(Boolean) : undefined
+      tags: formData.tags ? formData.tags.split(',').map(t => t.trim()).filter(Boolean) : undefined,
+      cached_iso_path: cachedIsoPath
     }
 
     try {
@@ -706,7 +649,7 @@ export default function Templates() {
                 {/* OS Type Selection */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">Operating System</label>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-3 gap-3">
                     <button
                       type="button"
                       onClick={() => handleOsTypeChange('linux')}
@@ -733,6 +676,19 @@ export default function Templates() {
                       <Monitor className="h-5 w-5 mr-2" />
                       <span className="font-medium">Windows</span>
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => handleOsTypeChange('custom')}
+                      className={clsx(
+                        "flex items-center justify-center p-3 border-2 rounded-lg transition-all",
+                        formData.os_type === 'custom'
+                          ? "border-purple-500 bg-purple-50 text-purple-700"
+                          : "border-gray-200 hover:border-gray-300"
+                      )}
+                    >
+                      <Disc className="h-5 w-5 mr-2" />
+                      <span className="font-medium">Custom</span>
+                    </button>
                   </div>
                 </div>
 
@@ -743,7 +699,7 @@ export default function Templates() {
                       <div className="flex">
                         <Info className="h-4 w-4 text-orange-500 mt-0.5 mr-2" />
                         <p className="text-xs text-orange-700">
-                          Linux VMs can use <strong>qemus/qemu</strong> with ISOs or <strong>Docker containers</strong>.
+                          Linux VMs can use <strong>qemux/qemu</strong> with ISOs or <strong>Docker containers</strong>.
                           {linuxVersions && linuxVersions.cached_count > 0
                             ? ` ${linuxVersions.cached_count} ISO(s) cached locally.`
                             : ''}
@@ -784,11 +740,9 @@ export default function Templates() {
                       >
                         <option value="">Select an image...</option>
 
-                        {/* ===== CACHED SECTION ===== */}
-
-                        {/* Cached - Desktop */}
+                        {/* Desktop */}
                         {((linuxVersions?.desktop.some(v => v.cached)) || getCachedContainersByCategory('desktop').length > 0) && (
-                          <optgroup label="✓ Cached - Desktop">
+                          <optgroup label="Desktop">
                             {linuxVersions?.desktop.filter(v => v.cached).map(v => (
                               <option key={`iso-${v.version}`} value={`iso:${v.version}`}>
                                 {v.name} (ISO) - {v.size_gb} GB
@@ -805,9 +759,9 @@ export default function Templates() {
                           </optgroup>
                         )}
 
-                        {/* Cached - Server/CLI */}
+                        {/* Server/CLI */}
                         {((linuxVersions?.server.some(v => v.cached)) || getCachedContainersByCategory('server').length > 0) && (
-                          <optgroup label="✓ Cached - Server/CLI">
+                          <optgroup label="Server/CLI">
                             {linuxVersions?.server.filter(v => v.cached).map(v => (
                               <option key={`iso-${v.version}`} value={`iso:${v.version}`}>
                                 {v.name} (ISO) - {v.size_gb} GB
@@ -824,9 +778,9 @@ export default function Templates() {
                           </optgroup>
                         )}
 
-                        {/* Cached - Security */}
+                        {/* Security */}
                         {linuxVersions?.security.some(v => v.cached) && (
-                          <optgroup label="✓ Cached - Security">
+                          <optgroup label="Security">
                             {linuxVersions.security.filter(v => v.cached).map(v => (
                               <option key={`iso-${v.version}`} value={`iso:${v.version}`}>
                                 {v.name} (ISO) - {v.size_gb} GB
@@ -835,9 +789,9 @@ export default function Templates() {
                           </optgroup>
                         )}
 
-                        {/* Cached - Services */}
+                        {/* Services */}
                         {getCachedContainersByCategory('services').length > 0 && (
-                          <optgroup label="✓ Cached - Services">
+                          <optgroup label="Services">
                             {getCachedContainersByCategory('services').map(({ tag, size_gb }) => {
                               const displayName = getContainerImageName(tag)
                               return (
@@ -849,117 +803,11 @@ export default function Templates() {
                           </optgroup>
                         )}
 
-                        {/* ===== AVAILABLE (NOT CACHED) SECTION ===== */}
-
-                        {/* Available - Desktop */}
-                        {((linuxVersions?.desktop.some(v => !v.cached)) || recommendedImages?.desktop.some(d => !d.cached)) && (
-                          <optgroup label="Available - Desktop">
-                            {linuxVersions?.desktop.filter(v => !v.cached).map(v => (
-                              <option key={`iso-${v.version}`} value={`iso:${v.version}`}>
-                                {v.name} (ISO) - {v.size_gb} GB
-                              </option>
-                            ))}
-                            {recommendedImages?.desktop.filter(d => !d.cached).map(rec => (
-                              <option key={rec.image} value={rec.image!}>
-                                {rec.name || rec.image} ({rec.image})
-                              </option>
-                            ))}
-                          </optgroup>
-                        )}
-
-                        {/* Available - Server/CLI */}
-                        {((linuxVersions?.server.some(v => !v.cached)) || recommendedImages?.server.some(s => !s.cached)) && (
-                          <optgroup label="Available - Server/CLI">
-                            {linuxVersions?.server.filter(v => !v.cached).map(v => (
-                              <option key={`iso-${v.version}`} value={`iso:${v.version}`}>
-                                {v.name} (ISO) - {v.size_gb} GB
-                              </option>
-                            ))}
-                            {recommendedImages?.server.filter(s => !s.cached).map(rec => (
-                              <option key={rec.image} value={rec.image!}>
-                                {rec.name || rec.image} ({rec.image})
-                              </option>
-                            ))}
-                          </optgroup>
-                        )}
-
-                        {/* Available - Security */}
-                        {linuxVersions?.security.some(v => !v.cached) && (
-                          <optgroup label="Available - Security">
-                            {linuxVersions.security.filter(v => !v.cached).map(v => (
-                              <option key={`iso-${v.version}`} value={`iso:${v.version}`}>
-                                {v.name} (ISO) - {v.size_gb} GB
-                              </option>
-                            ))}
-                          </optgroup>
-                        )}
-
-                        {/* Available - Services */}
-                        {recommendedImages?.services.some(s => !s.cached) && (
-                          <optgroup label="Available - Services">
-                            {recommendedImages.services.filter(s => !s.cached).map(rec => (
-                              <option key={rec.image} value={rec.image!}>
-                                {rec.name || rec.image} ({rec.image})
-                              </option>
-                            ))}
-                          </optgroup>
-                        )}
                       </select>
                       <p className="mt-1 text-xs text-gray-500">
-                        Select from cached ISOs, cached containers, or recommended images. Non-cached items will be downloaded on first use.
+                        Only cached images are shown. Visit <strong>Image Cache</strong> to download more options.
                       </p>
                     </div>
-
-                    {/* Download prompt for non-cached Linux ISOs */}
-                    {selectedLinuxVersion && !selectedLinuxVersion.cached && (
-                      <div className="bg-amber-50 border border-amber-200 rounded-md p-3">
-                        <p className="text-sm text-amber-800 mb-2">
-                          <strong>{selectedLinuxVersion.name}</strong> is not cached locally.
-                          Download it first for faster VM creation.
-                        </p>
-                        {downloadingLinuxVersion === selectedLinuxVersion.version ? (
-                          <div className="space-y-2">
-                            <div className="flex items-center gap-2 text-sm text-amber-700">
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                              <span>
-                                {linuxDownloadStatus?.progress_percent
-                                  ? `Downloading... ${linuxDownloadStatus.progress_percent}%`
-                                  : linuxDownloadStatus?.progress_gb
-                                    ? `Downloading... ${linuxDownloadStatus.progress_gb} GB`
-                                    : 'Starting download...'}
-                              </span>
-                            </div>
-                            {linuxDownloadStatus?.total_bytes && linuxDownloadStatus?.progress_bytes && (
-                              <div className="w-full bg-amber-200 rounded-full h-2">
-                                <div
-                                  className="bg-amber-600 h-2 rounded-full transition-all duration-300"
-                                  style={{ width: `${(linuxDownloadStatus.progress_bytes / linuxDownloadStatus.total_bytes) * 100}%` }}
-                                />
-                              </div>
-                            )}
-                          </div>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => handleDownloadLinuxISO(selectedLinuxVersion.version)}
-                            className="inline-flex items-center px-3 py-1.5 border border-amber-300 rounded-md text-sm font-medium text-amber-800 bg-amber-100 hover:bg-amber-200"
-                          >
-                            <Download className="h-4 w-4 mr-2" />
-                            Download and Cache ({selectedLinuxVersion.size_gb} GB)
-                          </button>
-                        )}
-                      </div>
-                    )}
-
-                    {/* Show cached confirmation for Linux ISOs */}
-                    {selectedLinuxVersion && selectedLinuxVersion.cached && (
-                      <div className="bg-green-50 border border-green-200 rounded-md p-3">
-                        <div className="flex items-center gap-2 text-sm text-green-700">
-                          <Check className="h-4 w-4" />
-                          <span><strong>{selectedLinuxVersion.name}</strong> is cached and ready to use.</span>
-                        </div>
-                      </div>
-                    )}
 
                     <div>
                       <label className="block text-sm font-medium text-gray-700">OS Variant Name</label>
@@ -984,8 +832,8 @@ export default function Templates() {
                         <p className="text-xs text-blue-700">
                           Windows VMs use <strong>dockur/windows</strong> container.
                           {windowsVersions.cached_count > 0
-                            ? ` ${windowsVersions.cached_count} ISO(s) cached locally for faster VM creation.`
-                            : ' Download an ISO to cache for faster VM creation.'}
+                            ? ` ${windowsVersions.cached_count} ISO(s) cached locally.`
+                            : ' No ISOs cached. Visit Image Cache to download Windows ISOs.'}
                         </p>
                       </div>
                     </div>
@@ -1005,37 +853,30 @@ export default function Templates() {
                         className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
                       >
                         <option value="">Select a Windows version...</option>
-                        {/* Cached versions first */}
-                        {windowsVersions.all.some(v => v.cached) && (
-                          <optgroup label="Cached">
-                            {windowsVersions.all.filter(v => v.cached).map(v => (
-                              <option key={v.version} value={v.version}>
-                                {v.name} ({v.version}) - {v.size_gb} GB
-                              </option>
-                            ))}
-                          </optgroup>
-                        )}
-                        {windowsVersions.desktop.some(v => !v.cached) && (
+                        {/* Desktop */}
+                        {windowsVersions.desktop.some(v => v.cached) && (
                           <optgroup label="Desktop">
-                            {windowsVersions.desktop.filter(v => !v.cached).map(v => (
+                            {windowsVersions.desktop.filter(v => v.cached).map(v => (
                               <option key={v.version} value={v.version}>
                                 {v.name} ({v.version}) - {v.size_gb} GB
                               </option>
                             ))}
                           </optgroup>
                         )}
-                        {windowsVersions.server.some(v => !v.cached) && (
+                        {/* Server */}
+                        {windowsVersions.server.some(v => v.cached) && (
                           <optgroup label="Server">
-                            {windowsVersions.server.filter(v => !v.cached).map(v => (
+                            {windowsVersions.server.filter(v => v.cached).map(v => (
                               <option key={v.version} value={v.version}>
                                 {v.name} ({v.version}) - {v.size_gb} GB
                               </option>
                             ))}
                           </optgroup>
                         )}
-                        {windowsVersions.legacy.some(v => !v.cached) && (
+                        {/* Legacy */}
+                        {windowsVersions.legacy.some(v => v.cached) && (
                           <optgroup label="Legacy">
-                            {windowsVersions.legacy.filter(v => !v.cached).map(v => (
+                            {windowsVersions.legacy.filter(v => v.cached).map(v => (
                               <option key={v.version} value={v.version}>
                                 {v.name} ({v.version}) - {v.size_gb} GB
                               </option>
@@ -1043,68 +884,80 @@ export default function Templates() {
                           </optgroup>
                         )}
                       </select>
+                      <p className="mt-1 text-xs text-gray-500">
+                        Only cached ISOs are shown. Visit <strong>Image Cache</strong> to download more options.
+                      </p>
                     </div>
-
-                    {/* Download prompt for non-cached versions */}
-                    {selectedWindowsVersion && !selectedWindowsVersion.cached && (
-                      <div className="bg-amber-50 border border-amber-200 rounded-md p-3">
-                        <p className="text-sm text-amber-800 mb-2">
-                          <strong>{selectedWindowsVersion.name}</strong> is not cached locally.
-                          Download it first to create templates with this version.
-                        </p>
-                        {downloadingVersion === selectedWindowsVersion.version ? (
-                          <div className="space-y-2">
-                            <div className="flex items-center gap-2 text-sm text-amber-700">
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                              <span>
-                                {downloadStatus?.progress_percent
-                                  ? `Downloading... ${downloadStatus.progress_percent}%`
-                                  : downloadStatus?.progress_gb
-                                    ? `Downloading... ${downloadStatus.progress_gb} GB`
-                                    : 'Starting download...'}
-                              </span>
-                            </div>
-                            {downloadStatus?.total_bytes && downloadStatus?.progress_bytes && (
-                              <div className="w-full bg-amber-200 rounded-full h-2">
-                                <div
-                                  className="bg-amber-600 h-2 rounded-full transition-all duration-300"
-                                  style={{ width: `${(downloadStatus.progress_bytes / downloadStatus.total_bytes) * 100}%` }}
-                                />
-                              </div>
-                            )}
-                          </div>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => handleDownloadWindowsISO(selectedWindowsVersion.version)}
-                            className="inline-flex items-center px-3 py-1.5 border border-amber-300 rounded-md text-sm font-medium text-amber-800 bg-amber-100 hover:bg-amber-200"
-                          >
-                            <Download className="h-4 w-4 mr-2" />
-                            Download and Cache ({selectedWindowsVersion.size_gb} GB)
-                          </button>
-                        )}
-                      </div>
-                    )}
-
-                    {/* Show cached confirmation */}
-                    {selectedWindowsVersion && selectedWindowsVersion.cached && (
-                      <div className="bg-green-50 border border-green-200 rounded-md p-3">
-                        <div className="flex items-center gap-2 text-sm text-green-700">
-                          <Check className="h-4 w-4" />
-                          <span><strong>{selectedWindowsVersion.name}</strong> is cached and ready to use.</span>
-                        </div>
-                      </div>
-                    )}
 
                     {/* Custom ISO option */}
                     {customISOs && customISOs.isos.length > 0 && (
                       <div className="bg-gray-50 border border-gray-200 rounded-md p-3">
-                        <p className="text-xs text-gray-600 mb-2">
+                        <p className="text-xs text-gray-600">
                           <strong>Custom ISO available:</strong> You can also use a custom ISO when creating VMs
                           from this template. {customISOs.total_count} custom ISO(s) in cache.
                         </p>
                       </div>
                     )}
+                  </>
+                )}
+
+                {/* Custom ISO fields */}
+                {formData.os_type === 'custom' && (
+                  <>
+                    <div className="bg-purple-50 border border-purple-200 rounded-md p-3">
+                      <div className="flex">
+                        <Info className="h-4 w-4 text-purple-500 mt-0.5 mr-2" />
+                        <p className="text-xs text-purple-700">
+                          Custom ISOs use <strong>qemux/qemu</strong> to boot any ISO image.
+                          {customISOs && customISOs.total_count > 0
+                            ? ` ${customISOs.total_count} custom ISO(s) available.`
+                            : ' No custom ISOs available. Visit Image Cache to upload or download custom ISOs.'}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Custom ISO</label>
+                      <select
+                        required
+                        value={formData.custom_iso}
+                        onChange={(e) => {
+                          const iso = customISOs?.isos.find(i => i.filename === e.target.value)
+                          setFormData({
+                            ...formData,
+                            custom_iso: e.target.value,
+                            os_variant: iso?.name || e.target.value.replace('.iso', ''),
+                            base_image: 'qemux/qemu'
+                          })
+                        }}
+                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                      >
+                        <option value="">Select a custom ISO...</option>
+                        {customISOs?.isos.map(iso => (
+                          <option key={iso.filename} value={iso.filename}>
+                            {iso.name} ({iso.size_gb} GB)
+                          </option>
+                        ))}
+                      </select>
+                      <p className="mt-1 text-xs text-gray-500">
+                        Select from your uploaded/downloaded custom ISOs. Visit <strong>Image Cache</strong> to add more.
+                      </p>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">OS Variant Name</label>
+                      <input
+                        type="text"
+                        required
+                        value={formData.os_variant}
+                        onChange={(e) => setFormData({ ...formData, os_variant: e.target.value })}
+                        placeholder="e.g., OPNsense 24.1, pfSense 2.7, FreeBSD 14"
+                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                      />
+                      <p className="mt-1 text-xs text-gray-500">
+                        A descriptive name for this OS (shown in UI).
+                      </p>
+                    </div>
                   </>
                 )}
 
@@ -1253,11 +1106,8 @@ export default function Templates() {
                   </button>
                   <button
                     type="submit"
-                    disabled={submitting || Boolean(formData.os_type === 'windows' && selectedWindowsVersion && !selectedWindowsVersion.cached)}
+                    disabled={submitting}
                     className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 disabled:opacity-50"
-                    title={formData.os_type === 'windows' && selectedWindowsVersion && !selectedWindowsVersion.cached
-                      ? 'Download the Windows ISO first'
-                      : undefined}
                   >
                     {submitting && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
                     {editingTemplate ? 'Update' : 'Create'}

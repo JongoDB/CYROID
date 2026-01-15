@@ -77,15 +77,24 @@ services:
       - "traefik.enable=true"
       # API service
       - "traefik.http.services.api.loadbalancer.server.port=8000"
-      # HTTP router
+      # HTTP router for /api
       - "traefik.http.routers.api.rule=PathPrefix(`/api`)"
       - "traefik.http.routers.api.entrypoints=web"
       - "traefik.http.routers.api.service=api"
-      # HTTPS router
+      # HTTPS router for /api
       - "traefik.http.routers.api-secure.rule=PathPrefix(`/api`)"
       - "traefik.http.routers.api-secure.entrypoints=websecure"
       - "traefik.http.routers.api-secure.tls=true"
       - "traefik.http.routers.api-secure.service=api"
+      # HTTP router for /ws (WebSocket endpoints for console, VNC proxy, etc.)
+      - "traefik.http.routers.ws.rule=PathPrefix(`/ws`)"
+      - "traefik.http.routers.ws.entrypoints=web"
+      - "traefik.http.routers.ws.service=api"
+      # HTTPS router for /ws
+      - "traefik.http.routers.ws-secure.rule=PathPrefix(`/ws`)"
+      - "traefik.http.routers.ws-secure.entrypoints=websecure"
+      - "traefik.http.routers.ws-secure.tls=true"
+      - "traefik.http.routers.ws-secure.service=api"
 
   worker:
     build:

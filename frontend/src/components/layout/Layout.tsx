@@ -31,9 +31,9 @@ interface NavItem {
 
 const navigation: NavItem[] = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
+  { name: 'Image Cache', href: '/cache', icon: HardDrive },
   { name: 'Templates', href: '/templates', icon: Server },
   { name: 'Ranges', href: '/ranges', icon: Network },
-  { name: 'Image Cache', href: '/cache', icon: HardDrive },
   { name: 'Users', href: '/users', icon: Users, adminOnly: true },
   { name: 'Artifacts', href: '/artifacts', icon: FileBox },
 ]

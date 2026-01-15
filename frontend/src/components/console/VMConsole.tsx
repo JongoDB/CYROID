@@ -65,7 +65,9 @@ export function VMConsole({ vmId, vmHostname, token, onClose }: VMConsoleProps) 
   }, [vmId, token])
 
   const connectWebSocket = (terminal: Terminal) => {
-    const wsUrl = 'ws://' + window.location.host + '/api/v1/ws/console/' + vmId + '?token=' + token
+    // Use wss:// for HTTPS, ws:// for HTTP
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    const wsUrl = wsProtocol + '//' + window.location.host + '/api/v1/ws/console/' + vmId + '?token=' + token
     const ws = new WebSocket(wsUrl)
 
     ws.onopen = () => {

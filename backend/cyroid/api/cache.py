@@ -19,6 +19,101 @@ router = APIRouter(prefix="/cache", tags=["Image Cache"])
 # Track active Docker image pulls for progress reporting
 _active_docker_pulls: Dict[str, Dict[str, Any]] = {}
 
+# Supported compressed archive extensions for ISO downloads/uploads
+SUPPORTED_ARCHIVE_EXTENSIONS = (
+    '.zip', '.7z', '.rar',  # Common archives
+    '.tar', '.tar.gz', '.tgz', '.tar.bz2', '.tbz2', '.tar.xz', '.txz',  # Tar variants
+    '.gz', '.gzip', '.bz2', '.xz', '.lzma',  # Single-file compression
+)
+
+
+def is_archive_file(path_or_url: str) -> bool:
+    """Check if a file path or URL points to a compressed archive."""
+    lower = path_or_url.lower()
+    # Handle query strings in URLs
+    if '?' in lower:
+        lower = lower.split('?')[0]
+    return any(lower.endswith(ext) for ext in SUPPORTED_ARCHIVE_EXTENSIONS)
+
+
+def get_archive_extension(path_or_url: str) -> Optional[str]:
+    """Get the archive extension from a file path or URL."""
+    lower = path_or_url.lower()
+    if '?' in lower:
+        lower = lower.split('?')[0]
+    # Check for compound extensions first (.tar.gz, .tar.bz2, etc.)
+    for ext in ('.tar.gz', '.tar.bz2', '.tar.xz'):
+        if lower.endswith(ext):
+            return ext
+    # Then check single extensions
+    for ext in SUPPORTED_ARCHIVE_EXTENSIONS:
+        if lower.endswith(ext):
+            return ext
+    return None
+
+
+def extract_iso_from_archive(archive_path: str, dest_dir: str) -> str:
+    """
+    Extract an archive and find the ISO file inside.
+    Uses 7z which supports most archive formats.
+
+    Args:
+        archive_path: Path to the archive file
+        dest_dir: Directory to extract to
+
+    Returns:
+        Path to the extracted ISO file
+
+    Raises:
+        ValueError: If no ISO found or multiple ISOs found
+        RuntimeError: If extraction fails
+    """
+    import subprocess
+    import shutil
+    import tempfile
+
+    # Create a temporary extraction directory
+    extract_dir = tempfile.mkdtemp(prefix="iso_extract_", dir=dest_dir)
+
+    try:
+        # Use 7z for extraction - it handles most formats
+        # -y: assume Yes on all queries
+        # -o: output directory
+        result = subprocess.run(
+            ['7z', 'x', '-y', f'-o{extract_dir}', archive_path],
+            capture_output=True,
+            text=True,
+            timeout=3600  # 1 hour timeout for large archives
+        )
+
+        if result.returncode != 0:
+            raise RuntimeError(f"Failed to extract archive: {result.stderr}")
+
+        # Find all ISO files in the extracted content (recursive)
+        iso_files = []
+        for root, dirs, files in os.walk(extract_dir):
+            for f in files:
+                if f.lower().endswith('.iso'):
+                    iso_files.append(os.path.join(root, f))
+
+        if not iso_files:
+            raise ValueError("No ISO file found in archive")
+
+        if len(iso_files) > 1:
+            # If multiple ISOs, prefer the largest one (likely the main ISO)
+            iso_files.sort(key=lambda x: os.path.getsize(x), reverse=True)
+            logger.warning(f"Multiple ISO files found in archive, using largest: {iso_files[0]}")
+
+        return iso_files[0]
+
+    except subprocess.TimeoutExpired:
+        raise RuntimeError("Archive extraction timed out")
+    except Exception as e:
+        # Clean up on failure
+        if os.path.exists(extract_dir):
+            shutil.rmtree(extract_dir, ignore_errors=True)
+        raise
+
 
 def get_windows_iso_dir() -> str:
     """Get the Windows ISO cache directory path."""
@@ -1416,15 +1511,30 @@ def download_custom_iso(
     }
 
     def download_iso(url: str, dest_path: str, name: str, filename: str, iso_dir: str):
-        """Download ISO in background with progress tracking."""
+        """Download ISO in background with progress tracking. Supports compressed archives."""
         import requests
         import json
         import time
+        import shutil
+        import tempfile
         from datetime import datetime
 
         metadata_file = os.path.join(iso_dir, "metadata.json")
+        is_archive = is_archive_file(url)
+        temp_archive_path = None
+        extract_dir = None
 
         try:
+            # Determine download path (temp file for archives, final path for ISOs)
+            if is_archive:
+                archive_ext = get_archive_extension(url) or '.archive'
+                temp_archive_path = os.path.join(iso_dir, f".tmp_{filename}{archive_ext}")
+                download_path = temp_archive_path
+                _active_custom_downloads[filename]["is_archive"] = True
+                _active_custom_downloads[filename]["archive_status"] = "downloading"
+            else:
+                download_path = dest_path
+
             # Use streaming download with progress
             response = requests.get(url, stream=True, timeout=3600, allow_redirects=True)
             response.raise_for_status()
@@ -1437,12 +1547,12 @@ def download_custom_iso(
 
             # Download with progress tracking
             downloaded = 0
-            with open(dest_path, 'wb') as f:
+            with open(download_path, 'wb') as f:
                 for chunk in response.iter_content(chunk_size=1024 * 1024):  # 1MB chunks
                     # Check if download was cancelled
                     if filename not in _active_custom_downloads or _active_custom_downloads[filename].get("cancelled"):
-                        if os.path.exists(dest_path):
-                            os.remove(dest_path)
+                        if os.path.exists(download_path):
+                            os.remove(download_path)
                         if filename in _active_custom_downloads:
                             del _active_custom_downloads[filename]
                         return
@@ -1450,6 +1560,26 @@ def download_custom_iso(
                         f.write(chunk)
                         downloaded += len(chunk)
                         _active_custom_downloads[filename]["progress_bytes"] = downloaded
+
+            # If it's an archive, extract and find the ISO
+            if is_archive:
+                _active_custom_downloads[filename]["archive_status"] = "extracting"
+                logger.info(f"Extracting ISO from archive: {temp_archive_path}")
+
+                try:
+                    iso_path = extract_iso_from_archive(temp_archive_path, iso_dir)
+                    extract_dir = os.path.dirname(iso_path)
+
+                    # Move extracted ISO to final destination
+                    shutil.move(iso_path, dest_path)
+                    logger.info(f"Extracted ISO moved to: {dest_path}")
+
+                finally:
+                    # Clean up temp archive and extraction directory
+                    if temp_archive_path and os.path.exists(temp_archive_path):
+                        os.remove(temp_archive_path)
+                    if extract_dir and os.path.exists(extract_dir):
+                        shutil.rmtree(extract_dir, ignore_errors=True)
 
             # Update metadata
             metadata = {}
@@ -1463,7 +1593,8 @@ def download_custom_iso(
             metadata[filename] = {
                 "name": name,
                 "url": url,
-                "downloaded_at": datetime.utcnow().isoformat()
+                "downloaded_at": datetime.utcnow().isoformat(),
+                "extracted_from_archive": is_archive
             }
             with open(metadata_file, "w") as f:
                 json.dump(metadata, f, indent=2)
@@ -1477,9 +1608,14 @@ def download_custom_iso(
                 del _active_custom_downloads[filename]
 
         except Exception as e:
-            # Clean up partial download
+            # Clean up partial download and temp files
             if os.path.exists(dest_path):
                 os.remove(dest_path)
+            if temp_archive_path and os.path.exists(temp_archive_path):
+                os.remove(temp_archive_path)
+            if extract_dir and os.path.exists(extract_dir):
+                shutil.rmtree(extract_dir, ignore_errors=True)
+
             if filename in _active_custom_downloads:
                 _active_custom_downloads[filename]["status"] = "failed"
                 _active_custom_downloads[filename]["error"] = str(e)
@@ -1799,21 +1935,34 @@ async def upload_custom_iso(
     current_user: AdminUser = None,
 ):
     """
-    Upload a custom ISO file to the cache.
+    Upload a custom ISO file or compressed archive containing an ISO to the cache.
+    Supports: .iso, .zip, .7z, .rar, .tar, .tar.gz, .tgz, .tar.bz2, .gz, .bz2, .xz
     Admin only.
     """
     import os
     import re
     import json
+    import shutil
     import aiofiles
     from datetime import datetime
     from cyroid.config import get_settings
 
-    # Validate file type
-    if not file.filename or not file.filename.lower().endswith('.iso'):
+    if not file.filename:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="File must be an ISO file"
+            detail="No file provided"
+        )
+
+    # Check if file is an ISO or supported archive
+    filename_lower = file.filename.lower()
+    is_iso = filename_lower.endswith('.iso')
+    is_archive = is_archive_file(file.filename)
+
+    if not is_iso and not is_archive:
+        supported_formats = ".iso, " + ", ".join(SUPPORTED_ARCHIVE_EXTENSIONS)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"File must be an ISO or compressed archive. Supported formats: {supported_formats}"
         )
 
     settings = get_settings()
@@ -1835,10 +1984,39 @@ async def upload_custom_iso(
             detail=f"ISO '{safe_name}' already exists. Delete it first to replace."
         )
 
+    temp_archive_path = None
+    extract_dir = None
+
     try:
-        async with aiofiles.open(filepath, 'wb') as out_file:
-            while content := await file.read(1024 * 1024):  # 1MB chunks
-                await out_file.write(content)
+        if is_archive:
+            # Save archive to temp file first
+            archive_ext = get_archive_extension(file.filename) or '.archive'
+            temp_archive_path = os.path.join(custom_iso_dir, f".tmp_upload_{safe_name}{archive_ext}")
+
+            async with aiofiles.open(temp_archive_path, 'wb') as out_file:
+                while content := await file.read(1024 * 1024):  # 1MB chunks
+                    await out_file.write(content)
+
+            # Extract ISO from archive
+            logger.info(f"Extracting ISO from uploaded archive: {temp_archive_path}")
+            iso_path = extract_iso_from_archive(temp_archive_path, custom_iso_dir)
+            extract_dir = os.path.dirname(iso_path)
+
+            # Move extracted ISO to final destination
+            shutil.move(iso_path, filepath)
+            logger.info(f"Extracted ISO moved to: {filepath}")
+
+            # Clean up
+            if os.path.exists(temp_archive_path):
+                os.remove(temp_archive_path)
+            if extract_dir and os.path.exists(extract_dir):
+                shutil.rmtree(extract_dir, ignore_errors=True)
+
+        else:
+            # Direct ISO upload
+            async with aiofiles.open(filepath, 'wb') as out_file:
+                while content := await file.read(1024 * 1024):  # 1MB chunks
+                    await out_file.write(content)
 
         file_size = os.path.getsize(filepath)
 
@@ -1854,7 +2032,8 @@ async def upload_custom_iso(
         metadata[safe_name] = {
             "name": name,
             "url": f"uploaded:{file.filename}",
-            "downloaded_at": datetime.utcnow().isoformat()
+            "downloaded_at": datetime.utcnow().isoformat(),
+            "extracted_from_archive": is_archive
         }
         with open(metadata_file, "w") as f:
             json.dump(metadata, f, indent=2)
@@ -1865,12 +2044,29 @@ async def upload_custom_iso(
             "filename": safe_name,
             "path": filepath,
             "size_bytes": file_size,
-            "size_gb": round(file_size / (1024**3), 2)
+            "size_gb": round(file_size / (1024**3), 2),
+            "extracted_from_archive": is_archive
         }
+    except ValueError as e:
+        # Clean up on failure (e.g., no ISO found in archive)
+        if os.path.exists(filepath):
+            os.remove(filepath)
+        if temp_archive_path and os.path.exists(temp_archive_path):
+            os.remove(temp_archive_path)
+        if extract_dir and os.path.exists(extract_dir):
+            shutil.rmtree(extract_dir, ignore_errors=True)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
     except Exception as e:
         # Clean up on failure
         if os.path.exists(filepath):
             os.remove(filepath)
+        if temp_archive_path and os.path.exists(temp_archive_path):
+            os.remove(temp_archive_path)
+        if extract_dir and os.path.exists(extract_dir):
+            shutil.rmtree(extract_dir, ignore_errors=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to upload ISO: {str(e)}"

@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException, status, Request
 
 from cyroid.api.deps import DBSession, CurrentUser
 from cyroid.models.vm import VM, VMStatus
-from cyroid.models.range import Range
+from cyroid.models.range import Range, RangeStatus
 from cyroid.models.network import Network
 from cyroid.models.template import VMTemplate, OSType
 from cyroid.models.event_log import EventType
@@ -210,7 +210,7 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
                 is_linuxserver = "linuxserver/" in base_image or "lscr.io/linuxserver" in base_image
                 is_kasmweb = "kasmweb/" in base_image
 
-                if base_image.startswith("iso:") or template.os_type == OSType.WINDOWS:
+                if base_image.startswith("iso:") or template.os_type == OSType.WINDOWS or template.os_type == OSType.CUSTOM:
                     # qemus/qemu and dockur/windows use port 8006 over HTTP
                     vnc_port = "8006"
                     vnc_scheme = "http"
@@ -240,15 +240,17 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
                     # Service (shared by both routers)
                     f"traefik.http.services.{router_name}.loadbalancer.server.port": vnc_port,
                     f"traefik.http.services.{router_name}.loadbalancer.server.scheme": vnc_scheme,
-                    # HTTP router
+                    # HTTP router (priority=100 to take precedence over frontend catch-all)
                     f"traefik.http.routers.{router_name}.rule": f"PathPrefix(`/vnc/{vm.id}`)",
                     f"traefik.http.routers.{router_name}.entrypoints": "web",
                     f"traefik.http.routers.{router_name}.service": router_name,
-                    # HTTPS router
+                    f"traefik.http.routers.{router_name}.priority": "100",
+                    # HTTPS router (priority=100 to take precedence over frontend catch-all)
                     f"traefik.http.routers.{router_name}-secure.rule": f"PathPrefix(`/vnc/{vm.id}`)",
                     f"traefik.http.routers.{router_name}-secure.entrypoints": "websecure",
                     f"traefik.http.routers.{router_name}-secure.tls": "true",
                     f"traefik.http.routers.{router_name}-secure.service": router_name,
+                    f"traefik.http.routers.{router_name}-secure.priority": "100",
                     # Middleware
                     f"traefik.http.middlewares.vnc-strip-{vm_id_short}.stripprefix.prefixes": f"/vnc/{vm.id}",
                 })
@@ -348,6 +350,37 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
                     manual_install=vm.manual_install,
                     oem_script_path=oem_script_path,
                 )
+            elif template.os_type == OSType.CUSTOM:
+                # Custom ISO VMs use qemux/qemu with the custom ISO
+                settings = get_settings()
+
+                # Setup VM-specific storage path
+                vm_storage_path = os.path.join(
+                    settings.vm_storage_dir,
+                    str(vm.range_id),
+                    str(vm.id),
+                    "storage"
+                )
+
+                # Get custom ISO path from template
+                iso_path = template.cached_iso_path if hasattr(template, 'cached_iso_path') and template.cached_iso_path else None
+
+                container_id = docker.create_linux_vm_container(
+                    name=f"cyroid-{vm.hostname}-{str(vm.id)[:8]}",
+                    network_id=network.docker_network_id,
+                    ip_address=vm.ip_address,
+                    cpu_limit=vm.cpu,
+                    memory_limit_mb=vm.ram_mb,
+                    disk_size_gb=vm.disk_gb,
+                    linux_distro="custom",  # Will be overridden by iso_path
+                    labels=labels,
+                    iso_path=iso_path,
+                    storage_path=vm_storage_path,
+                    display_type=vm.display_type or "desktop",
+                    # Extended configuration
+                    disk2_gb=vm.disk2_gb,
+                    disk3_gb=vm.disk3_gb,
+                )
             else:
                 container_id = docker.create_container(
                     name=f"cyroid-{vm.hostname}-{str(vm.id)[:8]}",
@@ -382,6 +415,14 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
             event_type=EventType.VM_STARTED,
             message=f"VM {vm.hostname} started"
         )
+
+        # Update range status to RUNNING if any VM is running
+        # This makes the execution console accessible
+        range_obj = db.query(Range).filter(Range.id == vm.range_id).first()
+        if range_obj and range_obj.status in (RangeStatus.STOPPED, RangeStatus.DRAFT):
+            range_obj.status = RangeStatus.RUNNING
+            db.commit()
+            logger.info(f"Range {range_obj.id} status updated to RUNNING")
 
     except HTTPException:
         raise
@@ -440,6 +481,16 @@ def stop_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
             event_type=EventType.VM_STOPPED,
             message=f"VM {vm.hostname} stopped"
         )
+
+        # Update range status to STOPPED if all VMs are stopped
+        range_obj = db.query(Range).filter(Range.id == vm.range_id).first()
+        if range_obj and range_obj.status == RangeStatus.RUNNING:
+            all_vms = db.query(VM).filter(VM.range_id == vm.range_id).all()
+            all_stopped = all(v.status == VMStatus.STOPPED for v in all_vms)
+            if all_stopped:
+                range_obj.status = RangeStatus.STOPPED
+                db.commit()
+                logger.info(f"Range {range_obj.id} status updated to STOPPED (all VMs stopped)")
 
     except Exception as e:
         logger.error(f"Failed to stop VM {vm_id}: {e}")

@@ -20,7 +20,7 @@ export interface VMTemplate {
   id: string
   name: string
   description: string | null
-  os_type: 'windows' | 'linux'
+  os_type: 'windows' | 'linux' | 'custom'
   os_variant: string
   base_image: string
   default_cpu: number

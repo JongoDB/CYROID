@@ -152,7 +152,7 @@ import type { VMTemplate, Range, Network, VM, EventLog, EventLogList, VMStatsRes
 export interface VMTemplateCreate {
   name: string
   description?: string
-  os_type: 'windows' | 'linux'
+  os_type: 'windows' | 'linux' | 'custom'
   os_variant: string
   base_image: string
   default_cpu?: number
@@ -160,6 +160,7 @@ export interface VMTemplateCreate {
   default_disk_gb?: number
   config_script?: string
   tags?: string[]
+  cached_iso_path?: string  // For custom ISOs
 }
 
 export const templatesApi = {

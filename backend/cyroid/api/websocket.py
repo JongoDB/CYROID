@@ -76,10 +76,14 @@ async def vm_console(
         # Get container and create exec instance
         container = docker.client.containers.get(vm.container_id)
 
+        # Try /bin/bash first, fall back to /bin/sh
+        # Use shell with login to get proper environment
+        shell_cmd = ["/bin/sh", "-c", "if [ -x /bin/bash ]; then exec /bin/bash; else exec /bin/sh; fi"]
+
         # Create interactive exec instance
         exec_instance = docker.client.api.exec_create(
             vm.container_id,
-            cmd="/bin/bash",
+            cmd=shell_cmd,
             stdin=True,
             tty=True,
             stdout=True,
@@ -93,37 +97,62 @@ async def vm_console(
             tty=True,
         )
 
-        # Set socket to non-blocking
+        # Keep socket in blocking mode but use select for async behavior
         exec_socket._sock.setblocking(False)
+
+        # Track if connection is still alive
+        connection_alive = True
 
         async def read_from_container():
             """Read output from container and send to WebSocket."""
+            nonlocal connection_alive
             try:
-                while True:
+                # Initial wait for shell to start
+                await asyncio.sleep(0.1)
+
+                while connection_alive:
                     try:
                         data = exec_socket._sock.recv(4096)
                         if data:
                             # Skip Docker stream header (8 bytes) if present
                             if len(data) > 8 and data[0] in (0, 1, 2):
                                 data = data[8:]
-                            await websocket.send_text(data.decode("utf-8", errors="replace"))
+                            if data:  # Check again after stripping header
+                                await websocket.send_text(data.decode("utf-8", errors="replace"))
                         else:
+                            # Empty data means socket closed
+                            logger.info(f"Container socket closed for VM {vm_id}")
+                            connection_alive = False
                             break
                     except BlockingIOError:
-                        await asyncio.sleep(0.01)
+                        # No data available, wait a bit
+                        await asyncio.sleep(0.05)
+                    except OSError as e:
+                        # Socket error (connection reset, etc.)
+                        logger.warning(f"Socket error for VM {vm_id}: {e}")
+                        connection_alive = False
+                        break
             except Exception as e:
                 logger.error(f"Error reading from container: {e}")
+                connection_alive = False
 
         async def write_to_container():
             """Read input from WebSocket and send to container."""
+            nonlocal connection_alive
             try:
-                while True:
-                    data = await websocket.receive_text()
-                    exec_socket._sock.send(data.encode())
+                while connection_alive:
+                    try:
+                        data = await asyncio.wait_for(websocket.receive_text(), timeout=1.0)
+                        exec_socket._sock.send(data.encode())
+                    except asyncio.TimeoutError:
+                        # No input from user, continue loop
+                        continue
             except WebSocketDisconnect:
                 logger.info(f"WebSocket disconnected for VM {vm_id}")
+                connection_alive = False
             except Exception as e:
                 logger.error(f"Error writing to container: {e}")
+                connection_alive = False
 
         # Run both tasks concurrently
         await asyncio.gather(
