@@ -3,7 +3,7 @@ import { useEffect, useState, useRef } from 'react'
 import { EventLog, EventType } from '../../types'
 import { eventsApi } from '../../services/api'
 import {
-  CheckCircle, Circle, Loader2, XCircle,
+  CheckCircle, Loader2, XCircle,
   ChevronDown, ChevronUp, Router, Network, Server, Rocket
 } from 'lucide-react'
 import clsx from 'clsx'
@@ -162,19 +162,6 @@ export function DeploymentProgress({
 
   const formatTime = (timestamp: string) => {
     return new Date(timestamp).toLocaleTimeString()
-  }
-
-  const renderStepIcon = (step: StepStatus) => {
-    switch (step.status) {
-      case 'completed':
-        return <CheckCircle className="w-6 h-6 text-green-500" />
-      case 'in_progress':
-        return <Loader2 className="w-6 h-6 text-blue-500 animate-spin" />
-      case 'error':
-        return <XCircle className="w-6 h-6 text-red-500" />
-      default:
-        return <Circle className="w-6 h-6 text-gray-300" />
-    }
   }
 
   const stepConfig = [

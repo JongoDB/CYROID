@@ -304,11 +304,12 @@ async def range_status(
 ):
     """
     WebSocket endpoint for range status updates.
-    Sends VM status changes in real-time.
+    Combines periodic polling with real-time event notifications.
     """
     await websocket.accept()
 
     db = next(get_db())
+    connection_id = f"status_{range_id}_{id(websocket)}"
 
     try:
         user = await get_current_user_ws(websocket, token, db)
@@ -316,18 +317,36 @@ async def range_status(
             return
 
         from cyroid.models.range import Range
+        from cyroid.services.event_broadcaster import get_connection_manager
 
         range_obj = db.query(Range).filter(Range.id == range_id).first()
         if not range_obj:
             await websocket.close(code=4004, reason="Range not found")
             return
 
-        # Poll for status updates
-        last_status = {}
+        # Register with connection manager for real-time events
+        connection_manager = get_connection_manager()
+        await connection_manager.connect(connection_id, websocket)
+        await connection_manager.subscribe_to_range(connection_id, str(range_id))
+
+        # Send initial status immediately
+        vms = db.query(VM).filter(VM.range_id == range_id).all()
+        current_status = {str(vm.id): vm.status.value for vm in vms}
+        await websocket.send_json({
+            "type": "status_update",
+            "range_id": str(range_id),
+            "range_status": range_obj.status.value,
+            "vms": current_status,
+        })
+
+        # Poll for status updates (as backup to real-time events)
+        last_status = current_status.copy()
         while True:
-            # Get current VM statuses
+            # Refresh data
+            db.expire_all()
             vms = db.query(VM).filter(VM.range_id == range_id).all()
             current_status = {str(vm.id): vm.status.value for vm in vms}
+            db.refresh(range_obj)
 
             # Check for changes
             if current_status != last_status:
@@ -339,17 +358,23 @@ async def range_status(
                 })
                 last_status = current_status.copy()
 
-            # Refresh range status
-            db.refresh(range_obj)
-
-            await asyncio.sleep(2)  # Poll every 2 seconds
+            await asyncio.sleep(3)  # Poll every 3 seconds as backup
 
     except WebSocketDisconnect:
         logger.info(f"Status WebSocket disconnected for range {range_id}")
     except Exception as e:
         logger.error(f"Status WebSocket error for range {range_id}: {e}")
-        await websocket.close(code=4000, reason=str(e))
+        try:
+            await websocket.close(code=4000, reason=str(e))
+        except Exception:
+            pass
     finally:
+        # Clean up connection
+        try:
+            connection_manager = get_connection_manager()
+            await connection_manager.disconnect(connection_id)
+        except Exception:
+            pass
         db.close()
 
 
@@ -357,31 +382,110 @@ async def range_status(
 async def system_events(
     websocket: WebSocket,
     token: str = Query(...),
+    range_id: Optional[UUID] = Query(None),
 ):
     """
-    WebSocket endpoint for system-wide events.
-    Broadcasts deployment progress, errors, and notifications.
+    WebSocket endpoint for real-time event streaming.
+
+    Broadcasts deployment progress, VM status changes, errors, and notifications.
+    Optionally filter by range_id to receive only events for a specific range.
+
+    Message types received:
+    - Event broadcasts (event_type, message, range_id, vm_id, data, timestamp)
+    - Ping messages (type: "ping") for keepalive
+
+    Client can send:
+    - {"action": "subscribe", "range_id": "uuid"} - Subscribe to range events
+    - {"action": "unsubscribe", "range_id": "uuid"} - Unsubscribe from range
+    - {"action": "subscribe_vm", "vm_id": "uuid"} - Subscribe to VM events
     """
     await websocket.accept()
 
     db = next(get_db())
+    connection_id = f"events_{id(websocket)}"
 
     try:
         user = await get_current_user_ws(websocket, token, db)
         if not user:
             return
 
-        # Keep connection alive and wait for events
-        # In a real implementation, this would subscribe to a Redis pub/sub
+        from cyroid.services.event_broadcaster import (
+            get_connection_manager,
+            RANGE_CHANNEL_PREFIX,
+            VM_CHANNEL_PREFIX
+        )
+
+        connection_manager = get_connection_manager()
+        await connection_manager.connect(connection_id, websocket)
+
+        # If range_id specified, subscribe to that range
+        if range_id:
+            await connection_manager.subscribe_to_range(connection_id, str(range_id))
+
+        # Send connected confirmation
+        await websocket.send_json({
+            "type": "connected",
+            "message": "Real-time events connected",
+            "subscriptions": [f"range:{range_id}"] if range_id else []
+        })
+
+        # Listen for client messages (subscription changes) and keep alive
         while True:
-            # Ping to keep connection alive
-            await websocket.send_json({"type": "ping"})
-            await asyncio.sleep(30)
+            try:
+                # Wait for client message with timeout
+                data = await asyncio.wait_for(
+                    websocket.receive_json(),
+                    timeout=30.0
+                )
+
+                action = data.get("action")
+
+                if action == "subscribe" and "range_id" in data:
+                    await connection_manager.subscribe_to_range(
+                        connection_id, data["range_id"]
+                    )
+                    await websocket.send_json({
+                        "type": "subscribed",
+                        "channel": f"range:{data['range_id']}"
+                    })
+
+                elif action == "unsubscribe" and "range_id" in data:
+                    channel = f"{RANGE_CHANNEL_PREFIX}{data['range_id']}"
+                    await connection_manager.unsubscribe(connection_id, channel)
+                    await websocket.send_json({
+                        "type": "unsubscribed",
+                        "channel": f"range:{data['range_id']}"
+                    })
+
+                elif action == "subscribe_vm" and "vm_id" in data:
+                    await connection_manager.subscribe_to_vm(
+                        connection_id, data["vm_id"]
+                    )
+                    await websocket.send_json({
+                        "type": "subscribed",
+                        "channel": f"vm:{data['vm_id']}"
+                    })
+
+                elif action == "ping":
+                    await websocket.send_json({"type": "pong"})
+
+            except asyncio.TimeoutError:
+                # Send keepalive ping
+                await websocket.send_json({"type": "ping"})
 
     except WebSocketDisconnect:
-        logger.info("Events WebSocket disconnected")
+        logger.info(f"Events WebSocket disconnected: {connection_id}")
     except Exception as e:
         logger.error(f"Events WebSocket error: {e}")
-        await websocket.close(code=4000, reason=str(e))
+        try:
+            await websocket.close(code=4000, reason=str(e))
+        except Exception:
+            pass
     finally:
+        # Clean up connection
+        try:
+            connection_manager = get_connection_manager()
+            await connection_manager.disconnect(connection_id)
+        except Exception:
+            pass
         db.close()

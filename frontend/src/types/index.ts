@@ -621,3 +621,25 @@ export interface LoadImagesResult {
   images_loaded: string[]
   count: number
 }
+
+// Real-time WebSocket Event Types
+export interface RealtimeEvent {
+  event_type: string
+  range_id: string | null
+  vm_id: string | null
+  message: string
+  data: Record<string, unknown> | null
+  timestamp: string
+}
+
+export interface WebSocketMessage {
+  type: 'connected' | 'subscribed' | 'unsubscribed' | 'ping' | 'pong' | 'status_update'
+  message?: string
+  subscriptions?: string[]
+  channel?: string
+  range_id?: string
+  range_status?: string
+  vms?: Record<string, string>
+}
+
+export type WebSocketConnectionState = 'connecting' | 'connected' | 'disconnected' | 'error'

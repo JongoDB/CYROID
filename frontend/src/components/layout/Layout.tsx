@@ -18,6 +18,7 @@ import {
 } from 'lucide-react'
 import clsx from 'clsx'
 import PasswordChangeModal from '../common/PasswordChangeModal'
+import { ToastContainer } from '../common/Toast'
 
 interface LayoutProps {
   children: ReactNode
@@ -211,6 +212,9 @@ export default function Layout({ children }: LayoutProps) {
         onClose={() => {}}
         isForced={true}
       />
+
+      {/* Toast notifications */}
+      <ToastContainer />
     </div>
   )
 }

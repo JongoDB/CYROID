@@ -1,11 +1,11 @@
 // frontend/src/pages/RangeDetail.tsx
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState, useMemo, useCallback, useRef } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { rangesApi, networksApi, vmsApi, templatesApi, NetworkCreate, VMCreate } from '../services/api'
-import type { Range, Network, VM, VMTemplate } from '../types'
+import type { Range, Network, VM, VMTemplate, RealtimeEvent } from '../types'
 import {
   ArrowLeft, Plus, Loader2, X, Play, Square, RotateCw,
-  Network as NetworkIcon, Server, Trash2, Rocket, Activity, Monitor, Shield, Download, Pencil, Globe, Router, Wifi
+  Network as NetworkIcon, Server, Trash2, Rocket, Activity, Monitor, Shield, Download, Pencil, Globe, Router, Wifi, Radio
 } from 'lucide-react'
 import clsx from 'clsx'
 import { VncConsole } from '../components/console/VncConsole'
@@ -14,6 +14,8 @@ import { useIsArmHost } from '../stores/systemStore'
 import { EmulationWarning } from '../components/common/EmulationWarning'
 import ExportRangeDialog from '../components/export/ExportRangeDialog'
 import { DeploymentProgress } from '../components/range/DeploymentProgress'
+import { useRealtimeRange } from '../hooks/useRealtimeRange'
+import { toast } from '../stores/toastStore'
 
 const statusColors: Record<string, string> = {
   draft: 'bg-gray-100 text-gray-800',
@@ -107,6 +109,71 @@ export default function RangeDetail() {
 
   // Architecture detection for emulation warning
   const isArmHost = useIsArmHost()
+
+  // Track VMs with recent status changes for pulse animation
+  const [recentlyChangedVms, setRecentlyChangedVms] = useState<Set<string>>(new Set())
+  const vmStatusRef = useRef<Record<string, string>>({})
+
+  // Handle real-time events
+  const handleRealtimeEvent = useCallback((event: RealtimeEvent) => {
+    // Show toast for significant events
+    if (event.event_type === 'deployment_completed') {
+      toast.success(event.message)
+      fetchData()
+    } else if (event.event_type === 'deployment_failed') {
+      toast.error(event.message)
+      fetchData()
+    } else if (event.event_type === 'vm_error') {
+      toast.error(`VM Error: ${event.message}`)
+    } else if (event.event_type === 'vm_started' || event.event_type === 'vm_stopped') {
+      // Refresh to get latest VM status
+      fetchData()
+    }
+  }, [])
+
+  // Handle VM status changes with pulse animation
+  const handleVmStatusChange = useCallback((vmId: string, newStatus: string) => {
+    const previousStatus = vmStatusRef.current[vmId]
+    if (previousStatus && previousStatus !== newStatus) {
+      // Trigger pulse animation
+      setRecentlyChangedVms(prev => new Set(prev).add(vmId))
+      // Remove after animation completes
+      setTimeout(() => {
+        setRecentlyChangedVms(prev => {
+          const next = new Set(prev)
+          next.delete(vmId)
+          return next
+        })
+      }, 1000)
+    }
+    vmStatusRef.current[vmId] = newStatus
+  }, [])
+
+  // Handle range status changes
+  const handleStatusChange = useCallback((rangeStatus: string, vmStatuses: Record<string, string>) => {
+    // Update local state with new statuses
+    setRange(prev => prev ? { ...prev, status: rangeStatus as Range['status'] } : null)
+
+    // Check for individual VM status changes
+    Object.entries(vmStatuses).forEach(([vmId, status]) => {
+      handleVmStatusChange(vmId, status)
+    })
+
+    setVms(prev => prev.map(vm => {
+      const newStatus = vmStatuses[vm.id]
+      if (newStatus && newStatus !== vm.status) {
+        return { ...vm, status: newStatus as VM['status'] }
+      }
+      return vm
+    }))
+  }, [handleVmStatusChange])
+
+  // Real-time WebSocket connection
+  const { connectionState } = useRealtimeRange(id || null, {
+    onEvent: handleRealtimeEvent,
+    onStatusChange: handleStatusChange,
+    enabled: !!id,
+  })
 
   // Get the currently selected template for the VM form
   const selectedTemplate = useMemo(() => {
@@ -508,6 +575,20 @@ export default function RangeDetail() {
               )}
             </div>
             <p className="mt-1 text-sm text-gray-500">{range.description || 'No description'}</p>
+            {/* Real-time connection indicator */}
+            <div className="mt-1 flex items-center gap-1.5">
+              <Radio className={clsx(
+                "h-3 w-3",
+                connectionState === 'connected' ? 'text-green-500' :
+                connectionState === 'connecting' ? 'text-yellow-500 animate-pulse' :
+                'text-gray-400'
+              )} />
+              <span className="text-xs text-gray-400">
+                {connectionState === 'connected' ? 'Live updates' :
+                 connectionState === 'connecting' ? 'Connecting...' :
+                 'Offline'}
+              </span>
+            </div>
           </div>
           <div className="mt-4 sm:mt-0 flex items-center space-x-3">
             {range.status === 'draft' && (
@@ -721,8 +802,9 @@ export default function RangeDetail() {
                         <div className="flex items-center">
                           <p className="text-sm font-medium text-gray-900">{vm.hostname}</p>
                           <span className={clsx(
-                            "ml-2 px-1.5 py-0.5 text-xs font-medium rounded",
-                            statusColors[vm.status]
+                            "ml-2 px-1.5 py-0.5 text-xs font-medium rounded transition-all",
+                            statusColors[vm.status],
+                            recentlyChangedVms.has(vm.id) && "animate-pulse-once ring-2 ring-blue-400"
                           )}>
                             {vm.status}
                           </span>

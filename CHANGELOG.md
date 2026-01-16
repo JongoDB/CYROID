@@ -5,6 +5,24 @@ All notable changes to CYROID will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.4] - 2026-01-16
+
+### Added
+
+- **Real-Time UI Updates via WebSocket** ([#5](../../issues/5)): Live status updates without page refresh. When deploying a range, starting VMs, or performing any operation, users now see status updates in real-time as they happen.
+  - WebSocket event streaming with Redis pub/sub for scalable broadcasting
+  - Selective subscription to specific ranges for efficient bandwidth usage
+  - Toast notifications for significant events (deployment complete, VM errors)
+  - Pulse animations on status badges when VM states change
+  - Connection status indicator showing live update availability
+  - `useRealtimeRange` React hook for easy integration
+
+### Changed
+
+- WebSocket endpoints enhanced with Redis pub/sub infrastructure
+- EventService now broadcasts events to connected clients in real-time
+- Added connection manager for WebSocket lifecycle and subscriptions
+
 ## [0.4.3] - 2026-01-16
 
 ### Added

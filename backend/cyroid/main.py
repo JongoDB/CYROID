@@ -1,4 +1,7 @@
 # backend/cyroid/main.py
+import logging
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -18,12 +21,39 @@ from cyroid.api.msel import router as msel_router
 from cyroid.api.cache import router as cache_router
 from cyroid.api.system import router as system_router
 
+logger = logging.getLogger(__name__)
 settings = get_settings()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Application lifespan events for startup and shutdown."""
+    # Startup
+    from cyroid.services.event_broadcaster import get_connection_manager, get_broadcaster
+
+    logger.info("Starting real-time event services...")
+    connection_manager = get_connection_manager()
+    await connection_manager.start()
+
+    broadcaster = get_broadcaster()
+    await broadcaster.connect()
+
+    logger.info("Real-time event services started")
+
+    yield
+
+    # Shutdown
+    logger.info("Stopping real-time event services...")
+    await connection_manager.stop()
+    await broadcaster.disconnect()
+    logger.info("Real-time event services stopped")
+
 
 app = FastAPI(
     title=settings.app_name,
     description="Cyber Range Orchestrator In Docker",
     version=settings.app_version,
+    lifespan=lifespan,
 )
 
 app.add_middleware(
