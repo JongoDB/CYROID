@@ -11,6 +11,7 @@ class NetworkBase(BaseModel):
     gateway: str = Field(..., pattern=r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$")
     dns_servers: Optional[str] = None
     is_isolated: bool = True  # Isolated by default for security
+    internet_enabled: bool = False  # Internet access via VyOS NAT
 
 
 class NetworkCreate(NetworkBase):
@@ -21,12 +22,14 @@ class NetworkUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=100)
     dns_servers: Optional[str] = None
     is_isolated: Optional[bool] = None
+    internet_enabled: Optional[bool] = None
 
 
 class NetworkResponse(NetworkBase):
     id: UUID
     range_id: UUID
     docker_network_id: Optional[str] = None
+    vyos_interface: Optional[str] = None  # eth1, eth2, etc.
     created_at: datetime
     updated_at: datetime
 

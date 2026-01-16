@@ -20,9 +20,18 @@ class Network(Base, UUIDMixin, TimestampMixin):
     docker_network_id: Mapped[Optional[str]] = mapped_column(String(64))
 
     # Network isolation - when True:
-    # - Docker network is internal (no external routing)
-    # - iptables rules block access to host/infrastructure
+    # - VyOS router enforces firewall rules blocking external access
+    # - VMs can only communicate within their network
     is_isolated: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    # Internet access via VyOS NAT - when True:
+    # - VyOS router provides NAT masquerade for this network
+    # - VMs can access the internet through the router
+    # - Only effective when is_isolated=True (otherwise direct access)
+    internet_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    # VyOS interface name (eth1, eth2, etc.) - set during deployment
+    vyos_interface: Mapped[Optional[str]] = mapped_column(String(10))
 
     # Relationships
     range = relationship("Range", back_populates="networks")

@@ -44,3 +44,6 @@ class Range(Base, UUIDMixin, TimestampMixin):
     msel: Mapped[Optional["MSEL"]] = relationship(
         "MSEL", back_populates="range", uselist=False, cascade="all, delete-orphan"
     )
+    router: Mapped[Optional["RangeRouter"]] = relationship(
+        "RangeRouter", back_populates="range", uselist=False, cascade="all, delete-orphan"
+    )

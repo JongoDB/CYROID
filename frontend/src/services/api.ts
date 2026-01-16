@@ -271,6 +271,7 @@ export interface NetworkUpdate {
   name?: string
   dns_servers?: string
   is_isolated?: boolean
+  internet_enabled?: boolean
 }
 
 export const networksApi = {
@@ -282,6 +283,7 @@ export const networksApi = {
   provision: (id: string) => api.post<Network>(`/networks/${id}/provision`),
   teardown: (id: string) => api.post<Network>(`/networks/${id}/teardown`),
   toggleIsolation: (id: string) => api.post<Network>(`/networks/${id}/toggle-isolation`),
+  toggleInternet: (id: string) => api.post<Network>(`/networks/${id}/toggle-internet`),
 }
 
 // VMs API

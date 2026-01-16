@@ -16,6 +16,7 @@ from cyroid.models.vm import VM, VMStatus
 from cyroid.models.template import VMTemplate, OSType
 from cyroid.models.resource_tag import ResourceTag
 from cyroid.models.user import User
+from cyroid.models.router import RangeRouter, RouterStatus
 from cyroid.schemas.range import (
     RangeCreate, RangeUpdate, RangeResponse, RangeDetailResponse,
     RangeTemplateExport, RangeTemplateImport, NetworkTemplateData, VMTemplateData
@@ -32,6 +33,12 @@ def get_docker_service():
     """Lazy import to avoid Docker connection issues during testing."""
     from cyroid.services.docker_service import get_docker_service as _get_docker_service
     return _get_docker_service()
+
+
+def get_vyos_service():
+    """Lazy import for VyOS service."""
+    from cyroid.services.vyos_service import VyOSService
+    return VyOSService()
 
 
 @router.get("", response_model=List[RangeResponse])
@@ -82,7 +89,11 @@ def create_range(range_data: RangeCreate, db: DBSession, current_user: CurrentUs
 
 @router.get("/{range_id}", response_model=RangeDetailResponse)
 def get_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
-    range_obj = db.query(Range).filter(Range.id == range_id).first()
+    range_obj = db.query(Range).options(
+        joinedload(Range.networks),
+        joinedload(Range.vms),
+        joinedload(Range.router)
+    ).filter(Range.id == range_id).first()
     if not range_obj:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -155,9 +166,51 @@ def deploy_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
 
     try:
         docker = get_docker_service()
+        vyos = get_vyos_service()
+
+        # Step 0: Create VyOS router for this range
+        range_router = db.query(RangeRouter).filter(RangeRouter.range_id == range_id).first()
+        if not range_router:
+            # Create router record
+            management_ip = vyos.allocate_management_ip()
+            range_router = RangeRouter(
+                range_id=range_id,
+                management_ip=management_ip,
+                status=RouterStatus.CREATING
+            )
+            db.add(range_router)
+            db.commit()
+
+        # Create and start the router container if needed
+        if not range_router.container_id:
+            try:
+                range_router.status = RouterStatus.CREATING
+                db.commit()
+
+                container_id = vyos.create_router_container(
+                    range_id=str(range_id),
+                    management_ip=range_router.management_ip
+                )
+                range_router.container_id = container_id
+                vyos.start_router(container_id)
+
+                # Wait for router to be ready
+                import time
+                time.sleep(3)  # VyOS needs time to initialize
+
+                range_router.status = RouterStatus.RUNNING
+                db.commit()
+                logger.info(f"VyOS router created for range {range_id}")
+            except Exception as e:
+                logger.error(f"Failed to create VyOS router: {e}")
+                range_router.status = RouterStatus.ERROR
+                range_router.error_message = str(e)[:500]
+                db.commit()
+                raise
 
         # Step 1: Provision all networks
         networks = db.query(Network).filter(Network.range_id == range_id).all()
+        interface_num = 1  # eth0 is management, start from eth1
         for network in networks:
             if not network.docker_network_id:
                 docker_network_id = docker.create_network(
@@ -178,6 +231,47 @@ def deploy_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
                     docker.setup_network_isolation(docker_network_id, network.subnet)
 
                 db.commit()
+
+            # Connect VyOS router to this network as the gateway
+            if range_router.container_id and range_router.status == RouterStatus.RUNNING:
+                try:
+                    import ipaddress
+                    interface_name = f"eth{interface_num}"
+                    network.vyos_interface = interface_name
+
+                    # VyOS gets the gateway IP (.1) - Docker bridge no longer claims it
+                    vyos_ip = network.gateway
+                    subnet_obj = ipaddress.ip_network(network.subnet, strict=False)
+
+                    # Connect router to network with gateway IP
+                    vyos.connect_to_network(
+                        container_id=range_router.container_id,
+                        network_id=network.docker_network_id,
+                        interface_ip=vyos_ip
+                    )
+
+                    # Configure interface in VyOS (need CIDR notation)
+                    ip_with_cidr = f"{vyos_ip}/{subnet_obj.prefixlen}"
+                    vyos.configure_interface(
+                        container_id=range_router.container_id,
+                        interface=interface_name,
+                        ip_address=ip_with_cidr,
+                        description=network.name
+                    )
+
+                    # Configure NAT if internet is enabled
+                    if network.internet_enabled:
+                        vyos.configure_nat_outbound(
+                            container_id=range_router.container_id,
+                            rule_number=interface_num * 10,
+                            source_network=network.subnet
+                        )
+
+                    interface_num += 1
+                    db.commit()
+                    logger.info(f"Connected VyOS router as gateway for {network.name} at {vyos_ip}")
+                except Exception as e:
+                    logger.warning(f"Failed to connect VyOS to network {network.name}: {e}")
 
         # Step 2: Create and start all VMs
         vms = db.query(VM).filter(VM.range_id == range_id).all()
@@ -352,8 +446,24 @@ def deploy_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
                 vm.container_id = container_id
                 docker.start_container(container_id)
 
-                # Configure Linux user for KasmVNC containers
+                # Configure default route for Docker containers (VyOS is the gateway)
+                # Windows/Linux VMs (QEMU-based) handle their own routing internally
                 base_image = template.base_image or ""
+                is_docker_container = (
+                    template.os_type != OSType.WINDOWS and
+                    template.os_type != OSType.CUSTOM and
+                    not base_image.startswith("iso:")
+                )
+                if is_docker_container and network.gateway:
+                    try:
+                        # Give container a moment to initialize networking
+                        import time
+                        time.sleep(1)
+                        docker.configure_default_route(container_id, network.gateway)
+                    except Exception as e:
+                        logger.warning(f"Failed to configure default route for VM {vm.id}: {e}")
+
+                # Configure Linux user for KasmVNC containers
                 if "kasmweb/" in base_image:
                     # KasmVNC uses 'kasm-user' as the default user
                     username = vm.linux_username or "kasm-user"
@@ -486,6 +596,7 @@ def teardown_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
 
     try:
         docker = get_docker_service()
+        vyos = get_vyos_service()
 
         # Step 1: Remove all VM containers
         vms = db.query(VM).filter(VM.range_id == range_id).all()
@@ -496,12 +607,25 @@ def teardown_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
                 vm.status = VMStatus.PENDING
                 db.commit()
 
-        # Step 2: Remove all Docker networks
+        # Step 2: Remove VyOS router
+        range_router = db.query(RangeRouter).filter(RangeRouter.range_id == range_id).first()
+        if range_router and range_router.container_id:
+            try:
+                vyos.remove_router(range_router.container_id)
+                logger.info(f"Removed VyOS router for range {range_id}")
+            except Exception as e:
+                logger.warning(f"Failed to remove VyOS router: {e}")
+            range_router.container_id = None
+            range_router.status = RouterStatus.PENDING
+            db.commit()
+
+        # Step 3: Remove all Docker networks and reset VyOS interface assignments
         networks = db.query(Network).filter(Network.range_id == range_id).all()
         for network in networks:
             if network.docker_network_id:
                 docker.delete_network(network.docker_network_id)
                 network.docker_network_id = None
+                network.vyos_interface = None
                 db.commit()
 
         range_obj.status = RangeStatus.DRAFT

@@ -47,27 +47,43 @@ class DockerService:
         subnet: str,
         gateway: str,
         internal: bool = True,
-        labels: Optional[Dict[str, str]] = None
+        labels: Optional[Dict[str, str]] = None,
+        use_vyos_gateway: bool = True
     ) -> str:
         """
         Create a Docker network with the specified configuration.
-        
+
         Args:
             name: Network name
             subnet: CIDR notation (e.g., "10.0.1.0/24")
-            gateway: Gateway IP address
+            gateway: Gateway IP address (used by VyOS, not Docker bridge)
             internal: If True, no external connectivity (isolation)
             labels: Optional labels for the network
-            
+            use_vyos_gateway: If True, don't assign gateway to Docker bridge (VyOS will be gateway)
+
         Returns:
             Network ID
         """
-        ipam_pool = docker.types.IPAMPool(
-            subnet=subnet,
-            gateway=gateway
-        )
+        if use_vyos_gateway:
+            # Docker bridge uses .254, leaving .1 available for VyOS
+            import ipaddress
+            subnet_obj = ipaddress.ip_network(subnet, strict=False)
+            hosts = list(subnet_obj.hosts())
+            # Use last usable host (.254 for /24) for Docker bridge
+            bridge_ip = str(hosts[-1]) if hosts else gateway
+
+            ipam_pool = docker.types.IPAMPool(
+                subnet=subnet,
+                gateway=bridge_ip  # Docker bridge uses .254, not .1
+            )
+        else:
+            # Legacy mode: Docker bridge is the gateway
+            ipam_pool = docker.types.IPAMPool(
+                subnet=subnet,
+                gateway=gateway
+            )
         ipam_config = docker.types.IPAMConfig(pool_configs=[ipam_pool])
-        
+
         try:
             network = self.client.networks.create(
                 name=name,
@@ -77,7 +93,7 @@ class DockerService:
                 labels=labels or {},
                 attachable=True
             )
-            logger.info(f"Created network: {name} ({network.id[:12]})")
+            logger.info(f"Created network: {name} ({network.id[:12]}) [VyOS gateway mode: {use_vyos_gateway}]")
             return network.id
         except APIError as e:
             logger.error(f"Failed to create network {name}: {e}")
@@ -128,6 +144,9 @@ class DockerService:
         This allows traefik to route to VMs on that network without exposing
         the management network to VMs.
 
+        Traefik is assigned .253 in the subnet, leaving .1 available for VyOS
+        and .254 for the Docker bridge.
+
         Args:
             network_id: Docker network ID to connect traefik to
 
@@ -135,6 +154,8 @@ class DockerService:
             True if successful, False if traefik not found or already connected
         """
         try:
+            import ipaddress
+
             # Find the traefik container
             traefik_container = None
             for container in self.client.containers.list():
@@ -155,9 +176,26 @@ class DockerService:
                 logger.debug(f"Traefik already connected to network {network.name}")
                 return True
 
-            # Connect traefik to the network
-            network.connect(traefik_container.id)
-            logger.info(f"Connected traefik to network {network.name} for VM routing")
+            # Calculate Traefik IP (.253 in the subnet)
+            # This leaves .1 for VyOS and .254 for Docker bridge
+            ipam_config = network.attrs.get("IPAM", {}).get("Config", [])
+            traefik_ip = None
+            if ipam_config:
+                subnet_str = ipam_config[0].get("Subnet")
+                if subnet_str:
+                    subnet_obj = ipaddress.ip_network(subnet_str, strict=False)
+                    hosts = list(subnet_obj.hosts())
+                    if len(hosts) >= 3:
+                        # .253 is second-to-last usable host
+                        traefik_ip = str(hosts[-2])
+
+            # Connect traefik to the network with specific IP
+            if traefik_ip:
+                network.connect(traefik_container.id, ipv4_address=traefik_ip)
+                logger.info(f"Connected traefik to network {network.name} at {traefik_ip}")
+            else:
+                network.connect(traefik_container.id)
+                logger.info(f"Connected traefik to network {network.name} for VM routing")
             return True
 
         except NotFound as e:
@@ -362,6 +400,62 @@ class DockerService:
         except ValueError:
             return False
 
+    def connect_traefik_to_management_network(self) -> bool:
+        """
+        Connect the traefik container to the management network.
+        This allows traefik to route to VyOS routers and potentially
+        route VNC traffic through the management network.
+
+        Returns:
+            True if successful
+        """
+        from cyroid.config import get_settings
+        settings = get_settings()
+
+        try:
+            # Find the traefik container
+            traefik_container = None
+            for container in self.client.containers.list():
+                if 'traefik' in container.name.lower():
+                    traefik_container = container
+                    break
+
+            if not traefik_container:
+                logger.warning("Traefik container not found")
+                return False
+
+            # Get the management network
+            network_name = settings.management_network_name
+            try:
+                networks = self.client.networks.list(names=[network_name])
+                mgmt_network = None
+                for network in networks:
+                    if network.name == network_name:
+                        mgmt_network = network
+                        break
+
+                if not mgmt_network:
+                    logger.warning(f"Management network {network_name} not found")
+                    return False
+            except NotFound:
+                logger.warning(f"Management network {network_name} not found")
+                return False
+
+            # Check if traefik is already connected
+            connected_containers = mgmt_network.attrs.get("Containers", {})
+            if traefik_container.id in connected_containers:
+                logger.debug("Traefik already connected to management network")
+                return True
+
+            # Connect traefik to the management network
+            mgmt_network.connect(traefik_container.id)
+            logger.info(f"Connected traefik to management network {network_name}")
+            return True
+
+        except APIError as e:
+            logger.warning(f"Failed to connect traefik to management network: {e}")
+            return False
+
     # Container Operations (Linux VMs)
 
     def create_container(
@@ -457,6 +551,7 @@ class DockerService:
                     mem_limit=f"{memory_limit_mb}m",
                     binds=volumes,
                     privileged=privileged,
+                    cap_add=["NET_ADMIN"],  # Required for VyOS gateway routing
                     restart_policy={"Name": "unless-stopped"}
                 ),
                 environment=environment,
@@ -1277,6 +1372,51 @@ local-hostname: {name}
         except APIError as e:
             logger.error(f"Failed to exec in container {container_id}: {e}")
             raise
+
+    def configure_default_route(
+        self,
+        container_id: str,
+        gateway_ip: str
+    ) -> bool:
+        """
+        Configure the default route in a container to use VyOS as gateway.
+
+        This is needed because Docker networks are created without a gateway
+        (VyOS is the actual gateway), so containers don't have a default route.
+
+        Args:
+            container_id: Container ID
+            gateway_ip: Gateway IP address (VyOS router)
+
+        Returns:
+            True if successful
+        """
+        try:
+            # First check if a default route already exists
+            exit_code, output = self.exec_command(
+                container_id,
+                "ip route show default"
+            )
+
+            if exit_code == 0 and "default" in output:
+                # Delete existing default route
+                self.exec_command(container_id, "ip route del default")
+
+            # Add default route via VyOS gateway
+            exit_code, output = self.exec_command(
+                container_id,
+                f"ip route add default via {gateway_ip}"
+            )
+
+            if exit_code != 0:
+                logger.warning(f"Failed to set default route in container {container_id[:12]}: {output}")
+                return False
+
+            logger.info(f"Configured default route via {gateway_ip} in container {container_id[:12]}")
+            return True
+        except Exception as e:
+            logger.warning(f"Failed to configure default route in container {container_id[:12]}: {e}")
+            return False
 
     def set_linux_user_password(
         self,

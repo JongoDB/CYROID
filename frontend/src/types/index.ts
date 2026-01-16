@@ -45,6 +45,7 @@ export interface Range {
   vm_count: number
   networks?: Network[]
   vms?: VM[]
+  router?: RangeRouter | null
 }
 
 export interface Network {
@@ -56,6 +57,19 @@ export interface Network {
   dns_servers: string | null
   docker_network_id: string | null
   is_isolated: boolean
+  internet_enabled: boolean
+  vyos_interface: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface RangeRouter {
+  id: string
+  range_id: string
+  container_id: string | null
+  management_ip: string | null
+  status: 'pending' | 'creating' | 'running' | 'stopped' | 'error'
+  error_message: string | null
   created_at: string
   updated_at: string
 }

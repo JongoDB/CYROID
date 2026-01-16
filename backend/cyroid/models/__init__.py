@@ -12,6 +12,7 @@ from cyroid.models.event_log import EventLog, EventType
 from cyroid.models.connection import Connection, ConnectionProtocol, ConnectionState
 from cyroid.models.msel import MSEL
 from cyroid.models.inject import Inject, InjectStatus
+from cyroid.models.router import RangeRouter, RouterStatus
 
 __all__ = [
     "Base",
@@ -27,4 +28,5 @@ __all__ = [
     "Connection", "ConnectionProtocol", "ConnectionState",
     "MSEL",
     "Inject", "InjectStatus",
+    "RangeRouter", "RouterStatus",
 ]

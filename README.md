@@ -186,6 +186,54 @@
 | | Traefik | 3.x | Reverse Proxy |
 | | Docker | 24+ | Container Runtime |
 
+### Network Segmentation Architecture
+
+CYROID uses VyOS router containers to provide per-range network isolation, NAT, and routing:
+
+```
+┌────────────────────────────────────────────────────────────────────────────┐
+│                           Docker Host                                       │
+│                                                                             │
+│  ┌───────────────────────────────────────────────────────────────────────┐ │
+│  │               Management Network (10.10.0.0/16)                        │ │
+│  │                      cyroid-management                                 │ │
+│  └─────────┬──────────────────┬──────────────────┬───────────────────────┘ │
+│            │                  │                  │                         │
+│       ┌────┴────┐        ┌────┴────┐        ┌────┴────┐                    │
+│       │ CYROID  │        │ Traefik │        │ VyOS-1  │                    │
+│       │   API   │        │         │        │ Router  │                    │
+│       └─────────┘        └─────────┘        └────┬────┘                    │
+│                                                  │                         │
+│        Range 1                                   │                         │
+│  ┌───────────────────────────────────────────────┘                         │
+│  │                                                                         │
+│  │  eth1 ──► Network A (10.0.1.0/24) ──┬── VM1 (10.0.1.10)                │
+│  │                                      └── VM2 (10.0.1.11)                │
+│  │                                                                         │
+│  │  eth2 ──► Network B (10.0.2.0/24) ──── VM3 (10.0.2.10)                 │
+│  └─────────────────────────────────────────────────────────────────────────┘
+└────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Key Features:**
+
+| Feature | Description |
+|---------|-------------|
+| **Per-Range VyOS Router** | Each range gets a dedicated VyOS container for routing/NAT |
+| **Management Network** | 10.10.0.0/16 for CYROID ↔ VyOS communication |
+| **Network Isolation** | Shield icon toggle - VyOS firewall blocks external access |
+| **Internet Access** | Globe icon toggle - VyOS NAT enables per-network internet |
+| **VNC Unaffected** | Traefik connects directly to range networks for console access |
+
+**Network Connectivity Matrix:**
+
+| is_isolated | internet_enabled | Result |
+|-------------|------------------|--------|
+| ✓ | ✗ | No external access, deny all outbound |
+| ✓ | ✓ | NAT to internet via VyOS, isolated from host |
+| ✗ | ✗ | Direct Docker bridge access |
+| ✗ | ✓ | Full internet + host access |
+
 ---
 
 ## Quick Start

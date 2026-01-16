@@ -9,6 +9,7 @@ from cyroid.models.range import Range, RangeStatus
 from cyroid.models.network import Network
 from cyroid.models.vm import VM, VMStatus
 from cyroid.models.template import VMTemplate
+from cyroid.models.router import RangeRouter, RouterStatus
 
 logger = logging.getLogger(__name__)
 
@@ -17,14 +18,16 @@ logger = logging.getLogger(__name__)
 def deploy_range_task(range_id: str):
     """
     Async task to deploy a range.
-    Creates Docker networks and starts all VMs.
+    Creates VyOS router, Docker networks, and starts all VMs.
     """
     logger.info(f"Starting async deployment for range {range_id}")
 
     db = get_session_local()()
     try:
         from cyroid.services.docker_service import get_docker_service
+        from cyroid.services.vyos_service import get_vyos_service
         docker = get_docker_service()
+        vyos = get_vyos_service()
 
         range_obj = db.query(Range).filter(Range.id == UUID(range_id)).first()
         if not range_obj:
@@ -35,15 +38,59 @@ def deploy_range_task(range_id: str):
         range_obj.status = RangeStatus.DEPLOYING
         db.commit()
 
+        # Step 0: Create VyOS router for this range
+        router = db.query(RangeRouter).filter(RangeRouter.range_id == UUID(range_id)).first()
+        if not router:
+            # Allocate management IP and create router record
+            management_ip = vyos.allocate_management_ip()
+            router = RangeRouter(
+                range_id=UUID(range_id),
+                management_ip=management_ip,
+                status=RouterStatus.CREATING
+            )
+            db.add(router)
+            db.commit()
+
+        try:
+            if not router.container_id:
+                # Create and start the VyOS router
+                container_id = vyos.create_router_container(range_id, router.management_ip)
+                router.container_id = container_id
+                db.commit()
+
+                vyos.start_router(container_id)
+
+                # Wait for router to be ready
+                if vyos.wait_for_router_ready(container_id, timeout=120):
+                    router.status = RouterStatus.RUNNING
+                else:
+                    router.status = RouterStatus.ERROR
+                    router.error_message = "Router failed to become ready"
+                db.commit()
+
+                # Connect traefik to management network for routing
+                docker.connect_traefik_to_management_network()
+
+            logger.info(f"VyOS router ready for range {range_id}")
+        except Exception as e:
+            logger.error(f"Failed to create VyOS router for range {range_id}: {e}")
+            router.status = RouterStatus.ERROR
+            router.error_message = str(e)[:500]
+            db.commit()
+            # Continue anyway - VMs can still work without VyOS features
+
         # Step 1: Provision all networks
         networks = db.query(Network).filter(Network.range_id == UUID(range_id)).all()
+        interface_num = 1  # eth0 is management, start from eth1
+
         for network in networks:
             if not network.docker_network_id:
+                # Networks are NOT internal when using VyOS - VyOS handles isolation
                 docker_network_id = docker.create_network(
                     name=f"cyroid-{network.name}-{str(network.id)[:8]}",
                     subnet=network.subnet,
                     gateway=network.gateway,
-                    internal=network.is_isolated,
+                    internal=False,  # VyOS handles isolation, not Docker
                     labels={
                         "cyroid.range_id": range_id,
                         "cyroid.network_id": str(network.id),
@@ -55,11 +102,47 @@ def deploy_range_task(range_id: str):
                 # Connect traefik to this network for VNC/web console routing
                 docker.connect_traefik_to_network(docker_network_id)
 
-                # If isolated, set up iptables rules to block access to host/infrastructure
-                if network.is_isolated:
-                    docker.setup_network_isolation(docker_network_id, network.subnet)
+                # Connect VyOS router to this network
+                if router and router.container_id and router.status == RouterStatus.RUNNING:
+                    interface_name = f"eth{interface_num}"
+                    network.vyos_interface = interface_name
 
-                logger.info(f"Provisioned network {network.name} (isolated={network.is_isolated})")
+                    # Router gets the gateway IP on this network
+                    vyos.connect_to_network(
+                        router.container_id,
+                        docker_network_id,
+                        network.gateway
+                    )
+
+                    # Configure the interface on VyOS
+                    subnet_bits = network.subnet.split('/')[1]
+                    vyos.configure_interface(
+                        router.container_id,
+                        interface_name,
+                        f"{network.gateway}/{subnet_bits}",
+                        description=network.name
+                    )
+
+                    # Configure NAT if internet is enabled
+                    if network.internet_enabled:
+                        rule_num = interface_num * 10
+                        vyos.configure_nat_outbound(
+                            router.container_id,
+                            rule_num,
+                            network.subnet
+                        )
+
+                    # Configure firewall for isolation
+                    if network.is_isolated and not network.internet_enabled:
+                        vyos.configure_firewall_isolated(
+                            router.container_id,
+                            interface_name
+                        )
+
+                    interface_num += 1
+                    db.commit()
+
+                logger.info(f"Provisioned network {network.name} (isolated={network.is_isolated}, internet={network.internet_enabled})")
 
         # Step 2: Create and start all VMs
         vms = db.query(VM).filter(VM.range_id == UUID(range_id)).all()
@@ -139,14 +222,16 @@ def deploy_range_task(range_id: str):
 def teardown_range_task(range_id: str):
     """
     Async task to teardown a range.
-    Stops and removes all VMs, then removes networks.
+    Stops and removes all VMs, VyOS router, then removes networks.
     """
     logger.info(f"Starting async teardown for range {range_id}")
 
     db = get_session_local()()
     try:
         from cyroid.services.docker_service import get_docker_service
+        from cyroid.services.vyos_service import get_vyos_service
         docker = get_docker_service()
+        vyos = get_vyos_service()
 
         # Step 1: Stop and remove all VM containers
         vms = db.query(VM).filter(VM.range_id == UUID(range_id)).all()
@@ -161,19 +246,30 @@ def teardown_range_task(range_id: str):
                 db.commit()
                 logger.info(f"Removed VM {vm.hostname}")
 
-        # Step 2: Remove all Docker networks
+        # Step 2: Remove VyOS router
+        router = db.query(RangeRouter).filter(RangeRouter.range_id == UUID(range_id)).first()
+        if router and router.container_id:
+            try:
+                vyos.remove_router(router.container_id)
+            except Exception as e:
+                logger.warning(f"Failed to remove VyOS router: {e}")
+            router.container_id = None
+            router.status = RouterStatus.PENDING
+            db.commit()
+            logger.info(f"Removed VyOS router for range {range_id}")
+
+        # Step 3: Remove all Docker networks
         networks = db.query(Network).filter(Network.range_id == UUID(range_id)).all()
         for network in networks:
             if network.docker_network_id:
                 try:
-                    # Remove iptables isolation rules
-                    docker.teardown_network_isolation(network.docker_network_id, network.subnet)
                     # Disconnect traefik before deleting network
                     docker.disconnect_traefik_from_network(network.docker_network_id)
                     docker.delete_network(network.docker_network_id)
                 except Exception as e:
                     logger.warning(f"Failed to delete network {network.id}: {e}")
                 network.docker_network_id = None
+                network.vyos_interface = None
                 db.commit()
                 logger.info(f"Removed network {network.name}")
 

@@ -5,7 +5,7 @@ import { rangesApi, networksApi, vmsApi, templatesApi, NetworkCreate, VMCreate }
 import type { Range, Network, VM, VMTemplate } from '../types'
 import {
   ArrowLeft, Plus, Loader2, X, Play, Square, RotateCw,
-  Network as NetworkIcon, Server, Trash2, Rocket, Activity, Monitor, Shield, Download, Pencil
+  Network as NetworkIcon, Server, Trash2, Rocket, Activity, Monitor, Shield, Download, Pencil, Globe, Router
 } from 'lucide-react'
 import clsx from 'clsx'
 import { VncConsole } from '../components/console/VncConsole'
@@ -201,6 +201,23 @@ export default function RangeDetail() {
       fetchData()
     } catch (err: any) {
       alert(err.response?.data?.detail || 'Failed to toggle isolation')
+    }
+  }
+
+  const handleToggleInternet = async (network: Network) => {
+    if (!network.docker_network_id) {
+      alert('Network must be provisioned first (deploy the range)')
+      return
+    }
+    if (!network.vyos_interface) {
+      alert('VyOS router not connected to this network. Redeploy the range.')
+      return
+    }
+    try {
+      await networksApi.toggleInternet(network.id)
+      fetchData()
+    } catch (err: any) {
+      alert(err.response?.data?.detail || 'Failed to toggle internet access')
     }
   }
 
@@ -426,6 +443,21 @@ export default function RangeDetail() {
               )}>
                 {range.status}
               </span>
+              {range.router && (
+                <span className={clsx(
+                  "ml-2 px-2.5 py-0.5 text-sm font-medium rounded-full flex items-center gap-1",
+                  range.router.status === 'running' ? 'bg-green-100 text-green-800' :
+                  range.router.status === 'error' ? 'bg-red-100 text-red-800' :
+                  'bg-gray-100 text-gray-800'
+                )}
+                title={range.router.error_message || `VyOS Router: ${range.router.status}`}
+                >
+                  <Router className="h-3 w-3" />
+                  {range.router.status === 'running' ? 'Router Up' :
+                   range.router.status === 'error' ? 'Router Error' :
+                   range.router.status}
+                </span>
+              )}
             </div>
             <p className="mt-1 text-sm text-gray-500">{range.description || 'No description'}</p>
           </div>
@@ -512,24 +544,46 @@ export default function RangeDetail() {
                   </div>
                   <div className="flex items-center space-x-2">
                     {network.docker_network_id && (
-                      <button
-                        onClick={() => handleToggleIsolation(network)}
-                        className={clsx(
-                          "p-1",
-                          network.is_isolated
-                            ? "text-blue-600 hover:text-blue-800"
-                            : "text-gray-400 hover:text-blue-600"
+                      <>
+                        <button
+                          onClick={() => handleToggleIsolation(network)}
+                          className={clsx(
+                            "p-1",
+                            network.is_isolated
+                              ? "text-blue-600 hover:text-blue-800"
+                              : "text-gray-400 hover:text-blue-600"
+                          )}
+                          title={network.is_isolated
+                            ? "Isolated - Click to allow external access"
+                            : "Open - Click to enable isolation"
+                          }
+                        >
+                          <Shield
+                            className="h-4 w-4"
+                            fill={network.is_isolated ? "currentColor" : "none"}
+                          />
+                        </button>
+                        {network.vyos_interface && (
+                          <button
+                            onClick={() => handleToggleInternet(network)}
+                            className={clsx(
+                              "p-1",
+                              network.internet_enabled
+                                ? "text-green-600 hover:text-green-800"
+                                : "text-gray-400 hover:text-green-600"
+                            )}
+                            title={network.internet_enabled
+                              ? "Internet enabled - Click to disable"
+                              : "No internet - Click to enable NAT"
+                            }
+                          >
+                            <Globe
+                              className="h-4 w-4"
+                              fill={network.internet_enabled ? "currentColor" : "none"}
+                            />
+                          </button>
                         )}
-                        title={network.is_isolated
-                          ? "Isolated - Click to allow external access"
-                          : "Open - Click to enable isolation"
-                        }
-                      >
-                        <Shield
-                          className="h-4 w-4"
-                          fill={network.is_isolated ? "currentColor" : "none"}
-                        />
-                      </button>
+                      </>
                     )}
                     <button
                       onClick={() => openEditNetworkModal(network)}

@@ -225,6 +225,88 @@ def toggle_network_isolation(network_id: UUID, db: DBSession, current_user: Curr
     return network
 
 
+@router.post("/{network_id}/toggle-internet", response_model=NetworkResponse)
+def toggle_network_internet(network_id: UUID, db: DBSession, current_user: CurrentUser):
+    """
+    Toggle internet access on/off for a provisioned network.
+
+    When enabled, VyOS router provides NAT masquerade for this network via eth0
+    (management interface). Traffic flows: VM → VyOS NAT → Docker bridge NAT → Internet.
+
+    This leverages Docker's native NAT on the management bridge for internet access,
+    eliminating the need for complex macvlan configurations.
+    """
+    from cyroid.models.router import RangeRouter, RouterStatus
+
+    network = db.query(Network).filter(Network.id == network_id).first()
+    if not network:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Network not found",
+        )
+
+    if not network.docker_network_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Network not provisioned. Deploy the range first.",
+        )
+
+    # Get the VyOS router for this range
+    router = db.query(RangeRouter).filter(RangeRouter.range_id == network.range_id).first()
+    if not router or not router.container_id or router.status != RouterStatus.RUNNING:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="VyOS router not available. Deploy the range first.",
+        )
+
+    if not network.vyos_interface:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Network not connected to VyOS router",
+        )
+
+    try:
+        from cyroid.services.vyos_service import get_vyos_service
+        vyos = get_vyos_service()
+
+        # Use eth0 (management interface) for outbound NAT
+        # Docker's NAT on the management bridge will forward traffic to the internet
+        outbound_interface = "eth0"
+
+        if network.internet_enabled:
+            # Disable internet access - remove NAT rule
+            vyos.remove_internet_nat(router.container_id, network.subnet, outbound_interface)
+            network.internet_enabled = False
+            logger.info(f"Disabled internet for network {network.name}")
+        else:
+            # Enable internet access - add NAT masquerade rule via eth0
+            if not vyos.configure_internet_nat(
+                router.container_id,
+                network.subnet,
+                outbound_interface
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Failed to configure NAT for internet access",
+                )
+            network.internet_enabled = True
+            logger.info(f"Enabled internet for network {network.name} via Docker bridge NAT")
+
+        db.commit()
+        db.refresh(network)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to toggle internet for network {network_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to toggle internet: {str(e)}",
+        )
+
+    return network
+
+
 @router.post("/{network_id}/teardown", response_model=NetworkResponse)
 def teardown_network(network_id: UUID, db: DBSession, current_user: CurrentUser):
     """Remove the Docker network for this network configuration."""

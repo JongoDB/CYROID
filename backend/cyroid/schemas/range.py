@@ -5,10 +5,25 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 
 from cyroid.models.range import RangeStatus
+from cyroid.models.router import RouterStatus
 
 if TYPE_CHECKING:
     from cyroid.schemas.network import NetworkResponse
     from cyroid.schemas.vm import VMResponse
+
+
+class RouterResponse(BaseModel):
+    """VyOS router status for a range."""
+    id: UUID
+    container_id: Optional[str] = None
+    management_ip: Optional[str] = None
+    status: RouterStatus
+    error_message: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
 
 
 class RangeBase(BaseModel):
@@ -54,9 +69,10 @@ class RangeResponse(RangeBase):
 
 
 class RangeDetailResponse(RangeResponse):
-    """Range with nested networks and VMs"""
+    """Range with nested networks, VMs, and router status"""
     networks: List["NetworkResponse"] = []
     vms: List["VMResponse"] = []
+    router: Optional[RouterResponse] = None
 
 
 # Import and rebuild for forward references
