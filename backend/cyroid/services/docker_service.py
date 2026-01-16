@@ -20,6 +20,8 @@ import logging
 import time
 import ipaddress
 
+from cyroid.utils.arch import IS_ARM, HOST_ARCH, requires_emulation
+
 logger = logging.getLogger(__name__)
 
 
@@ -741,12 +743,22 @@ class DockerService:
 
         # Check if KVM is available for hardware acceleration
         kvm_available = os.path.exists("/dev/kvm")
-        if kvm_available:
+
+        # Check if emulation is required (x86 VM on ARM host)
+        emulated = IS_ARM  # Windows VMs are always x86
+
+        if kvm_available and not emulated:
             environment["KVM"] = "Y"
             logger.info("KVM acceleration enabled for Windows VM")
         else:
-            logger.warning("KVM not available, Windows VM will run in software emulation mode (slower)")
             environment["KVM"] = "N"
+            if emulated:
+                logger.warning(
+                    f"Windows VM '{name}' will run via x86 emulation on ARM host. "
+                    "Expect significantly slower performance (10-20x)."
+                )
+            else:
+                logger.warning("KVM not available, Windows VM will run in software emulation mode")
 
         # Setup volume bindings
         binds = []
@@ -988,10 +1000,22 @@ class DockerService:
 
         # Check if KVM is available for hardware acceleration
         kvm_available = os.path.exists("/dev/kvm")
+
+        # Determine if this distro needs emulation
+        # ARM64-native distros: ubuntu, debian, fedora, alpine, rocky, alma, kali
+        arm64_native = linux_distro.lower() in ('ubuntu', 'debian', 'fedora', 'alpine', 'rocky', 'alma', 'kali')
+        emulated = IS_ARM and not arm64_native
+
         if kvm_available:
-            logger.info("KVM acceleration enabled for Linux VM")
+            if emulated:
+                logger.warning(
+                    f"Linux VM '{name}' ({linux_distro}) will run via x86 emulation on ARM host. "
+                    "Expect significantly slower performance (10-20x)."
+                )
+            else:
+                logger.info(f"KVM acceleration enabled for Linux VM (native {'ARM64' if IS_ARM else 'x86_64'})")
         else:
-            logger.warning("KVM not available, Linux VM will run in software emulation mode (slower)")
+            logger.warning("KVM not available, Linux VM will run in software emulation mode")
 
         # Setup volume bindings
         binds = []
