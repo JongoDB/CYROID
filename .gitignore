@@ -48,3 +48,8 @@ backend/venv_test/
 frontend/test-results/
 frontend/playwright-report/
 .playwright-mcp/
+.claude-playwright/
+test-results/
+
+# Certificates
+certs/
