@@ -5,7 +5,7 @@ import { rangesApi, networksApi, vmsApi, templatesApi, NetworkCreate, VMCreate }
 import type { Range, Network, VM, VMTemplate } from '../types'
 import {
   ArrowLeft, Plus, Loader2, X, Play, Square, RotateCw,
-  Network as NetworkIcon, Server, Trash2, Rocket, Activity, Monitor, Shield, Download
+  Network as NetworkIcon, Server, Trash2, Rocket, Activity, Monitor, Shield, Download, Pencil
 } from 'lucide-react'
 import clsx from 'clsx'
 import { VncConsole } from '../components/console/VncConsole'
@@ -38,7 +38,7 @@ export default function RangeDetail() {
     subnet: '',
     gateway: '',
     dns_servers: '',
-    isolation_level: 'controlled'
+    is_isolated: true
   })
 
   // VM modal state
@@ -86,6 +86,18 @@ export default function RangeDetail() {
 
   // Export dialog state
   const [showExportDialog, setShowExportDialog] = useState(false)
+
+  // Edit range modal state
+  const [showEditRangeModal, setShowEditRangeModal] = useState(false)
+  const [editRangeForm, setEditRangeForm] = useState({ name: '', description: '' })
+
+  // Edit network modal state
+  const [showEditNetworkModal, setShowEditNetworkModal] = useState(false)
+  const [editingNetwork, setEditingNetwork] = useState<Network | null>(null)
+  const [editNetworkForm, setEditNetworkForm] = useState({
+    name: '',
+    dns_servers: ''
+  })
 
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -157,10 +169,10 @@ export default function RangeDetail() {
         subnet: networkForm.subnet!,
         gateway: networkForm.gateway!,
         dns_servers: networkForm.dns_servers || undefined,
-        isolation_level: networkForm.isolation_level as 'complete' | 'controlled' | 'open'
+        is_isolated: networkForm.is_isolated
       })
       setShowNetworkModal(false)
-      setNetworkForm({ name: '', subnet: '', gateway: '', dns_servers: '', isolation_level: 'controlled' })
+      setNetworkForm({ name: '', subnet: '', gateway: '', dns_servers: '', is_isolated: true })
       fetchData()
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to create network')
@@ -179,16 +191,76 @@ export default function RangeDetail() {
     }
   }
 
-  const handleIsolateNetwork = async (network: Network) => {
+  const handleToggleIsolation = async (network: Network) => {
     if (!network.docker_network_id) {
       alert('Network must be provisioned first (deploy the range)')
       return
     }
     try {
-      await networksApi.isolate(network.id)
-      alert(`Applied isolation rules to "${network.name}". VMs can no longer access host/infrastructure.`)
+      await networksApi.toggleIsolation(network.id)
+      fetchData()
     } catch (err: any) {
-      alert(err.response?.data?.detail || 'Failed to apply isolation')
+      alert(err.response?.data?.detail || 'Failed to toggle isolation')
+    }
+  }
+
+  const openEditRangeModal = () => {
+    if (range) {
+      setEditRangeForm({
+        name: range.name,
+        description: range.description || ''
+      })
+      setShowEditRangeModal(true)
+    }
+  }
+
+  const handleUpdateRange = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!id) return
+    setSubmitting(true)
+    setError(null)
+
+    try {
+      await rangesApi.update(id, {
+        name: editRangeForm.name,
+        description: editRangeForm.description || undefined
+      })
+      setShowEditRangeModal(false)
+      fetchData()
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Failed to update range')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const openEditNetworkModal = (network: Network) => {
+    setEditingNetwork(network)
+    setEditNetworkForm({
+      name: network.name,
+      dns_servers: network.dns_servers || ''
+    })
+    setShowEditNetworkModal(true)
+  }
+
+  const handleUpdateNetwork = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!editingNetwork) return
+    setSubmitting(true)
+    setError(null)
+
+    try {
+      await networksApi.update(editingNetwork.id, {
+        name: editNetworkForm.name,
+        dns_servers: editNetworkForm.dns_servers || undefined
+      })
+      setShowEditNetworkModal(false)
+      setEditingNetwork(null)
+      fetchData()
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Failed to update network')
+    } finally {
+      setSubmitting(false)
     }
   }
 
@@ -341,8 +413,15 @@ export default function RangeDetail() {
           <div>
             <div className="flex items-center">
               <h1 className="text-2xl font-bold text-gray-900">{range.name}</h1>
+              <button
+                onClick={openEditRangeModal}
+                className="ml-2 p-1 text-gray-400 hover:text-primary-600"
+                title="Edit range"
+              >
+                <Pencil className="h-4 w-4" />
+              </button>
               <span className={clsx(
-                "ml-3 px-2.5 py-0.5 text-sm font-medium rounded-full",
+                "ml-2 px-2.5 py-0.5 text-sm font-medium rounded-full",
                 statusColors[range.status]
               )}>
                 {range.status}
@@ -432,23 +511,33 @@ export default function RangeDetail() {
                     </div>
                   </div>
                   <div className="flex items-center space-x-2">
-                    <span className={clsx(
-                      "px-2 py-0.5 text-xs font-medium rounded",
-                      network.isolation_level === 'complete' ? 'bg-red-100 text-red-700' :
-                      network.isolation_level === 'controlled' ? 'bg-yellow-100 text-yellow-700' :
-                      'bg-green-100 text-green-700'
-                    )}>
-                      {network.isolation_level}
-                    </span>
                     {network.docker_network_id && (
                       <button
-                        onClick={() => handleIsolateNetwork(network)}
-                        className="p-1 text-gray-400 hover:text-blue-600"
-                        title="Apply firewall isolation (blocks VM access to host/infrastructure)"
+                        onClick={() => handleToggleIsolation(network)}
+                        className={clsx(
+                          "p-1",
+                          network.is_isolated
+                            ? "text-blue-600 hover:text-blue-800"
+                            : "text-gray-400 hover:text-blue-600"
+                        )}
+                        title={network.is_isolated
+                          ? "Isolated - Click to allow external access"
+                          : "Open - Click to enable isolation"
+                        }
                       >
-                        <Shield className="h-4 w-4" />
+                        <Shield
+                          className="h-4 w-4"
+                          fill={network.is_isolated ? "currentColor" : "none"}
+                        />
                       </button>
                     )}
+                    <button
+                      onClick={() => openEditNetworkModal(network)}
+                      className="p-1 text-gray-400 hover:text-primary-600"
+                      title="Edit network"
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </button>
                     <button
                       onClick={() => handleDeleteNetwork(network)}
                       className="p-1 text-gray-400 hover:text-red-600"
@@ -621,17 +710,18 @@ export default function RangeDetail() {
                     placeholder="8.8.8.8,8.8.4.4"
                   />
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700">Isolation Level</label>
-                  <select
-                    value={networkForm.isolation_level}
-                    onChange={(e) => setNetworkForm({ ...networkForm, isolation_level: e.target.value as 'complete' | 'controlled' | 'open' })}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
-                  >
-                    <option value="complete">Complete (No external access)</option>
-                    <option value="controlled">Controlled (Limited access)</option>
-                    <option value="open">Open (Full access)</option>
-                  </select>
+                <div className="flex items-center">
+                  <input
+                    type="checkbox"
+                    id="is_isolated"
+                    checked={networkForm.is_isolated}
+                    onChange={(e) => setNetworkForm({ ...networkForm, is_isolated: e.target.checked })}
+                    className="h-4 w-4 text-primary-600 border-gray-300 rounded focus:ring-primary-500"
+                  />
+                  <label htmlFor="is_isolated" className="ml-2 block text-sm text-gray-700">
+                    <span className="font-medium">Network Isolation</span>
+                    <p className="text-xs text-gray-500">Block access to host and external networks</p>
+                  </label>
                 </div>
                 <div className="flex justify-end space-x-3 pt-4">
                   <button type="button" onClick={() => setShowNetworkModal(false)} className="px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50">Cancel</button>
@@ -1291,6 +1381,148 @@ export default function RangeDetail() {
           rangeId={range.id}
           rangeName={range.name}
         />
+      )}
+
+      {/* Edit Range Modal */}
+      {showEditRangeModal && (
+        <div className="fixed inset-0 z-50 overflow-y-auto">
+          <div className="flex items-center justify-center min-h-screen px-4">
+            <div className="fixed inset-0 bg-gray-500 bg-opacity-75" onClick={() => setShowEditRangeModal(false)} />
+            <div className="relative bg-white rounded-lg shadow-xl max-w-md w-full">
+              <div className="flex items-center justify-between p-4 border-b">
+                <h3 className="text-lg font-medium text-gray-900">Edit Range</h3>
+                <button onClick={() => setShowEditRangeModal(false)} className="text-gray-400 hover:text-gray-500">
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              <form onSubmit={handleUpdateRange} className="p-4 space-y-4">
+                {error && (
+                  <div className="p-3 bg-red-50 text-red-700 rounded-md text-sm">{error}</div>
+                )}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Name</label>
+                  <input
+                    type="text"
+                    required
+                    value={editRangeForm.name}
+                    onChange={(e) => setEditRangeForm({ ...editRangeForm, name: e.target.value })}
+                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Description</label>
+                  <textarea
+                    rows={3}
+                    value={editRangeForm.description}
+                    onChange={(e) => setEditRangeForm({ ...editRangeForm, description: e.target.value })}
+                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                  />
+                </div>
+                <div className="flex justify-end space-x-3 pt-4">
+                  <button
+                    type="button"
+                    onClick={() => setShowEditRangeModal(false)}
+                    className="px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={submitting}
+                    className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 disabled:opacity-50"
+                  >
+                    {submitting && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                    Save
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Network Modal */}
+      {showEditNetworkModal && editingNetwork && (
+        <div className="fixed inset-0 z-50 overflow-y-auto">
+          <div className="flex items-center justify-center min-h-screen px-4">
+            <div className="fixed inset-0 bg-gray-500 bg-opacity-75" onClick={() => setShowEditNetworkModal(false)} />
+            <div className="relative bg-white rounded-lg shadow-xl max-w-md w-full">
+              <div className="flex items-center justify-between p-4 border-b">
+                <h3 className="text-lg font-medium text-gray-900">Edit Network</h3>
+                <button onClick={() => setShowEditNetworkModal(false)} className="text-gray-400 hover:text-gray-500">
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              <form onSubmit={handleUpdateNetwork} className="p-4 space-y-4">
+                {error && (
+                  <div className="p-3 bg-red-50 text-red-700 rounded-md text-sm">{error}</div>
+                )}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Name</label>
+                  <input
+                    type="text"
+                    required
+                    value={editNetworkForm.name}
+                    onChange={(e) => setEditNetworkForm({ ...editNetworkForm, name: e.target.value })}
+                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Subnet</label>
+                  <input
+                    type="text"
+                    value={editingNetwork.subnet}
+                    disabled
+                    className="mt-1 block w-full rounded-md border-gray-300 bg-gray-100 shadow-sm sm:text-sm cursor-not-allowed"
+                  />
+                  <p className="mt-1 text-xs text-gray-500">Subnet cannot be changed after creation</p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Gateway</label>
+                  <input
+                    type="text"
+                    value={editingNetwork.gateway}
+                    disabled
+                    className="mt-1 block w-full rounded-md border-gray-300 bg-gray-100 shadow-sm sm:text-sm cursor-not-allowed"
+                  />
+                  <p className="mt-1 text-xs text-gray-500">Gateway cannot be changed after creation</p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">DNS Servers</label>
+                  <input
+                    type="text"
+                    value={editNetworkForm.dns_servers}
+                    onChange={(e) => setEditNetworkForm({ ...editNetworkForm, dns_servers: e.target.value })}
+                    placeholder="e.g., 8.8.8.8,8.8.4.4"
+                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                  />
+                </div>
+                <div className="p-3 bg-gray-50 rounded-md">
+                  <p className="text-sm text-gray-600">
+                    <span className="font-medium">Isolation:</span> Use the shield icon on the network card to toggle isolation on/off for provisioned networks.
+                  </p>
+                </div>
+                <div className="flex justify-end space-x-3 pt-4">
+                  <button
+                    type="button"
+                    onClick={() => setShowEditNetworkModal(false)}
+                    className="px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={submitting}
+                    className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 disabled:opacity-50"
+                  >
+                    {submitting && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                    Save
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

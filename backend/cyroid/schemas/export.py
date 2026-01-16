@@ -59,7 +59,7 @@ class NetworkExportData(BaseModel):
     subnet: str  # CIDR notation
     gateway: str
     dns_servers: Optional[str] = None  # Comma-separated
-    isolation_level: str = "complete"  # complete, controlled, open
+    is_isolated: bool = True  # Network isolation enabled
 
 
 # =============================================================================

@@ -72,7 +72,7 @@ class NetworkTemplateData(BaseModel):
     name: str
     subnet: str
     gateway: Optional[str] = None
-    isolation_level: str = "complete"
+    is_isolated: bool = True
 
 
 class VMTemplateData(BaseModel):

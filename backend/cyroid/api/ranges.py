@@ -11,7 +11,7 @@ from cyroid.config import get_settings
 
 from cyroid.api.deps import DBSession, CurrentUser, filter_by_visibility, check_resource_access
 from cyroid.models.range import Range, RangeStatus
-from cyroid.models.network import Network, IsolationLevel
+from cyroid.models.network import Network
 from cyroid.models.vm import VM, VMStatus
 from cyroid.models.template import VMTemplate, OSType
 from cyroid.models.resource_tag import ResourceTag
@@ -160,18 +160,23 @@ def deploy_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
         networks = db.query(Network).filter(Network.range_id == range_id).all()
         for network in networks:
             if not network.docker_network_id:
-                internal = network.isolation_level in [IsolationLevel.COMPLETE, IsolationLevel.CONTROLLED]
                 docker_network_id = docker.create_network(
                     name=f"cyroid-{network.name}-{str(network.id)[:8]}",
                     subnet=network.subnet,
                     gateway=network.gateway,
-                    internal=internal,
+                    internal=network.is_isolated,
                     labels={
                         "cyroid.range_id": str(range_id),
                         "cyroid.network_id": str(network.id),
                     }
                 )
                 network.docker_network_id = docker_network_id
+
+                # Apply iptables isolation if network is isolated
+                if network.is_isolated:
+                    docker.connect_traefik_to_network(docker_network_id)
+                    docker.setup_network_isolation(docker_network_id, network.subnet)
+
                 db.commit()
 
         # Step 2: Create and start all VMs
@@ -530,7 +535,7 @@ def export_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
             name=n.name,
             subnet=n.subnet,
             gateway=n.gateway,
-            isolation_level=n.isolation_level.value,
+            is_isolated=n.is_isolated,
         )
         for n in networks
     ]
@@ -594,7 +599,7 @@ def import_range(
             name=net_data.name,
             subnet=net_data.subnet,
             gateway=net_data.gateway,
-            isolation_level=IsolationLevel(net_data.isolation_level),
+            is_isolated=net_data.is_isolated,
         )
         db.add(network)
         db.commit()
@@ -668,7 +673,7 @@ def clone_range(
             name=network.name,
             subnet=network.subnet,
             gateway=network.gateway,
-            isolation_level=network.isolation_level,
+            is_isolated=network.is_isolated,
         )
         db.add(cloned_network)
         db.commit()

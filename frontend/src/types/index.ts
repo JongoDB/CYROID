@@ -54,8 +54,8 @@ export interface Network {
   subnet: string
   gateway: string
   dns_servers: string | null
-  isolation_level: 'complete' | 'controlled' | 'open'
   docker_network_id: string | null
+  is_isolated: boolean
   created_at: string
   updated_at: string
 }

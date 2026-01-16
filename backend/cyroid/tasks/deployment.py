@@ -6,7 +6,7 @@ from uuid import UUID
 
 from cyroid.database import get_session_local
 from cyroid.models.range import Range, RangeStatus
-from cyroid.models.network import Network, IsolationLevel
+from cyroid.models.network import Network
 from cyroid.models.vm import VM, VMStatus
 from cyroid.models.template import VMTemplate
 
@@ -39,12 +39,11 @@ def deploy_range_task(range_id: str):
         networks = db.query(Network).filter(Network.range_id == UUID(range_id)).all()
         for network in networks:
             if not network.docker_network_id:
-                internal = network.isolation_level in [IsolationLevel.COMPLETE, IsolationLevel.CONTROLLED]
                 docker_network_id = docker.create_network(
                     name=f"cyroid-{network.name}-{str(network.id)[:8]}",
                     subnet=network.subnet,
                     gateway=network.gateway,
-                    internal=internal,
+                    internal=network.is_isolated,
                     labels={
                         "cyroid.range_id": range_id,
                         "cyroid.network_id": str(network.id),
@@ -56,10 +55,11 @@ def deploy_range_task(range_id: str):
                 # Connect traefik to this network for VNC/web console routing
                 docker.connect_traefik_to_network(docker_network_id)
 
-                # Set up iptables rules to isolate this network from host/infrastructure
-                docker.setup_network_isolation(docker_network_id, network.subnet)
+                # If isolated, set up iptables rules to block access to host/infrastructure
+                if network.is_isolated:
+                    docker.setup_network_isolation(docker_network_id, network.subnet)
 
-                logger.info(f"Provisioned and isolated network {network.name}")
+                logger.info(f"Provisioned network {network.name} (isolated={network.is_isolated})")
 
         # Step 2: Create and start all VMs
         vms = db.query(VM).filter(VM.range_id == UUID(range_id)).all()

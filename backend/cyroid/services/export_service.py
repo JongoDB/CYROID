@@ -110,7 +110,7 @@ class ExportService:
             subnet=network.subnet,
             gateway=network.gateway,
             dns_servers=network.dns_servers,
-            isolation_level=network.isolation_level.value,
+            is_isolated=network.is_isolated,
         )
 
     def _collect_vm_data(
@@ -773,7 +773,7 @@ class ExportService:
                     subnet=net_data.subnet,
                     gateway=net_data.gateway,
                     dns_servers=net_data.dns_servers,
-                    isolation_level=net_data.isolation_level,
+                    is_isolated=net_data.is_isolated,
                 )
                 db.add(network)
                 db.flush()

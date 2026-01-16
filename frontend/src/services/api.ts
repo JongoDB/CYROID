@@ -264,18 +264,24 @@ export interface NetworkCreate {
   subnet: string
   gateway: string
   dns_servers?: string
-  isolation_level?: 'complete' | 'controlled' | 'open'
+  is_isolated?: boolean
+}
+
+export interface NetworkUpdate {
+  name?: string
+  dns_servers?: string
+  is_isolated?: boolean
 }
 
 export const networksApi = {
   list: (rangeId: string) => api.get<Network[]>(`/networks?range_id=${rangeId}`),
   get: (id: string) => api.get<Network>(`/networks/${id}`),
   create: (data: NetworkCreate) => api.post<Network>('/networks', data),
-  update: (id: string, data: Partial<NetworkCreate>) => api.put<Network>(`/networks/${id}`, data),
+  update: (id: string, data: NetworkUpdate) => api.put<Network>(`/networks/${id}`, data),
   delete: (id: string) => api.delete(`/networks/${id}`),
   provision: (id: string) => api.post<Network>(`/networks/${id}/provision`),
   teardown: (id: string) => api.post<Network>(`/networks/${id}/teardown`),
-  isolate: (id: string) => api.post<Network>(`/networks/${id}/isolate`),
+  toggleIsolation: (id: string) => api.post<Network>(`/networks/${id}/toggle-isolation`),
 }
 
 // VMs API
