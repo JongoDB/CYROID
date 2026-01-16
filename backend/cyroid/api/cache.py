@@ -1019,6 +1019,49 @@ QEMU_LINUX_VERSIONS = [
 ]
 
 
+# ARM64 ISO URLs for supported distributions
+# These are used when running on ARM64 hosts (Apple Silicon, etc.)
+QEMU_LINUX_ARM64_ISOS = {
+    "ubuntu": "https://releases.ubuntu.com/24.04/ubuntu-24.04.1-live-server-arm64.iso",
+    "ubuntus": "https://releases.ubuntu.com/24.04/ubuntu-24.04.1-live-server-arm64.iso",
+    "debian": "https://cdimage.debian.org/debian-cd/current/arm64/iso-cd/debian-12.9.0-arm64-netinst.iso",
+    "fedora": "https://download.fedoraproject.org/pub/fedora/linux/releases/41/Server/aarch64/iso/Fedora-Server-dvd-aarch64-41-1.4.iso",
+    "alpine": "https://dl-cdn.alpinelinux.org/alpine/v3.21/releases/aarch64/alpine-virt-3.21.2-aarch64.iso",
+    "rocky": "https://download.rockylinux.org/pub/rocky/9/isos/aarch64/Rocky-9.5-aarch64-minimal.iso",
+    "alma": "https://repo.almalinux.org/almalinux/9/isos/aarch64/AlmaLinux-9-latest-aarch64-minimal.iso",
+    "kali": "https://cdimage.kali.org/kali-2024.4/kali-linux-2024.4-installer-arm64.iso",
+}
+
+# Distributions with native ARM64 support
+ARM64_NATIVE_DISTROS = {"ubuntu", "ubuntus", "debian", "fedora", "alpine", "rocky", "alma", "kali"}
+
+
+def get_arm64_iso_url(distro_version: str) -> str | None:
+    """
+    Get the ARM64 ISO URL for a distribution if available.
+
+    Args:
+        distro_version: The version code (e.g., "ubuntu", "debian", "fedora")
+
+    Returns:
+        The ARM64 ISO URL if available, None otherwise
+    """
+    return QEMU_LINUX_ARM64_ISOS.get(distro_version)
+
+
+def has_arm64_support(distro_version: str) -> bool:
+    """
+    Check if a distribution has native ARM64 support.
+
+    Args:
+        distro_version: The version code (e.g., "ubuntu", "debian", "fedora")
+
+    Returns:
+        True if the distribution has ARM64 support, False otherwise
+    """
+    return distro_version in ARM64_NATIVE_DISTROS
+
+
 def get_linux_iso_dir() -> str:
     """Get the Linux ISO cache directory path."""
     settings = get_settings()
