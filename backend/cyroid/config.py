@@ -1,9 +1,15 @@
 # backend/cyroid/config.py
+import os
 from pydantic_settings import BaseSettings
 from functools import lru_cache
 
 
 class Settings(BaseSettings):
+    # Application version
+    app_version: str = "0.4.1"
+    git_commit: str = os.environ.get("GIT_COMMIT", "dev")
+    build_date: str = os.environ.get("BUILD_DATE", "")
+
     # Database
     database_url: str = "postgresql://cyroid:cyroid@db:5432/cyroid"
 

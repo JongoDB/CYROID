@@ -9,6 +9,7 @@ import Templates from './pages/Templates'
 import Ranges from './pages/Ranges'
 import RangeDetail from './pages/RangeDetail'
 import ExecutionConsole from './pages/ExecutionConsole'
+import StandaloneConsole from './pages/StandaloneConsole'
 import ImageCache from './pages/ImageCache'
 import UserManagement from './pages/UserManagement'
 import ProtectedRoute from './components/common/ProtectedRoute'
@@ -27,6 +28,15 @@ function App() {
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
+      {/* Standalone console - protected but no layout (for pop-out windows) */}
+      <Route
+        path="/console/:vmId"
+        element={
+          <ProtectedRoute>
+            <StandaloneConsole />
+          </ProtectedRoute>
+        }
+      />
       <Route
         path="/*"
         element={

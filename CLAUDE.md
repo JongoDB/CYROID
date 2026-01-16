@@ -9,7 +9,7 @@
 - **Name**: CYROID (Cyber Range Orchestrator In Docker)
 - **Type**: Web-based cyber range orchestration platform
 - **Domain**: Military/government cyber training, educational institutions
-- **Current Version**: 0.4.0-alpha
+- **Current Version**: 0.4.1-alpha
 - **Repository**: /home/ubuntu/Desktop/CYROID
 
 ---
@@ -117,6 +117,8 @@ Current overall progress: **Phase 4 of 7 Complete (57%)**
 | MSEL Parser | ✅ | Markdown/YAML support |
 | Manual Inject Execution | ✅ | Trigger from console |
 | Connection Tracking | ✅ | Monitor student activity |
+| Version Display | ✅ | API endpoint + UI footer |
+| Console Pop-out | ✅ | Default new window, Shift+click for inline |
 | Evidence Submission | 🟡 | In development |
 | Evidence Validation | 🟡 | In development |
 | Scoring Engine | 🟡 | In development |
@@ -233,6 +235,7 @@ At bottom of README, update:
 | 0.2.0 | 2026-01-XX | 2 | Multi-network, visual builder, deployment |
 | 0.3.0 | 2026-01-XX | 3 | Range templates, artifacts, snapshots |
 | 0.4.0 | 2026-01-15 | 4 | Execution console, MSEL, monitoring |
+| 0.4.1 | 2026-01-16 | 4 | Version display, console pop-out default |
 | 0.5.0 | TBD | 5 | Evidence submission, scoring |
 | 0.6.0 | TBD | 6 | Automation, CAC auth, offline mode |
 | 1.0.0 | TBD | 7 | Production release |
@@ -299,5 +302,5 @@ Phase 5: Evidence & Scoring system
 
 ---
 
-*Last Updated: 2026-01-15*
+*Last Updated: 2026-01-16*
 *Update this file whenever significant progress is made or context changes*

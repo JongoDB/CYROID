@@ -102,7 +102,14 @@
       "Bash(python:*)",
       "Bash(git remote add:*)",
       "Bash(git remote set-url:*)",
-      "Bash(git reset:*)"
+      "Bash(git reset:*)",
+      "Bash(gh issue list:*)",
+      "Bash(brew install:*)",
+      "Bash(gh auth:*)",
+      "Bash(find:*)",
+      "Skill(superpowers:subagent-driven-development)",
+      "Bash(npx tsc:*)",
+      "Bash(npx:*)"
     ]
   },
   "enableAllProjectMcpServers": true,

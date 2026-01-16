@@ -1,7 +1,8 @@
 // frontend/src/components/layout/Layout.tsx
-import { ReactNode, useState } from 'react'
+import { ReactNode, useState, useEffect } from 'react'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from '../../stores/authStore'
+import { versionApi, VersionInfo } from '../../services/api'
 import {
   LayoutDashboard,
   Server,
@@ -44,6 +45,13 @@ export default function Layout({ children }: LayoutProps) {
   const location = useLocation()
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [showPasswordModal, setShowPasswordModal] = useState(false)
+  const [versionInfo, setVersionInfo] = useState<VersionInfo | null>(null)
+
+  useEffect(() => {
+    versionApi.get()
+      .then(res => setVersionInfo(res.data))
+      .catch(() => {}) // Silently fail if version endpoint unavailable
+  }, [])
 
   // Filter navigation based on user roles (ABAC: check roles array)
   const isAdmin = user?.roles?.includes('admin') ?? false
@@ -155,6 +163,14 @@ export default function Layout({ children }: LayoutProps) {
               <LogOut className="mr-3 h-5 w-5" />
               Sign out
             </button>
+            {versionInfo && (
+              <div className="mt-4 pt-4 border-t border-gray-700 px-3 text-xs text-gray-500">
+                <span>v{versionInfo.version}</span>
+                {versionInfo.commit !== 'dev' && (
+                  <span className="ml-1">({versionInfo.commit.substring(0, 7)})</span>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </div>

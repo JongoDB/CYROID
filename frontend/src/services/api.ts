@@ -31,6 +31,19 @@ api.interceptors.response.use(
   }
 )
 
+// Version API
+export interface VersionInfo {
+  version: string
+  commit: string
+  build_date: string
+  api_version: string
+  app_name: string
+}
+
+export const versionApi = {
+  get: () => api.get<VersionInfo>('/version'),
+}
+
 // Auth API
 export interface LoginRequest {
   username: string
