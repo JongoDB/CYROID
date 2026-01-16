@@ -2,7 +2,7 @@
 from datetime import datetime
 from typing import Optional
 from uuid import UUID
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
 from cyroid.models.vm import VMStatus
 
@@ -123,6 +123,10 @@ class VMResponse(VMBase):
     linux_user_sudo: bool = True
     created_at: datetime
     updated_at: datetime
+
+    # Multi-architecture support - computed by API
+    emulated: bool = False
+    emulation_warning: Optional[str] = None
 
     class Config:
         from_attributes = True

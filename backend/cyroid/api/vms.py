@@ -1,5 +1,5 @@
 # backend/cyroid/api/vms.py
-from typing import List
+from typing import List, Optional, Tuple
 from uuid import UUID
 import logging
 
@@ -9,16 +9,118 @@ from cyroid.api.deps import DBSession, CurrentUser
 from cyroid.models.vm import VM, VMStatus
 from cyroid.models.range import Range, RangeStatus
 from cyroid.models.network import Network
-from cyroid.models.template import VMTemplate, OSType
+from cyroid.models.template import VMTemplate, OSType, VMType
 from cyroid.models.event_log import EventType
 from cyroid.schemas.vm import VMCreate, VMUpdate, VMResponse
 from cyroid.services.event_service import EventService
 from cyroid.config import get_settings
+from cyroid.utils.arch import IS_ARM
 import os
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/vms", tags=["VMs"])
+
+# Linux distros that have native ARM64 support
+ARM64_NATIVE_DISTROS = {'ubuntu', 'debian', 'fedora', 'alpine', 'rocky', 'alma', 'kali'}
+
+
+def compute_emulation_status(vm: VM, template: Optional[VMTemplate] = None) -> Tuple[bool, Optional[str]]:
+    """
+    Determine if a VM will run via emulation on this host.
+
+    Args:
+        vm: The VM model instance
+        template: The VM's template (optional, will be loaded if not provided)
+
+    Returns:
+        Tuple of (is_emulated, warning_message)
+    """
+    if not IS_ARM:
+        # x86 hosts run everything natively
+        return False, None
+
+    # On ARM hosts, check VM type
+    vm_type = template.vm_type if template else None
+
+    # Windows VMs are always x86
+    if vm_type == VMType.WINDOWS_VM or (template and template.os_type == OSType.WINDOWS):
+        return True, "Windows VMs run via x86 emulation on ARM hosts. Performance may be reduced."
+
+    # Linux VMs - check if distro has ARM64 support
+    if vm_type == VMType.LINUX_VM:
+        linux_distro = vm.linux_distro or (template.linux_distro if template else None)
+        if linux_distro and linux_distro.lower() in ARM64_NATIVE_DISTROS:
+            return False, None
+        # Unknown or unsupported distro on ARM
+        return True, f"This Linux VM may run via x86 emulation. Performance may be reduced."
+
+    # Custom ISOs - check template native_arch
+    if template and template.os_type == OSType.CUSTOM:
+        native_arch = template.native_arch if hasattr(template, 'native_arch') else 'x86_64'
+        if native_arch == 'arm64' or native_arch == 'both':
+            return False, None
+        return True, "Custom ISO runs via x86 emulation on ARM hosts. Performance may be reduced."
+
+    # Containers - check base image
+    if template and template.base_image:
+        # Most container images are multi-arch, assume native
+        return False, None
+
+    # Default: assume native for containers
+    return False, None
+
+
+def vm_to_response(vm: VM, template: Optional[VMTemplate] = None) -> dict:
+    """
+    Convert VM model to response dict with emulation status.
+
+    Args:
+        vm: The VM model instance
+        template: The VM's template (optional)
+
+    Returns:
+        Dictionary for VMResponse
+    """
+    emulated, warning = compute_emulation_status(vm, template)
+    response = {
+        "id": vm.id,
+        "range_id": vm.range_id,
+        "network_id": vm.network_id,
+        "template_id": vm.template_id,
+        "hostname": vm.hostname,
+        "ip_address": vm.ip_address,
+        "cpu": vm.cpu,
+        "ram_mb": vm.ram_mb,
+        "disk_gb": vm.disk_gb,
+        "position_x": vm.position_x,
+        "position_y": vm.position_y,
+        "status": vm.status,
+        "container_id": vm.container_id,
+        "windows_version": vm.windows_version,
+        "windows_username": vm.windows_username,
+        "iso_url": vm.iso_url,
+        "iso_path": vm.iso_path,
+        "display_type": vm.display_type or "desktop",
+        "use_dhcp": vm.use_dhcp,
+        "gateway": vm.gateway,
+        "dns_servers": vm.dns_servers,
+        "disk2_gb": vm.disk2_gb,
+        "disk3_gb": vm.disk3_gb,
+        "enable_shared_folder": vm.enable_shared_folder,
+        "enable_global_shared": vm.enable_global_shared,
+        "language": vm.language,
+        "keyboard": vm.keyboard,
+        "region": vm.region,
+        "manual_install": vm.manual_install,
+        "linux_username": vm.linux_username,
+        "linux_user_sudo": vm.linux_user_sudo,
+        "created_at": vm.created_at,
+        "updated_at": vm.updated_at,
+        "emulated": emulated,
+        "emulation_warning": warning,
+    }
+    return response
 
 
 def get_docker_service():
@@ -39,7 +141,13 @@ def list_vms(range_id: UUID, db: DBSession, current_user: CurrentUser):
         )
 
     vms = db.query(VM).filter(VM.range_id == range_id).all()
-    return vms
+
+    # Build responses with emulation status
+    responses = []
+    for vm in vms:
+        template = db.query(VMTemplate).filter(VMTemplate.id == vm.template_id).first()
+        responses.append(vm_to_response(vm, template))
+    return responses
 
 
 @router.post("", response_model=VMResponse, status_code=status.HTTP_201_CREATED)
@@ -99,7 +207,7 @@ def create_vm(vm_data: VMCreate, db: DBSession, current_user: CurrentUser):
     db.add(vm)
     db.commit()
     db.refresh(vm)
-    return vm
+    return vm_to_response(vm, template)
 
 
 @router.get("/{vm_id}", response_model=VMResponse)
@@ -110,7 +218,8 @@ def get_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
             status_code=status.HTTP_404_NOT_FOUND,
             detail="VM not found",
         )
-    return vm
+    template = db.query(VMTemplate).filter(VMTemplate.id == vm.template_id).first()
+    return vm_to_response(vm, template)
 
 
 @router.put("/{vm_id}", response_model=VMResponse)
@@ -133,7 +242,8 @@ def update_vm(
 
     db.commit()
     db.refresh(vm)
-    return vm
+    template = db.query(VMTemplate).filter(VMTemplate.id == vm.template_id).first()
+    return vm_to_response(vm, template)
 
 
 @router.delete("/{vm_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -475,7 +585,7 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
             detail=f"Failed to start VM: {str(e)}",
         )
 
-    return vm
+    return vm_to_response(vm, template)
 
 
 @router.post("/{vm_id}/stop", response_model=VMResponse)
@@ -529,7 +639,8 @@ def stop_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
             detail=f"Failed to stop VM: {str(e)}",
         )
 
-    return vm
+    template = db.query(VMTemplate).filter(VMTemplate.id == vm.template_id).first()
+    return vm_to_response(vm, template)
 
 
 @router.get("/{vm_id}/stats")
@@ -920,4 +1031,5 @@ def restart_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
             detail=f"Failed to restart VM: {str(e)}",
         )
 
-    return vm
+    template = db.query(VMTemplate).filter(VMTemplate.id == vm.template_id).first()
+    return vm_to_response(vm, template)
