@@ -6,6 +6,7 @@ import {
   Play, Square, RotateCcw, Terminal, Server, Cpu, HardDrive, ExternalLink
 } from 'lucide-react'
 import clsx from 'clsx'
+import { EmulationWarning } from '../common/EmulationWarning'
 
 interface Props {
   vms: VM[]
@@ -101,6 +102,9 @@ export function VMGrid({ vms, onRefresh, onOpenConsole }: Props) {
               <div className="flex items-center gap-2 min-w-0">
                 <Server className="w-5 h-5 text-orange-500 shrink-0" />
                 <span className="font-medium truncate">{vm.hostname}</span>
+                {vm.emulated && (
+                  <EmulationWarning compact className="shrink-0" />
+                )}
               </div>
               <span className={clsx('w-3 h-3 rounded-full shrink-0', statusColors[vm.status])} />
             </div>

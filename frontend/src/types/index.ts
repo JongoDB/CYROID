@@ -111,6 +111,9 @@ export interface VM {
   position_y: number
   created_at: string
   updated_at: string
+  // Emulation fields (for cross-architecture support)
+  emulated?: boolean
+  emulation_warning?: string | null
 }
 
 export interface Artifact {
