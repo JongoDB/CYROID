@@ -16,13 +16,14 @@ from cyroid.api.events import router as events_router
 from cyroid.api.connections import router as connections_router
 from cyroid.api.msel import router as msel_router
 from cyroid.api.cache import router as cache_router
+from cyroid.api.system import router as system_router
 
 settings = get_settings()
 
 app = FastAPI(
     title=settings.app_name,
     description="Cyber Range Orchestrator In Docker",
-    version="0.1.0",
+    version=settings.app_version,
 )
 
 app.add_middleware(
@@ -47,8 +48,21 @@ app.include_router(events_router, prefix="/api/v1")
 app.include_router(connections_router, prefix="/api/v1")
 app.include_router(msel_router, prefix="/api/v1")
 app.include_router(cache_router, prefix="/api/v1")
+app.include_router(system_router, prefix="/api/v1")
 
 
 @app.get("/health")
 async def health_check():
     return {"status": "healthy", "app": settings.app_name}
+
+
+@app.get("/api/v1/version")
+async def get_version():
+    """Return application version information."""
+    return {
+        "version": settings.app_version,
+        "commit": settings.git_commit,
+        "build_date": settings.build_date,
+        "api_version": "v1",
+        "app_name": settings.app_name,
+    }
