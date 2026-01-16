@@ -22,6 +22,10 @@ class VMTemplateBase(BaseModel):
     golden_image_path: Optional[str] = Field(None, max_length=500)
     cached_iso_path: Optional[str] = Field(None, max_length=500)
     is_cached: bool = Field(default=False)
+    # Multi-architecture support
+    iso_url_x86: Optional[str] = Field(None, max_length=500)
+    iso_url_arm64: Optional[str] = Field(None, max_length=500)
+    native_arch: str = Field(default="x86_64", max_length=20)
 
 
 class VMTemplateCreate(VMTemplateBase):
@@ -42,6 +46,10 @@ class VMTemplateUpdate(BaseModel):
     golden_image_path: Optional[str] = Field(None, max_length=500)
     cached_iso_path: Optional[str] = Field(None, max_length=500)
     is_cached: Optional[bool] = None
+    # Multi-architecture support
+    iso_url_x86: Optional[str] = Field(None, max_length=500)
+    iso_url_arm64: Optional[str] = Field(None, max_length=500)
+    native_arch: Optional[str] = Field(None, max_length=20)
 
 
 class VMTemplateResponse(VMTemplateBase):
