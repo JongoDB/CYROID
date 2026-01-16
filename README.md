@@ -84,6 +84,7 @@
 | Advanced Reporting & Analytics | 7 | Low |
 | Custom Report Builder | 7 | Low |
 | AAR Auto-generation | 7 | Low |
+| Windows ARM64 VM Support | 7 | Low |
 
 ---
 
@@ -284,6 +285,56 @@ curl http://localhost:8000/health
 3. **Build Range**: Go to Ranges → New Range → Add VMs and networks
 4. **Deploy**: Click Deploy to provision all resources
 5. **Access VMs**: Use the VNC console to interact with running VMs
+
+---
+
+## Platform Support
+
+CYROID runs natively on both **x86_64** and **ARM64** architectures (Apple Silicon, AWS Graviton, Raspberry Pi, etc.).
+
+### Architecture Compatibility Matrix
+
+| Feature | x86_64 | ARM64 |
+|---------|--------|-------|
+| Core Platform (API, Frontend, DB) | ✅ Native | ✅ Native |
+| Linux Containers | ✅ Native | ✅ Native |
+| Linux VMs (Ubuntu, Debian, Fedora, Alpine, Rocky, Alma, Kali) | ✅ Native | ✅ Native |
+| Linux VMs (Arch, Manjaro, Security Onion, others) | ✅ Native | ⚠️ Emulated |
+| Windows VMs (all versions) | ✅ Native | ⚠️ Emulated |
+| VyOS Router | ✅ Native | ⚠️ Emulated |
+
+### Running on ARM64 Hosts
+
+When running CYROID on ARM64 hosts (e.g., Apple Silicon Macs, AWS Graviton instances):
+
+**Native Performance:**
+- All core platform services (API, database, cache, storage) run natively
+- Docker containers run natively
+- Linux VMs for supported distributions download ARM64 ISOs automatically
+
+**Emulated (x86 via QEMU):**
+- Arch Linux, Manjaro, Security Onion, and other x86-only distributions
+- All Windows VMs (Windows ARM support planned for future release)
+- VyOS routers
+
+**Performance Expectations:**
+
+| Mode | Performance | Use Case |
+|------|-------------|----------|
+| Native ARM64 | 100% | Production on ARM infrastructure |
+| Emulated x86 | 5-10% | Development, testing, demos |
+
+> **Note:** The UI displays inline warnings when VMs will run via emulation, allowing you to understand performance implications before deployment.
+
+### Development on ARM
+
+CYROID fully supports development workflows on ARM64:
+
+1. All features remain fully functional
+2. The UI clearly indicates when emulation is active
+3. No code changes required between ARM development and x86 production deployment
+
+The platform automatically detects host architecture and selects native ISOs where available.
 
 ---
 
