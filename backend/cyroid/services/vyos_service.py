@@ -110,7 +110,7 @@ class VyOSService:
         Allocate a unique IP from the management network.
 
         Returns:
-            IP address string (e.g., "10.10.0.2")
+            IP address string (e.g., "10.0.0.2")
         """
         # Get existing containers on the management network
         network_name = self.settings.management_network_name

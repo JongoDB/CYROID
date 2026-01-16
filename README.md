@@ -195,7 +195,7 @@ CYROID uses VyOS router containers to provide per-range network isolation, NAT, 
 │                           Docker Host                                       │
 │                                                                             │
 │  ┌───────────────────────────────────────────────────────────────────────┐ │
-│  │               Management Network (10.10.0.0/16)                        │ │
+│  │               Management Network (10.0.0.0/16)                         │ │
 │  │                      cyroid-management                                 │ │
 │  └─────────┬──────────────────┬──────────────────┬───────────────────────┘ │
 │            │                  │                  │                         │
@@ -220,7 +220,7 @@ CYROID uses VyOS router containers to provide per-range network isolation, NAT, 
 | Feature | Description |
 |---------|-------------|
 | **Per-Range VyOS Router** | Each range gets a dedicated VyOS container for routing/NAT |
-| **Management Network** | 10.10.0.0/16 for CYROID ↔ VyOS communication |
+| **Management Network** | 10.0.0.0/16 for CYROID ↔ VyOS communication |
 | **Network Isolation** | Shield icon toggle - VyOS firewall blocks external access |
 | **Internet Access** | Globe icon toggle - VyOS NAT enables per-network internet |
 | **VNC Unaffected** | Traefik connects directly to range networks for console access |

@@ -39,7 +39,7 @@ class RangeRouter(Base, UUIDMixin, TimestampMixin):
     # Docker container ID (set after creation)
     container_id: Mapped[Optional[str]] = mapped_column(String(64))
 
-    # Management network IP (10.10.0.X)
+    # Management network IP (10.0.0.X)
     management_ip: Mapped[Optional[str]] = mapped_column(String(15))
 
     # Router status - use SAEnum to ensure proper value serialization

@@ -37,8 +37,8 @@ class Settings(BaseSettings):
     # VyOS Router Configuration
     vyos_image: str = "2stacks/vyos:1.2.0-rc11"
     management_network_name: str = "cyroid-management"
-    management_network_subnet: str = "10.10.0.0/16"
-    management_network_gateway: str = "10.10.0.1"
+    management_network_subnet: str = "10.0.0.0/16"
+    management_network_gateway: str = "10.0.0.1"
 
     class Config:
         env_file = ".env"
