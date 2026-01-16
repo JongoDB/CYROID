@@ -5,6 +5,24 @@ All notable changes to CYROID will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.3] - 2026-01-16
+
+### Added
+
+- **Verbose Deployment Progress** ([#6](../../issues/6)): Real-time deployment status with visual stepper and expandable log panel. Shows step-by-step progress through router creation, network provisioning, and VM startup. Includes detailed event logging with timestamps and color-coded status indicators.
+
+### Changed
+
+- Added 9 new deployment event types for granular progress tracking
+- Events API now supports filtering by event_types parameter
+- Event log component updated with icons for all deployment events
+
+## [0.4.2] - 2026-01-16
+
+### Added
+
+- **Multi-Architecture Support**: Native support for both x86_64 and ARM64 host systems with automatic architecture detection and emulation warnings for cross-architecture VMs
+
 ## [0.4.1] - 2026-01-16
 
 ### Added
