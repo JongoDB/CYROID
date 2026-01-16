@@ -9,7 +9,7 @@
 - **Name**: CYROID (Cyber Range Orchestrator In Docker)
 - **Type**: Web-based cyber range orchestration platform
 - **Domain**: Military/government cyber training, educational institutions
-- **Current Version**: 0.4.1-alpha
+- **Current Version**: 0.4.2-alpha
 - **Repository**: /home/ubuntu/Desktop/CYROID
 
 ---
@@ -88,6 +88,7 @@ Current overall progress: **Phase 4 of 7 Complete (57%)**
 - [ ] Custom report builder
 - [ ] AAR auto-generation
 - [ ] Advanced analytics dashboard
+- [ ] Windows ARM64 VM support (Win11 ARM)
 
 ---
 
@@ -127,6 +128,7 @@ Current overall progress: **Phase 4 of 7 Complete (57%)**
 | Attack Automation | ⏳ | Phase 6 |
 | CAC/PKI Auth | ⏳ | Phase 6 |
 | Purple Team Integration | ⏳ | Phase 7 |
+| Multi-Architecture Support | ✅ | x86_64 + ARM64 native, emulation warnings |
 
 ---
 
@@ -236,6 +238,7 @@ At bottom of README, update:
 | 0.3.0 | 2026-01-XX | 3 | Range templates, artifacts, snapshots |
 | 0.4.0 | 2026-01-15 | 4 | Execution console, MSEL, monitoring |
 | 0.4.1 | 2026-01-16 | 4 | Version display, console pop-out default |
+| 0.4.2 | 2026-01-16 | 4 | Multi-architecture support (x86_64 + ARM64) |
 | 0.5.0 | TBD | 5 | Evidence submission, scoring |
 | 0.6.0 | TBD | 6 | Automation, CAC auth, offline mode |
 | 1.0.0 | TBD | 7 | Production release |
