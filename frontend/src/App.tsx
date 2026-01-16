@@ -2,6 +2,7 @@
 import { Routes, Route } from 'react-router-dom'
 import { useEffect } from 'react'
 import { useAuthStore } from './stores/authStore'
+import { useSystemStore } from './stores/systemStore'
 import Login from './pages/Login'
 import Register from './pages/Register'
 import Dashboard from './pages/Dashboard'
@@ -17,12 +18,17 @@ import Layout from './components/layout/Layout'
 
 function App() {
   const { checkAuth, token } = useAuthStore()
+  const fetchSystemInfo = useSystemStore((state) => state.fetchSystemInfo)
 
   useEffect(() => {
     if (token) {
       checkAuth()
     }
   }, [])
+
+  useEffect(() => {
+    fetchSystemInfo()
+  }, [fetchSystemInfo])
 
   return (
     <Routes>
