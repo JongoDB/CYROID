@@ -1,5 +1,5 @@
 // frontend/src/pages/RangeDetail.tsx
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { rangesApi, networksApi, vmsApi, templatesApi, NetworkCreate, VMCreate } from '../services/api'
 import type { Range, Network, VM, VMTemplate } from '../types'
@@ -10,6 +10,8 @@ import {
 import clsx from 'clsx'
 import { VncConsole } from '../components/console/VncConsole'
 import { useAuthStore } from '../stores/authStore'
+import { useIsArmHost } from '../stores/systemStore'
+import { EmulationWarning } from '../components/common/EmulationWarning'
 import ExportRangeDialog from '../components/export/ExportRangeDialog'
 
 const statusColors: Record<string, string> = {
@@ -101,6 +103,34 @@ export default function RangeDetail() {
 
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // Architecture detection for emulation warning
+  const isArmHost = useIsArmHost()
+
+  // Get the currently selected template for the VM form
+  const selectedTemplate = useMemo(() => {
+    return templates.find(t => t.id === vmForm.template_id) || null
+  }, [templates, vmForm.template_id])
+
+  // Determine if selected template requires emulation on ARM host
+  const templateRequiresEmulation = useMemo(() => {
+    if (!isArmHost || !selectedTemplate) return false
+
+    // Windows always requires emulation on ARM (x86-only via QEMU)
+    if (selectedTemplate.os_type === 'windows') return true
+
+    // For Linux VMs (qemu-based ISO images), check if distro has ARM64 support
+    const baseImage = selectedTemplate.base_image?.toLowerCase() || ''
+    if (baseImage.startsWith('iso:')) {
+      // These distros have native ARM64 ISO support
+      const arm64Distros = ['ubuntu', 'debian', 'fedora', 'alpine', 'rocky', 'alma', 'kali']
+      const osVariant = selectedTemplate.os_variant?.toLowerCase() || ''
+      return !arm64Distros.some(distro => osVariant.includes(distro))
+    }
+
+    // Docker containers are typically multi-arch, no emulation needed
+    return false
+  }, [isArmHost, selectedTemplate])
 
   const fetchData = async () => {
     if (!id) return
@@ -881,6 +911,9 @@ export default function RangeDetail() {
                     ))}
                   </select>
                 </div>
+                {templateRequiresEmulation && (
+                  <EmulationWarning className="mt-2" />
+                )}
                 <div>
                   <label className="block text-sm font-medium text-gray-700">Network</label>
                   <select
