@@ -1,6 +1,6 @@
 // frontend/src/components/console/VncConsole.tsx
 import { useEffect, useState } from 'react'
-import { Maximize2, Minimize2, X, RefreshCw, Monitor, ExternalLink } from 'lucide-react'
+import { Maximize2, Minimize2, X, RefreshCw, Monitor } from 'lucide-react'
 import clsx from 'clsx'
 
 interface VncConsoleProps {
@@ -77,21 +77,6 @@ export function VncConsole({ vmId, vmHostname, token, onClose }: VncConsoleProps
     setIsFullscreen(!isFullscreen)
   }
 
-  const openInNewWindow = () => {
-    if (vncInfo) {
-      // Open in a new browser window (not tab) with specific dimensions
-      const width = 1280
-      const height = 800
-      const left = (window.screen.width - width) / 2
-      const top = (window.screen.height - height) / 2
-      window.open(
-        vncInfo.url,
-        `vnc_${vmId}`,
-        `width=${width},height=${height},left=${left},top=${top},menubar=no,toolbar=no,location=no,status=no,resizable=yes,scrollbars=no`
-      )
-    }
-  }
-
   const reload = () => {
     setLoading(true)
     setError(null)
@@ -128,15 +113,6 @@ export function VncConsole({ vmId, vmHostname, token, onClose }: VncConsoleProps
           )}
         </div>
         <div className="flex items-center gap-1">
-          {vncInfo && (
-            <button
-              onClick={openInNewWindow}
-              className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 rounded"
-              title="Open in new window"
-            >
-              <ExternalLink className="w-4 h-4" />
-            </button>
-          )}
           <button
             onClick={reload}
             className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 rounded"

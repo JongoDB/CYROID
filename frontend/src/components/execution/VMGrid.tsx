@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import { VM, VMStats } from '../../types'
 import { vmsApi } from '../../services/api'
 import {
-  Play, Square, RotateCcw, Terminal, Server, Cpu, HardDrive, ExternalLink
+  Play, Square, RotateCcw, Terminal, Server, Cpu, HardDrive
 } from 'lucide-react'
 import clsx from 'clsx'
 import { EmulationWarning } from '../common/EmulationWarning'
@@ -12,19 +12,6 @@ interface Props {
   vms: VM[]
   onRefresh: () => void
   onOpenConsole: (vmId: string, hostname: string) => void
-}
-
-// Open console in new window (default behavior)
-const openConsoleWindow = (vmId: string, hostname: string) => {
-  const width = 1024
-  const height = 768
-  const left = (window.screen.width - width) / 2
-  const top = (window.screen.height - height) / 2
-  window.open(
-    `/console/${vmId}`,
-    `console_${vmId}`,
-    `width=${width},height=${height},left=${left},top=${top},menubar=no,toolbar=no,location=no,status=no,resizable=yes,scrollbars=no`
-  )
 }
 
 const statusColors: Record<VM['status'], string> = {
@@ -172,19 +159,11 @@ export function VMGrid({ vms, onRefresh, onOpenConsole }: Props) {
                     <RotateCcw className="w-4 h-4 text-blue-600" />
                   </button>
                   <button
-                    onClick={(e) => {
-                      if (e.shiftKey) {
-                        // Shift+click: open inline (legacy behavior)
-                        onOpenConsole(vm.id, vm.hostname)
-                      } else {
-                        // Default: open in new window
-                        openConsoleWindow(vm.id, vm.hostname)
-                      }
-                    }}
+                    onClick={() => onOpenConsole(vm.id, vm.hostname)}
                     className="p-1.5 hover:bg-gray-100 rounded"
-                    title="Console (Shift+click for inline)"
+                    title="Console"
                   >
-                    <ExternalLink className="w-4 h-4 text-gray-600" />
+                    <Terminal className="w-4 h-4 text-gray-600" />
                   </button>
                 </>
               )}

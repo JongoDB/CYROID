@@ -68,7 +68,33 @@ export default function ExecutionConsole() {
     setRightPanelTab('injects')
   }
 
-  const handleOpenConsole = (vmId: string, hostname: string) => {
+  const handleOpenConsole = async (vmId: string, hostname: string) => {
+    const token = localStorage.getItem('token') || ''
+
+    // Check if VM has VNC capability
+    try {
+      const response = await fetch(`/api/v1/vms/${vmId}/vnc-info`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+
+      if (response.ok) {
+        // VNC available - open in new window
+        const width = 1280
+        const height = 800
+        const left = (window.screen.width - width) / 2
+        const top = (window.screen.height - height) / 2
+        window.open(
+          `/console/${vmId}`,
+          `console_${vmId}`,
+          `width=${width},height=${height},left=${left},top=${top},menubar=no,toolbar=no,location=no,status=no,resizable=yes,scrollbars=no`
+        )
+        return
+      }
+    } catch {
+      // VNC not available, fall through to inline terminal
+    }
+
+    // No VNC - open inline terminal console
     setSelectedVM({ id: vmId, hostname })
   }
 
