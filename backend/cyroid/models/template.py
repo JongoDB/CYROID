@@ -84,6 +84,11 @@ class VMTemplate(Base, UUIDMixin, TimestampMixin):
     cached_iso_path: Mapped[Optional[str]] = mapped_column(String(500))  # Path to cached ISO
     is_cached: Mapped[bool] = mapped_column(default=False)  # Whether this template uses cached images
 
+    # Multi-architecture support
+    iso_url_x86: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    iso_url_arm64: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    native_arch: Mapped[str] = mapped_column(String(20), default='x86_64')  # 'x86_64', 'arm64', or 'both'
+
     # Ownership
     created_by: Mapped[UUID] = mapped_column(ForeignKey("users.id"))
     created_by_user = relationship("User", back_populates="templates")
