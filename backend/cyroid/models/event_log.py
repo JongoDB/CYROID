@@ -9,15 +9,28 @@ from cyroid.models.base import Base, TimestampMixin, UUIDMixin
 
 
 class EventType(str, Enum):
+    # Deployment progress events
+    DEPLOYMENT_STARTED = "deployment_started"
+    DEPLOYMENT_STEP = "deployment_step"
+    DEPLOYMENT_COMPLETED = "deployment_completed"
+    DEPLOYMENT_FAILED = "deployment_failed"
+    ROUTER_CREATING = "router_creating"
+    ROUTER_CREATED = "router_created"
+    NETWORK_CREATING = "network_creating"
+    NETWORK_CREATED = "network_created"
+    VM_CREATING = "vm_creating"
+    # Range lifecycle events
     RANGE_DEPLOYED = "range_deployed"
     RANGE_STARTED = "range_started"
     RANGE_STOPPED = "range_stopped"
     RANGE_TEARDOWN = "range_teardown"
+    # VM lifecycle events
     VM_CREATED = "vm_created"
     VM_STARTED = "vm_started"
     VM_STOPPED = "vm_stopped"
     VM_RESTARTED = "vm_restarted"
     VM_ERROR = "vm_error"
+    # Other events
     SNAPSHOT_CREATED = "snapshot_created"
     SNAPSHOT_RESTORED = "snapshot_restored"
     ARTIFACT_PLACED = "artifact_placed"

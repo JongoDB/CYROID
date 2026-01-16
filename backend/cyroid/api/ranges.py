@@ -1,4 +1,5 @@
 # backend/cyroid/api/ranges.py
+import json
 from datetime import datetime
 from typing import List
 from uuid import UUID
@@ -17,6 +18,8 @@ from cyroid.models.template import VMTemplate, OSType
 from cyroid.models.resource_tag import ResourceTag
 from cyroid.models.user import User
 from cyroid.models.router import RangeRouter, RouterStatus
+from cyroid.models.event_log import EventType
+from cyroid.services.event_service import EventService
 from cyroid.schemas.range import (
     RangeCreate, RangeUpdate, RangeResponse, RangeDetailResponse,
     RangeTemplateExport, RangeTemplateImport, NetworkTemplateData, VMTemplateData
@@ -164,6 +167,22 @@ def deploy_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
     range_obj.status = RangeStatus.DEPLOYING
     db.commit()
 
+    # Initialize event service for progress logging
+    event_service = EventService(db)
+    networks = db.query(Network).filter(Network.range_id == range_id).all()
+    vms = db.query(VM).filter(VM.range_id == range_id).all()
+
+    # Log deployment start
+    event_service.log_event(
+        range_id=range_id,
+        event_type=EventType.DEPLOYMENT_STARTED,
+        message=f"Starting deployment of range '{range_obj.name}'",
+        extra_data=json.dumps({
+            "total_networks": len(networks),
+            "total_vms": len(vms),
+        })
+    )
+
     try:
         docker = get_docker_service()
         vyos = get_vyos_service()
@@ -187,6 +206,12 @@ def deploy_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
                 range_router.status = RouterStatus.CREATING
                 db.commit()
 
+                event_service.log_event(
+                    range_id=range_id,
+                    event_type=EventType.ROUTER_CREATING,
+                    message=f"Creating VyOS router (management IP: {range_router.management_ip})"
+                )
+
                 container_id = vyos.create_router_container(
                     range_id=str(range_id),
                     management_ip=range_router.management_ip
@@ -200,6 +225,12 @@ def deploy_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
 
                 range_router.status = RouterStatus.RUNNING
                 db.commit()
+
+                event_service.log_event(
+                    range_id=range_id,
+                    event_type=EventType.ROUTER_CREATED,
+                    message="VyOS router created and running"
+                )
                 logger.info(f"VyOS router created for range {range_id}")
             except Exception as e:
                 logger.error(f"Failed to create VyOS router: {e}")
@@ -209,10 +240,20 @@ def deploy_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
                 raise
 
         # Step 1: Provision all networks
-        networks = db.query(Network).filter(Network.range_id == range_id).all()
+        event_service.log_event(
+            range_id=range_id,
+            event_type=EventType.DEPLOYMENT_STEP,
+            message=f"Provisioning {len(networks)} network(s)"
+        )
         interface_num = 1  # eth0 is management, start from eth1
-        for network in networks:
+        for idx, network in enumerate(networks):
             if not network.docker_network_id:
+                event_service.log_event(
+                    range_id=range_id,
+                    event_type=EventType.NETWORK_CREATING,
+                    message=f"Creating network '{network.name}' ({idx + 1}/{len(networks)})",
+                    extra_data=json.dumps({"subnet": network.subnet, "gateway": network.gateway})
+                )
                 docker_network_id = docker.create_network(
                     name=f"cyroid-{network.name}-{str(network.id)[:8]}",
                     subnet=network.subnet,
@@ -231,6 +272,12 @@ def deploy_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
                     docker.setup_network_isolation(docker_network_id, network.subnet)
 
                 db.commit()
+
+                event_service.log_event(
+                    range_id=range_id,
+                    event_type=EventType.NETWORK_CREATED,
+                    message=f"Network '{network.name}' created ({network.subnet})"
+                )
 
             # Connect VyOS router to this network as the gateway
             if range_router.container_id and range_router.status == RouterStatus.RUNNING:
@@ -274,10 +321,20 @@ def deploy_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
                     logger.warning(f"Failed to connect VyOS to network {network.name}: {e}")
 
         # Step 2: Create and start all VMs
-        vms = db.query(VM).filter(VM.range_id == range_id).all()
-        for vm in vms:
+        event_service.log_event(
+            range_id=range_id,
+            event_type=EventType.DEPLOYMENT_STEP,
+            message=f"Starting {len(vms)} VM(s)"
+        )
+        for vm_idx, vm in enumerate(vms):
             if vm.container_id:
                 # Container exists, just start it
+                event_service.log_event(
+                    range_id=range_id,
+                    event_type=EventType.VM_CREATING,
+                    message=f"Starting existing VM '{vm.hostname}' ({vm_idx + 1}/{len(vms)})",
+                    vm_id=vm.id
+                )
                 docker.start_container(vm.container_id)
             else:
                 # Create new container
@@ -287,6 +344,26 @@ def deploy_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
                 if not network or not network.docker_network_id:
                     logger.warning(f"Skipping VM {vm.id}: network not provisioned")
                     continue
+
+                # Determine VM type for logging
+                vm_type = "container"
+                if template.os_type == OSType.WINDOWS:
+                    vm_type = "Windows VM"
+                elif template.os_type == OSType.CUSTOM or (template.base_image and template.base_image.startswith("iso:")):
+                    vm_type = "Linux VM (QEMU)"
+
+                event_service.log_event(
+                    range_id=range_id,
+                    event_type=EventType.VM_CREATING,
+                    message=f"Creating {vm_type} '{vm.hostname}' ({vm_idx + 1}/{len(vms)})",
+                    vm_id=vm.id,
+                    extra_data=json.dumps({
+                        "image": template.base_image,
+                        "ip_address": vm.ip_address,
+                        "cpu": vm.cpu,
+                        "ram_mb": vm.ram_mb
+                    })
+                )
 
                 vm_id_short = str(vm.id)[:8]
                 labels = {
@@ -493,14 +570,41 @@ def deploy_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
             vm.status = VMStatus.RUNNING
             db.commit()
 
+            event_service.log_event(
+                range_id=range_id,
+                event_type=EventType.VM_STARTED,
+                message=f"VM '{vm.hostname}' is now running",
+                vm_id=vm.id
+            )
+
         range_obj.status = RangeStatus.RUNNING
         db.commit()
+
+        # Log deployment completion
+        event_service.log_event(
+            range_id=range_id,
+            event_type=EventType.DEPLOYMENT_COMPLETED,
+            message=f"Range '{range_obj.name}' deployed successfully",
+            extra_data=json.dumps({
+                "networks_deployed": len(networks),
+                "vms_deployed": len(vms)
+            })
+        )
         db.refresh(range_obj)
 
     except Exception as e:
         logger.error(f"Failed to deploy range {range_id}: {e}")
         range_obj.status = RangeStatus.ERROR
         db.commit()
+
+        # Log deployment failure
+        event_service.log_event(
+            range_id=range_id,
+            event_type=EventType.DEPLOYMENT_FAILED,
+            message=f"Deployment failed: {str(e)[:200]}",
+            extra_data=json.dumps({"error": str(e)})
+        )
+
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to deploy range: {str(e)}",

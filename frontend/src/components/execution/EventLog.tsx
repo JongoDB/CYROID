@@ -4,7 +4,8 @@ import { EventLog as EventLogType, EventType } from '../../types'
 import { eventsApi } from '../../services/api'
 import {
   Play, Square, RotateCcw, AlertCircle,
-  Download, Upload, Plug, Activity
+  Download, Upload, Plug, Activity, Rocket,
+  CheckCircle, XCircle, Router, Network, Server, Loader2
 } from 'lucide-react'
 
 interface Props {
@@ -13,15 +14,28 @@ interface Props {
 }
 
 const eventIcons: Record<EventType, React.ReactNode> = {
-  vm_started: <Play className="w-4 h-4 text-green-500" />,
-  vm_stopped: <Square className="w-4 h-4 text-red-500" />,
-  vm_restarted: <RotateCcw className="w-4 h-4 text-blue-500" />,
-  vm_error: <AlertCircle className="w-4 h-4 text-red-600" />,
+  // Deployment progress events
+  deployment_started: <Rocket className="w-4 h-4 text-blue-500" />,
+  deployment_step: <Loader2 className="w-4 h-4 text-blue-400 animate-spin" />,
+  deployment_completed: <CheckCircle className="w-4 h-4 text-green-500" />,
+  deployment_failed: <XCircle className="w-4 h-4 text-red-600" />,
+  router_creating: <Router className="w-4 h-4 text-yellow-500" />,
+  router_created: <Router className="w-4 h-4 text-green-500" />,
+  network_creating: <Network className="w-4 h-4 text-yellow-500" />,
+  network_created: <Network className="w-4 h-4 text-green-500" />,
+  vm_creating: <Server className="w-4 h-4 text-yellow-500" />,
+  // Range lifecycle events
   range_deployed: <Activity className="w-4 h-4 text-green-500" />,
   range_started: <Play className="w-4 h-4 text-green-500" />,
   range_stopped: <Square className="w-4 h-4 text-gray-500" />,
   range_teardown: <AlertCircle className="w-4 h-4 text-red-500" />,
+  // VM lifecycle events
   vm_created: <Activity className="w-4 h-4 text-blue-500" />,
+  vm_started: <Play className="w-4 h-4 text-green-500" />,
+  vm_stopped: <Square className="w-4 h-4 text-red-500" />,
+  vm_restarted: <RotateCcw className="w-4 h-4 text-blue-500" />,
+  vm_error: <AlertCircle className="w-4 h-4 text-red-600" />,
+  // Other events
   snapshot_created: <Download className="w-4 h-4 text-purple-500" />,
   snapshot_restored: <Upload className="w-4 h-4 text-purple-500" />,
   artifact_placed: <Download className="w-4 h-4 text-orange-500" />,
@@ -44,7 +58,7 @@ export function EventLogComponent({ rangeId, maxHeight = '400px' }: Props) {
 
   const loadEvents = async () => {
     try {
-      const response = await eventsApi.getEvents(rangeId)
+      const response = await eventsApi.getEvents(rangeId, { limit: 100 })
       setEvents(response.data.events)
     } catch (error) {
       console.error('Failed to load events:', error)

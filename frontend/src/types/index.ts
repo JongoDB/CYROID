@@ -143,15 +143,28 @@ export interface Snapshot {
 }
 
 export type EventType =
+  // Deployment progress events
+  | 'deployment_started'
+  | 'deployment_step'
+  | 'deployment_completed'
+  | 'deployment_failed'
+  | 'router_creating'
+  | 'router_created'
+  | 'network_creating'
+  | 'network_created'
+  | 'vm_creating'
+  // Range lifecycle events
   | 'range_deployed'
   | 'range_started'
   | 'range_stopped'
   | 'range_teardown'
+  // VM lifecycle events
   | 'vm_created'
   | 'vm_started'
   | 'vm_stopped'
   | 'vm_restarted'
   | 'vm_error'
+  // Other events
   | 'snapshot_created'
   | 'snapshot_restored'
   | 'artifact_placed'

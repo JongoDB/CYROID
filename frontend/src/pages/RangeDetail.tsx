@@ -13,6 +13,7 @@ import { useAuthStore } from '../stores/authStore'
 import { useIsArmHost } from '../stores/systemStore'
 import { EmulationWarning } from '../components/common/EmulationWarning'
 import ExportRangeDialog from '../components/export/ExportRangeDialog'
+import { DeploymentProgress } from '../components/range/DeploymentProgress'
 
 const statusColors: Record<string, string> = {
   draft: 'bg-gray-100 text-gray-800',
@@ -557,6 +558,19 @@ export default function RangeDetail() {
           </div>
         </div>
       </div>
+
+      {/* Deployment Progress - shown when deploying */}
+      {range.status === 'deploying' && (
+        <div className="mb-6">
+          <DeploymentProgress
+            rangeId={range.id}
+            rangeStatus={range.status}
+            totalNetworks={networks.length}
+            totalVMs={vms.length}
+            onDeploymentComplete={() => fetchData()}
+          />
+        </div>
+      )}
 
       {/* Networks Section */}
       <div className="bg-white shadow rounded-lg mb-6">

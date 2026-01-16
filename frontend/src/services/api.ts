@@ -397,9 +397,24 @@ export const vmsApi = {
 }
 
 // Events API
+export interface EventsQueryParams {
+  limit?: number
+  offset?: number
+  event_types?: string[]
+}
+
 export const eventsApi = {
-  getEvents: (rangeId: string, limit = 100, offset = 0) =>
-    api.get<EventLogList>(`/events/${rangeId}`, { params: { limit, offset } }),
+  getEvents: (rangeId: string, params: EventsQueryParams = {}) =>
+    api.get<EventLogList>(`/events/${rangeId}`, {
+      params: {
+        limit: params.limit ?? 100,
+        offset: params.offset ?? 0,
+        event_types: params.event_types
+      },
+      paramsSerializer: {
+        indexes: null // Use repeated params for arrays: event_types=a&event_types=b
+      }
+    }),
   getVMEvents: (vmId: string, limit = 50) =>
     api.get<EventLog[]>(`/events/vm/${vmId}`, { params: { limit } }),
 }
