@@ -379,6 +379,9 @@ def deploy_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
                         iso_path=iso_path,
                         storage_path=vm_storage_path,
                         display_type=vm.display_type or "desktop",
+                        gateway=network.gateway,
+                        dns_servers=network.dns_servers,
+                        dns_search=network.dns_search,
                     )
                 elif template.os_type == OSType.CUSTOM:
                     # Custom ISO VMs use qemux/qemu
@@ -403,6 +406,9 @@ def deploy_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
                         iso_path=iso_path,
                         storage_path=vm_storage_path,
                         display_type=vm.display_type or "desktop",
+                        gateway=network.gateway,
+                        dns_servers=network.dns_servers,
+                        dns_search=network.dns_search,
                     )
                 elif template.base_image.startswith("iso:"):
                     # Linux ISO VMs use qemux/qemu
@@ -426,6 +432,9 @@ def deploy_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
                         labels=labels,
                         storage_path=vm_storage_path,
                         display_type=vm.display_type or "desktop",
+                        gateway=network.gateway,
+                        dns_servers=network.dns_servers,
+                        dns_search=network.dns_search,
                     )
                 else:
                     # Docker container
@@ -441,6 +450,8 @@ def deploy_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
                         linux_username=vm.linux_username,
                         linux_password=vm.linux_password,
                         linux_user_sudo=vm.linux_user_sudo,
+                        dns_servers=network.dns_servers,
+                        dns_search=network.dns_search,
                     )
 
                 vm.container_id = container_id

@@ -55,9 +55,11 @@ export interface Network {
   subnet: string
   gateway: string
   dns_servers: string | null
+  dns_search: string | null
   docker_network_id: string | null
   is_isolated: boolean
   internet_enabled: boolean
+  dhcp_enabled: boolean
   vyos_interface: string | null
   created_at: string
   updated_at: string

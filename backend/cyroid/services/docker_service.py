@@ -473,7 +473,9 @@ class DockerService:
         hostname: Optional[str] = None,
         linux_username: Optional[str] = None,
         linux_password: Optional[str] = None,
-        linux_user_sudo: bool = True
+        linux_user_sudo: bool = True,
+        dns_servers: Optional[str] = None,
+        dns_search: Optional[str] = None
     ) -> str:
         """
         Create a Docker container for a Linux VM.
@@ -493,6 +495,8 @@ class DockerService:
             linux_username: Linux username (for KasmVNC/LinuxServer containers)
             linux_password: Linux password (for KasmVNC/LinuxServer containers)
             linux_user_sudo: Grant sudo privileges (for LinuxServer containers)
+            dns_servers: Comma-separated DNS servers (e.g., "8.8.8.8,8.8.4.4")
+            dns_search: DNS search domain (e.g., "corp.local")
 
         Returns:
             Container ID
@@ -536,8 +540,30 @@ class DockerService:
             )
         })
 
+        # Parse DNS configuration
+        dns_list = None
+        dns_search_list = None
+        if dns_servers:
+            dns_list = [s.strip() for s in dns_servers.split(",") if s.strip()]
+        else:
+            dns_list = ["8.8.8.8", "8.8.4.4"]  # Default external DNS
+        if dns_search:
+            dns_search_list = [s.strip() for s in dns_search.split(",") if s.strip()]
+
         # Create container
         try:
+            host_config_args = {
+                "cpu_count": cpu_limit,
+                "mem_limit": f"{memory_limit_mb}m",
+                "binds": volumes,
+                "privileged": privileged,
+                "cap_add": ["NET_ADMIN"],  # Required for VyOS gateway routing
+                "restart_policy": {"Name": "unless-stopped"},
+                "dns": dns_list
+            }
+            if dns_search_list:
+                host_config_args["dns_search"] = dns_search_list
+
             container = self.client.api.create_container(
                 image=image,
                 name=name,
@@ -546,14 +572,7 @@ class DockerService:
                 tty=True,
                 stdin_open=True,
                 networking_config=networking_config,
-                host_config=self.client.api.create_host_config(
-                    cpu_count=cpu_limit,
-                    mem_limit=f"{memory_limit_mb}m",
-                    binds=volumes,
-                    privileged=privileged,
-                    cap_add=["NET_ADMIN"],  # Required for VyOS gateway routing
-                    restart_policy={"Name": "unless-stopped"}
-                ),
+                host_config=self.client.api.create_host_config(**host_config_args),
                 environment=environment,
                 labels=labels or {}
             )
@@ -586,6 +605,7 @@ class DockerService:
         use_dhcp: bool = False,
         gateway: Optional[str] = None,
         dns_servers: Optional[str] = None,
+        dns_search: Optional[str] = None,
         # Extended dockur/windows configuration
         disk2_gb: Optional[int] = None,
         disk3_gb: Optional[int] = None,
@@ -793,6 +813,16 @@ class DockerService:
             binds.append(f"{oem_script_path}:/oem:ro")
             logger.info(f"Using OEM script directory: {oem_script_path}")
 
+        # Parse DNS configuration for Docker container
+        dns_list = None
+        dns_search_list = None
+        if dns_servers:
+            dns_list = [s.strip() for s in dns_servers.split(",") if s.strip()]
+        else:
+            dns_list = ["8.8.8.8", "8.8.4.4"]  # Default external DNS
+        if dns_search:
+            dns_search_list = [s.strip() for s in dns_search.split(",") if s.strip()]
+
         # Windows containers need privileged mode for KVM
         try:
             host_config_args = {
@@ -800,8 +830,11 @@ class DockerService:
                 "mem_limit": f"{memory_limit_mb}m",
                 "privileged": True,
                 "cap_add": ["NET_ADMIN"],
-                "restart_policy": {"Name": "unless-stopped"}
+                "restart_policy": {"Name": "unless-stopped"},
+                "dns": dns_list
             }
+            if dns_search_list:
+                host_config_args["dns_search"] = dns_search_list
             if kvm_available:
                 host_config_args["devices"] = ["/dev/kvm:/dev/kvm"]
             if binds:
@@ -846,6 +879,7 @@ class DockerService:
         # Network configuration (for reference - requires manual config in VM)
         gateway: Optional[str] = None,
         dns_servers: Optional[str] = None,
+        dns_search: Optional[str] = None,
         # Extended qemus/qemu configuration
         boot_mode: str = "uefi",
         disk_type: str = "scsi",
@@ -1087,6 +1121,16 @@ local-hostname: {name}
             except FileNotFoundError:
                 logger.warning("genisoimage not found. Cloud-init ISO creation skipped. User will need manual setup.")
 
+        # Parse DNS configuration for Docker container
+        dns_list = None
+        dns_search_list = None
+        if dns_servers:
+            dns_list = [s.strip() for s in dns_servers.split(",") if s.strip()]
+        else:
+            dns_list = ["8.8.8.8", "8.8.4.4"]  # Default external DNS
+        if dns_search:
+            dns_search_list = [s.strip() for s in dns_search.split(",") if s.strip()]
+
         # Linux VM containers need privileged mode for KVM
         try:
             host_config_args = {
@@ -1094,8 +1138,11 @@ local-hostname: {name}
                 "mem_limit": f"{memory_limit_mb}m",
                 "privileged": True,
                 "cap_add": ["NET_ADMIN"],
-                "restart_policy": {"Name": "unless-stopped"}
+                "restart_policy": {"Name": "unless-stopped"},
+                "dns": dns_list
             }
+            if dns_search_list:
+                host_config_args["dns_search"] = dns_search_list
             if kvm_available:
                 host_config_args["devices"] = ["/dev/kvm:/dev/kvm"]
             if binds:

@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     global_shared_dir: str = "/data/cyroid/shared"
 
     # VyOS Router Configuration
-    vyos_image: str = "2stacks/vyos:latest"
+    vyos_image: str = "2stacks/vyos:1.2.0-rc11"
     management_network_name: str = "cyroid-management"
     management_network_subnet: str = "10.10.0.0/16"
     management_network_gateway: str = "10.10.0.1"

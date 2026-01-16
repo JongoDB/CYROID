@@ -264,14 +264,19 @@ export interface NetworkCreate {
   subnet: string
   gateway: string
   dns_servers?: string
+  dns_search?: string
   is_isolated?: boolean
+  internet_enabled?: boolean
+  dhcp_enabled?: boolean
 }
 
 export interface NetworkUpdate {
   name?: string
   dns_servers?: string
+  dns_search?: string
   is_isolated?: boolean
   internet_enabled?: boolean
+  dhcp_enabled?: boolean
 }
 
 export const networksApi = {
@@ -284,6 +289,7 @@ export const networksApi = {
   teardown: (id: string) => api.post<Network>(`/networks/${id}/teardown`),
   toggleIsolation: (id: string) => api.post<Network>(`/networks/${id}/toggle-isolation`),
   toggleInternet: (id: string) => api.post<Network>(`/networks/${id}/toggle-internet`),
+  toggleDhcp: (id: string) => api.post<Network>(`/networks/${id}/toggle-dhcp`),
 }
 
 // VMs API

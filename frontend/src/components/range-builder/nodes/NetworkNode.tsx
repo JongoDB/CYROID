@@ -1,7 +1,7 @@
 // frontend/src/components/range-builder/nodes/NetworkNode.tsx
 import { memo } from 'react'
 import { Handle, Position } from '@xyflow/react'
-import { Network as NetworkIcon, Shield, Globe } from 'lucide-react'
+import { Network as NetworkIcon, Shield, Globe, Wifi } from 'lucide-react'
 import clsx from 'clsx'
 import type { Network } from '../../../types'
 
@@ -42,13 +42,22 @@ export const NetworkNode = memo(({ data }: NetworkNodeProps) => {
             {network.is_isolated ? 'Isolated' : 'Open'}
           </span>
           {network.vyos_interface && (
-            <span className={clsx(
-              'flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium rounded',
-              network.internet_enabled ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'
-            )}>
-              <Globe className="w-3 h-3" fill={network.internet_enabled ? 'currentColor' : 'none'} />
-              {network.internet_enabled ? 'Internet' : 'Offline'}
-            </span>
+            <>
+              <span className={clsx(
+                'flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium rounded',
+                network.internet_enabled ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'
+              )}>
+                <Globe className="w-3 h-3" fill={network.internet_enabled ? 'currentColor' : 'none'} />
+                {network.internet_enabled ? 'Internet' : 'Offline'}
+              </span>
+              <span className={clsx(
+                'flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium rounded',
+                network.dhcp_enabled ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-500'
+              )}>
+                <Wifi className="w-3 h-3" fill={network.dhcp_enabled ? 'currentColor' : 'none'} />
+                {network.dhcp_enabled ? 'DHCP' : 'Static'}
+              </span>
+            </>
           )}
         </div>
       </div>
@@ -56,6 +65,7 @@ export const NetworkNode = memo(({ data }: NetworkNodeProps) => {
       <div className="text-[10px] text-gray-400">
         Gateway: {network.gateway}
         {network.dns_servers && ` | DNS: ${network.dns_servers}`}
+        {network.dns_search && ` | Search: ${network.dns_search}`}
       </div>
 
       <Handle type="source" position={Position.Right} className="w-2 h-2" />

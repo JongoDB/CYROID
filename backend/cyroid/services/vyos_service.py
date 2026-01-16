@@ -323,7 +323,7 @@ class VyOSService:
 
         Args:
             container_id: VyOS container ID
-            command: VyOS command to execute
+            command: VyOS command to execute (operational mode)
             timeout: Command timeout in seconds
 
         Returns:
@@ -332,7 +332,8 @@ class VyOSService:
         try:
             container = self.client.containers.get(container_id)
 
-            # VyOS commands need to be run through vbash
+            # For official VyOS image, use the vyatta wrapper
+            # Operational commands go through vbash with script-template
             full_command = f"/bin/vbash -c 'source /opt/vyatta/etc/functions/script-template; {command}'"
 
             exec_result = container.exec_run(
@@ -350,6 +351,39 @@ class VyOSService:
             logger.error(f"Failed to exec VyOS command: {e}")
             raise
 
+    def exec_shell_command(
+        self,
+        container_id: str,
+        command: str
+    ) -> tuple[int, str]:
+        """
+        Execute a shell command in the router container.
+
+        Args:
+            container_id: Router container ID
+            command: Shell command to execute
+
+        Returns:
+            Tuple of (exit_code, output)
+        """
+        try:
+            container = self.client.containers.get(container_id)
+
+            exec_result = container.exec_run(
+                f"/bin/bash -c '{command}'",
+                user="root",
+                demux=True
+            )
+            stdout = exec_result.output[0] or b""
+            stderr = exec_result.output[1] or b""
+            output = (stdout + stderr).decode("utf-8", errors="replace")
+            return exec_result.exit_code, output
+        except NotFound:
+            raise ValueError(f"Router container not found: {container_id}")
+        except APIError as e:
+            logger.error(f"Failed to exec shell command: {e}")
+            raise
+
     def configure_interface(
         self,
         container_id: str,
@@ -358,33 +392,26 @@ class VyOSService:
         description: str = ""
     ) -> bool:
         """
-        Configure a network interface on the VyOS router.
+        Configure a network interface on the router using standard Linux ip commands.
 
         Args:
-            container_id: VyOS container ID
+            container_id: Router container ID
             interface: Interface name (eth0, eth1, etc.)
             ip_address: IP address with CIDR (e.g., "10.0.1.1/24")
-            description: Interface description
+            description: Interface description (logged but not applied)
 
         Returns:
             True if successful
         """
-        commands = [
-            f"set interfaces ethernet {interface} address '{ip_address}'",
-        ]
-        if description:
-            commands.append(f"set interfaces ethernet {interface} description '{description}'")
-        commands.append("commit")
-        commands.append("save")
-
-        full_command = " && ".join(commands)
-        exit_code, output = self.exec_vyos_command(container_id, full_command)
+        # Use standard ip commands to configure the interface
+        command = f"ip addr add {ip_address} dev {interface} 2>/dev/null || true; ip link set {interface} up"
+        exit_code, output = self.exec_shell_command(container_id, command)
 
         if exit_code != 0:
             logger.error(f"Failed to configure interface {interface}: {output}")
             return False
 
-        logger.info(f"Configured VyOS interface {interface} with {ip_address}")
+        logger.info(f"Configured router interface {interface} with {ip_address}")
         return True
 
     def configure_nat_outbound(
@@ -395,27 +422,20 @@ class VyOSService:
         outbound_interface: str = "eth0"
     ) -> bool:
         """
-        Configure outbound NAT (masquerade) for a network.
+        Configure outbound NAT (masquerade) for a network using iptables.
 
         Args:
-            container_id: VyOS container ID
-            rule_number: NAT rule number (10, 20, etc.)
+            container_id: Router container ID
+            rule_number: NAT rule number (unused, kept for API compatibility)
             source_network: Source network CIDR (e.g., "10.0.1.0/24")
             outbound_interface: Interface for outbound traffic (usually eth0)
 
         Returns:
             True if successful
         """
-        commands = [
-            f"set nat source rule {rule_number} outbound-interface name '{outbound_interface}'",
-            f"set nat source rule {rule_number} source address '{source_network}'",
-            f"set nat source rule {rule_number} translation address 'masquerade'",
-            "commit",
-            "save"
-        ]
-
-        full_command = " && ".join(commands)
-        exit_code, output = self.exec_vyos_command(container_id, full_command)
+        # Use iptables for NAT masquerade
+        command = f"iptables -t nat -C POSTROUTING -s {source_network} -o {outbound_interface} -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -s {source_network} -o {outbound_interface} -j MASQUERADE"
+        exit_code, output = self.exec_shell_command(container_id, command)
 
         if exit_code != 0:
             logger.error(f"Failed to configure NAT for {source_network}: {output}")
@@ -427,32 +447,28 @@ class VyOSService:
     def remove_nat_rule(
         self,
         container_id: str,
-        rule_number: int
+        rule_number: int,
+        source_network: Optional[str] = None,
+        outbound_interface: str = "eth0"
     ) -> bool:
         """
-        Remove a NAT rule.
+        Remove a NAT rule using iptables.
 
         Args:
-            container_id: VyOS container ID
-            rule_number: NAT rule number to remove
+            container_id: Router container ID
+            rule_number: NAT rule number (unused, kept for API compatibility)
+            source_network: Source network CIDR to remove NAT for
+            outbound_interface: Outbound interface
 
         Returns:
             True if successful
         """
-        commands = [
-            f"delete nat source rule {rule_number}",
-            "commit",
-            "save"
-        ]
-
-        full_command = " && ".join(commands)
-        exit_code, output = self.exec_vyos_command(container_id, full_command)
-
-        if exit_code != 0:
-            logger.warning(f"Failed to remove NAT rule {rule_number}: {output}")
-            return False
-
-        logger.info(f"Removed NAT rule {rule_number}")
+        if source_network:
+            command = f"iptables -t nat -D POSTROUTING -s {source_network} -o {outbound_interface} -j MASQUERADE 2>/dev/null || true"
+            exit_code, output = self.exec_shell_command(container_id, command)
+            logger.info(f"Removed NAT rule for {source_network}")
+        else:
+            logger.warning("No source_network provided for NAT rule removal")
         return True
 
     def configure_firewall_isolated(
@@ -462,43 +478,37 @@ class VyOSService:
         allow_established: bool = True
     ) -> bool:
         """
-        Configure firewall to isolate a network (block outbound except established).
+        Configure firewall to isolate a network (block outbound except established) using iptables.
 
         Args:
-            container_id: VyOS container ID
+            container_id: Router container ID
             interface: Interface to apply firewall (eth1, eth2, etc.)
             allow_established: Allow established/related connections
 
         Returns:
             True if successful
         """
-        fw_name = f"ISOLATED-{interface.upper()}"
-        commands = [
-            f"set firewall ipv4 name {fw_name} default-action 'drop'",
-        ]
+        commands = []
+
+        # Create a chain for this interface if it doesn't exist
+        chain_name = f"ISOLATED_{interface.upper()}"
+        commands.append(f"iptables -N {chain_name} 2>/dev/null || true")
+
+        # Flush existing rules in the chain
+        commands.append(f"iptables -F {chain_name}")
 
         if allow_established:
-            commands.extend([
-                f"set firewall ipv4 name {fw_name} rule 10 action 'accept'",
-                f"set firewall ipv4 name {fw_name} rule 10 state established 'enable'",
-                f"set firewall ipv4 name {fw_name} rule 10 state related 'enable'",
-            ])
+            # Allow established/related connections
+            commands.append(f"iptables -A {chain_name} -m state --state ESTABLISHED,RELATED -j ACCEPT")
 
-        # Allow intra-network traffic
-        commands.extend([
-            f"set firewall ipv4 name {fw_name} rule 20 action 'accept'",
-            f"set firewall ipv4 name {fw_name} rule 20 destination group network-group 'SAME-NET'",
-        ])
+        # Drop everything else
+        commands.append(f"iptables -A {chain_name} -j DROP")
 
-        # Apply to interface
-        commands.extend([
-            f"set firewall interface {interface} out ipv4 name '{fw_name}'",
-            "commit",
-            "save"
-        ])
+        # Apply chain to interface (FORWARD chain for outbound)
+        commands.append(f"iptables -C FORWARD -i {interface} -j {chain_name} 2>/dev/null || iptables -I FORWARD -i {interface} -j {chain_name}")
 
-        full_command = " && ".join(commands)
-        exit_code, output = self.exec_vyos_command(container_id, full_command)
+        command = " && ".join(commands)
+        exit_code, output = self.exec_shell_command(container_id, command)
 
         if exit_code != 0:
             logger.error(f"Failed to configure isolation firewall for {interface}: {output}")
@@ -513,29 +523,28 @@ class VyOSService:
         interface: str
     ) -> bool:
         """
-        Remove firewall rules for an interface.
+        Remove firewall rules for an interface using iptables.
 
         Args:
-            container_id: VyOS container ID
+            container_id: Router container ID
             interface: Interface to remove firewall from
 
         Returns:
             True if successful
         """
-        fw_name = f"ISOLATED-{interface.upper()}"
+        chain_name = f"ISOLATED_{interface.upper()}"
         commands = [
-            f"delete firewall interface {interface} out",
-            f"delete firewall ipv4 name {fw_name}",
-            "commit",
-            "save"
+            # Remove from FORWARD chain
+            f"iptables -D FORWARD -i {interface} -j {chain_name} 2>/dev/null || true",
+            # Flush and delete the chain
+            f"iptables -F {chain_name} 2>/dev/null || true",
+            f"iptables -X {chain_name} 2>/dev/null || true",
         ]
 
-        full_command = " && ".join(commands)
-        exit_code, output = self.exec_vyos_command(container_id, full_command)
+        command = " && ".join(commands)
+        exit_code, output = self.exec_shell_command(container_id, command)
 
-        # Ignore errors - rules may not exist
-        if exit_code == 0:
-            logger.info(f"Removed firewall rules for {interface}")
+        logger.info(f"Removed firewall rules for {interface}")
         return True
 
     def get_router_status(self, container_id: str) -> Optional[str]:
@@ -582,7 +591,7 @@ class VyOSService:
         logger.warning(f"VyOS router {container_id[:12]} not ready after {timeout}s")
         return False
 
-    # Internet Access Methods (via management interface eth0 and Docker bridge NAT)
+    # Internet Access Methods (via iptables NAT)
 
     def configure_internet_nat(
         self,
@@ -591,15 +600,12 @@ class VyOSService:
         outbound_interface: str = "eth0"
     ) -> bool:
         """
-        Configure NAT masquerade for internet access via the management interface.
+        Configure NAT masquerade for internet access using iptables.
 
-        Traffic flow: VM → VyOS NAT (eth0) → Docker bridge NAT → Internet.
-
-        This uses Docker's native NAT on the management bridge for internet connectivity,
-        which is simpler and more reliable than macvlan configurations.
+        Traffic flow: VM → Router NAT (eth0) → Docker bridge NAT → Internet.
 
         Args:
-            container_id: VyOS container ID
+            container_id: Router container ID
             source_network: Source network CIDR to NAT (e.g., "10.100.1.0/24")
             outbound_interface: Outbound interface for NAT (default eth0 = management)
 
@@ -607,42 +613,14 @@ class VyOSService:
             True if successful
         """
         try:
-            container = self.client.containers.get(container_id)
+            # Use iptables for NAT masquerade
+            # Check if rule exists first, add if not
+            command = f"iptables -t nat -C POSTROUTING -s {source_network} -o {outbound_interface} -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -s {source_network} -o {outbound_interface} -j MASQUERADE"
+            exit_code, output = self.exec_shell_command(container_id, command)
 
-            # Enable IP forwarding
-            container.exec_run("bash -c 'echo 1 > /proc/sys/net/ipv4/ip_forward'", user="root")
-
-            # Disable rp_filter on all interfaces (needed for proper forwarding)
-            container.exec_run("bash -c 'for i in /proc/sys/net/ipv4/conf/*/rp_filter; do echo 0 > $i; done'", user="root")
-
-            # Check if rule already exists
-            check_cmd = f"iptables -t nat -C POSTROUTING -s {source_network} -o {outbound_interface} -j MASQUERADE 2>/dev/null"
-            result = container.exec_run(f"bash -c '{check_cmd}'", user="root")
-            if result.exit_code == 0:
-                logger.debug(f"Internet NAT rule for {source_network} already exists")
-                return True
-
-            # Add MASQUERADE rule for internet access
-            add_cmd = f"iptables -t nat -A POSTROUTING -s {source_network} -o {outbound_interface} -j MASQUERADE"
-            result = container.exec_run(f"bash -c '{add_cmd}'", user="root")
-            if result.exit_code != 0:
-                logger.error(f"Failed to add internet NAT rule: {result.output}")
+            if exit_code != 0:
+                logger.error(f"Failed to configure internet NAT for {source_network}: {output}")
                 return False
-
-            # Ensure ACCEPT rules in raw table to bypass VyOS's NOTRACK rules
-            # Without these, conntrack is disabled and NAT return traffic fails
-            # Rule 1: Allow conntrack for traffic FROM the source network
-            accept_src_cmd = f"iptables -t raw -I PREROUTING 1 -s {source_network} -j ACCEPT 2>/dev/null || true"
-            container.exec_run(f"bash -c '{accept_src_cmd}'", user="root")
-
-            # Rule 2: Allow conntrack for return traffic TO the VyOS NAT IP
-            # This is critical - without it, SYN-ACK responses are not tracked and get RST
-            accept_dst_cmd = f"iptables -t raw -I PREROUTING 1 -d 10.10.0.0/16 -j ACCEPT 2>/dev/null || true"
-            container.exec_run(f"bash -c '{accept_dst_cmd}'", user="root")
-
-            # Rule 3: Allow conntrack for outbound NAT'd traffic
-            accept_out_cmd = f"iptables -t raw -I OUTPUT 1 -s 10.10.0.0/16 -j ACCEPT 2>/dev/null || true"
-            container.exec_run(f"bash -c '{accept_out_cmd}'", user="root")
 
             logger.info(f"Configured internet NAT for {source_network} via {outbound_interface}")
             return True
@@ -658,10 +636,10 @@ class VyOSService:
         outbound_interface: str = "eth0"
     ) -> bool:
         """
-        Remove NAT masquerade rule for internet access.
+        Remove NAT masquerade rule for internet access using iptables.
 
         Args:
-            container_id: VyOS container ID
+            container_id: Router container ID
             source_network: Source network CIDR
             outbound_interface: Outbound interface (default eth0)
 
@@ -669,11 +647,9 @@ class VyOSService:
             True if successful
         """
         try:
-            container = self.client.containers.get(container_id)
-
-            # Remove MASQUERADE rule
-            del_cmd = f"iptables -t nat -D POSTROUTING -s {source_network} -o {outbound_interface} -j MASQUERADE 2>/dev/null || true"
-            container.exec_run(f"bash -c '{del_cmd}'", user="root")
+            # Remove the iptables NAT rule
+            command = f"iptables -t nat -D POSTROUTING -s {source_network} -o {outbound_interface} -j MASQUERADE 2>/dev/null || true"
+            exit_code, output = self.exec_shell_command(container_id, command)
 
             logger.info(f"Removed internet NAT rule for {source_network}")
             return True
@@ -681,6 +657,217 @@ class VyOSService:
         except Exception as e:
             logger.error(f"Failed to remove internet NAT: {e}")
             return False
+
+    # DHCP Server Methods (using ISC dhcpd)
+
+    def configure_dhcp_server(
+        self,
+        container_id: str,
+        network_name: str,
+        subnet: str,
+        gateway: str,
+        dns_servers: Optional[str] = None,
+        dns_search: Optional[str] = None,
+        range_start: Optional[str] = None,
+        range_end: Optional[str] = None,
+        lease_time: int = 86400,
+        interface: Optional[str] = None
+    ) -> bool:
+        """
+        Configure DHCP server for a network using ISC dhcpd.
+
+        Args:
+            container_id: Router container ID
+            network_name: Network name (used for config file naming)
+            subnet: Network subnet in CIDR (e.g., "10.0.1.0/24")
+            gateway: Default gateway IP (usually the router interface IP)
+            dns_servers: Comma-separated DNS servers (e.g., "8.8.8.8,8.8.4.4")
+            dns_search: DNS search domain (e.g., "corp.local")
+            range_start: Start of DHCP range (defaults to .10)
+            range_end: End of DHCP range (defaults to .250)
+            lease_time: DHCP lease time in seconds (default 86400 = 24 hours)
+            interface: Interface to listen on (auto-detected if not specified)
+
+        Returns:
+            True if successful
+        """
+        try:
+            # Parse subnet to calculate DHCP range
+            subnet_obj = ipaddress.ip_network(subnet, strict=False)
+            hosts = list(subnet_obj.hosts())
+            netmask = str(subnet_obj.netmask)
+            network_addr = str(subnet_obj.network_address)
+
+            # Default DHCP range: .10 to .250 (avoiding gateway and reserved IPs)
+            if not range_start:
+                range_start = str(hosts[9]) if len(hosts) > 10 else str(hosts[1])
+            if not range_end:
+                range_end = str(hosts[min(249, len(hosts) - 2)]) if len(hosts) > 250 else str(hosts[-2])
+
+            # Sanitize network name for config file
+            safe_name = network_name.replace("-", "_").replace(" ", "_").lower()[:32]
+
+            # Build DNS servers string
+            if dns_servers:
+                dns_list = [s.strip() for s in dns_servers.split(",") if s.strip()]
+                dns_str = ", ".join(dns_list)
+            else:
+                dns_str = "8.8.8.8, 8.8.4.4"
+
+            # Build ISC dhcpd configuration
+            config_lines = [
+                f"# DHCP config for {network_name}",
+                f"subnet {network_addr} netmask {netmask} {{",
+                f"    range {range_start} {range_end};",
+                f"    option routers {gateway};",
+                f"    option domain-name-servers {dns_str};",
+                f"    default-lease-time {lease_time};",
+                f"    max-lease-time {lease_time * 2};",
+            ]
+
+            # Add DNS search domain if specified
+            if dns_search:
+                config_lines.append(f'    option domain-name "{dns_search}";')
+
+            config_lines.append("}")
+
+            # Determine interface for dhcpd
+            listen_interface = interface or ""
+
+            # Setup directories
+            self.exec_shell_command(container_id, "mkdir -p /var/lib/dhcp /etc/dhcp && touch /var/lib/dhcp/dhcpd.leases")
+
+            # Write config file using base64 to avoid shell escaping issues
+            config_file = f"/etc/dhcp/dhcpd-{safe_name}.conf"
+            config_content = "\n".join(config_lines)
+
+            import base64
+            config_b64 = base64.b64encode(config_content.encode()).decode()
+
+            write_cmd = f"echo '{config_b64}' | base64 -d > {config_file}"
+            exit_code, output = self.exec_shell_command(container_id, write_cmd)
+            if exit_code != 0:
+                logger.error(f"Failed to write DHCP config: {output}")
+                return False
+
+            # Kill existing dhcpd and restart
+            self.exec_shell_command(container_id, "killall dhcpd 2>/dev/null || true")
+            time.sleep(1)
+
+            # Build combined config from all dhcpd config files
+            self.exec_shell_command(container_id, "cat /etc/dhcp/dhcpd-*.conf 2>/dev/null > /etc/dhcp/dhcpd.conf.combined")
+
+            # Start dhcpd with combined config using nohup to avoid zombie processes
+            # Use -f flag for foreground mode combined with nohup for proper daemonization
+            if listen_interface:
+                start_cmd = f"rm -f /var/run/dhcpd.pid; nohup dhcpd -f -cf /etc/dhcp/dhcpd.conf.combined -lf /var/lib/dhcp/dhcpd.leases {listen_interface} > /var/log/dhcpd.log 2>&1 &"
+            else:
+                start_cmd = "rm -f /var/run/dhcpd.pid; nohup dhcpd -f -cf /etc/dhcp/dhcpd.conf.combined -lf /var/lib/dhcp/dhcpd.leases > /var/log/dhcpd.log 2>&1 &"
+
+            exit_code, output = self.exec_shell_command(container_id, start_cmd)
+
+            # Verify dhcpd is running
+            time.sleep(2)
+            check_code, check_output = self.exec_shell_command(container_id, "pgrep -x dhcpd")
+
+            if check_code != 0:
+                logger.error(f"dhcpd not running after configuration: {output}")
+                return False
+
+            logger.info(f"Configured DHCP server (dhcpd) for {network_name} ({subnet}), range {range_start}-{range_end}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to configure DHCP server: {e}")
+            return False
+
+    def remove_dhcp_server(
+        self,
+        container_id: str,
+        network_name: str,
+        subnet: str
+    ) -> bool:
+        """
+        Remove DHCP server configuration for a network.
+
+        Args:
+            container_id: Router container ID
+            network_name: Network name
+            subnet: Network subnet in CIDR
+
+        Returns:
+            True if successful
+        """
+        try:
+            # Sanitize network name
+            safe_name = network_name.replace("-", "_").replace(" ", "_").lower()[:32]
+
+            # Remove config file and restart dhcpd
+            # Kill existing dhcpd
+            self.exec_shell_command(container_id, "pkill -x dhcpd 2>/dev/null || true")
+
+            # Remove the config file
+            self.exec_shell_command(container_id, f"rm -f /etc/dhcp/dhcpd-{safe_name}.conf")
+
+            # Rebuild combined config and restart if any configs remain
+            self.exec_shell_command(container_id, "cat /etc/dhcp/dhcpd-*.conf 2>/dev/null > /etc/dhcp/dhcpd.conf.combined || rm -f /etc/dhcp/dhcpd.conf.combined")
+
+            # Check if we have any remaining DHCP configs
+            check_code, _ = self.exec_shell_command(container_id, "test -s /etc/dhcp/dhcpd.conf.combined")
+            if check_code == 0:
+                # Start dhcpd with remaining configs
+                self.exec_shell_command(
+                    container_id,
+                    "rm -f /var/run/dhcpd.pid; nohup dhcpd -f -cf /etc/dhcp/dhcpd.conf.combined -lf /var/lib/dhcp/dhcpd.leases > /var/log/dhcpd.log 2>&1 &"
+                )
+
+            logger.info(f"Removed DHCP server configuration for {network_name}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to remove DHCP server config: {e}")
+            return False
+
+    def toggle_dhcp_server(
+        self,
+        container_id: str,
+        network_name: str,
+        subnet: str,
+        gateway: str,
+        enable: bool,
+        dns_servers: Optional[str] = None,
+        dns_search: Optional[str] = None
+    ) -> bool:
+        """
+        Enable or disable DHCP server for a network.
+
+        Args:
+            container_id: Router container ID
+            network_name: Network name
+            subnet: Network subnet
+            gateway: Gateway IP
+            enable: True to enable, False to disable
+            dns_servers: DNS servers (for enable)
+            dns_search: DNS search domain (for enable)
+
+        Returns:
+            True if successful
+        """
+        if enable:
+            return self.configure_dhcp_server(
+                container_id=container_id,
+                network_name=network_name,
+                subnet=subnet,
+                gateway=gateway,
+                dns_servers=dns_servers,
+                dns_search=dns_search
+            )
+        else:
+            return self.remove_dhcp_server(
+                container_id=container_id,
+                network_name=network_name,
+                subnet=subnet
+            )
 
 
 # Singleton instance

@@ -389,6 +389,10 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
                     linux_username=vm.linux_username,
                     linux_password=vm.linux_password,
                     linux_user_sudo=vm.linux_user_sudo if vm.linux_user_sudo is not None else True,
+                    # Network DNS configuration
+                    gateway=network.gateway,
+                    dns_servers=network.dns_servers,
+                    dns_search=network.dns_search,
                 )
             else:
                 container_id = docker.create_container(
@@ -404,6 +408,9 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
                     linux_username=vm.linux_username,
                     linux_password=vm.linux_password,
                     linux_user_sudo=vm.linux_user_sudo if vm.linux_user_sudo is not None else True,
+                    # Network DNS configuration
+                    dns_servers=network.dns_servers,
+                    dns_search=network.dns_search,
                 )
 
             vm.container_id = container_id

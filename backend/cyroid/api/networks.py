@@ -307,6 +307,79 @@ def toggle_network_internet(network_id: UUID, db: DBSession, current_user: Curre
     return network
 
 
+@router.post("/{network_id}/toggle-dhcp", response_model=NetworkResponse)
+def toggle_network_dhcp(network_id: UUID, db: DBSession, current_user: CurrentUser):
+    """
+    Toggle DHCP server on/off for a provisioned network.
+
+    When enabled, VyOS router provides DHCP for this network, assigning IPs
+    to VMs/containers that use DHCP. The DHCP range is automatically calculated
+    from the subnet (.10 to .250 for /24 networks).
+    """
+    from cyroid.models.router import RangeRouter, RouterStatus
+
+    network = db.query(Network).filter(Network.id == network_id).first()
+    if not network:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Network not found",
+        )
+
+    if not network.docker_network_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Network not provisioned. Deploy the range first.",
+        )
+
+    # Get the VyOS router for this range
+    router = db.query(RangeRouter).filter(RangeRouter.range_id == network.range_id).first()
+    if not router or not router.container_id or router.status != RouterStatus.RUNNING:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="VyOS router not available. Deploy the range first.",
+        )
+
+    try:
+        from cyroid.services.vyos_service import get_vyos_service
+        vyos = get_vyos_service()
+
+        if network.dhcp_enabled:
+            # Disable DHCP - remove DHCP server config
+            vyos.remove_dhcp_server(router.container_id, network.name, network.subnet)
+            network.dhcp_enabled = False
+            logger.info(f"Disabled DHCP for network {network.name}")
+        else:
+            # Enable DHCP - configure DHCP server
+            if not vyos.configure_dhcp_server(
+                container_id=router.container_id,
+                network_name=network.name,
+                subnet=network.subnet,
+                gateway=network.gateway,
+                dns_servers=network.dns_servers,
+                dns_search=network.dns_search
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Failed to configure DHCP server",
+                )
+            network.dhcp_enabled = True
+            logger.info(f"Enabled DHCP for network {network.name}")
+
+        db.commit()
+        db.refresh(network)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to toggle DHCP for network {network_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to toggle DHCP: {str(e)}",
+        )
+
+    return network
+
+
 @router.post("/{network_id}/teardown", response_model=NetworkResponse)
 def teardown_network(network_id: UUID, db: DBSession, current_user: CurrentUser):
     """Remove the Docker network for this network configuration."""

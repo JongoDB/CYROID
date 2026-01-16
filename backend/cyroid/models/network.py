@@ -14,7 +14,11 @@ class Network(Base, UUIDMixin, TimestampMixin):
     name: Mapped[str] = mapped_column(String(100))
     subnet: Mapped[str] = mapped_column(String(18))  # CIDR notation
     gateway: Mapped[str] = mapped_column(String(15))
-    dns_servers: Mapped[Optional[str]] = mapped_column(String(255))  # Comma-separated
+    dns_servers: Mapped[Optional[str]] = mapped_column(String(255), default="8.8.8.8,8.8.4.4")  # Comma-separated
+    dns_search: Mapped[Optional[str]] = mapped_column(String(255))  # Search domain (e.g., "corp.local")
+
+    # DHCP configuration - when True, VyOS provides DHCP for this network
+    dhcp_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # Docker network ID (set after creation)
     docker_network_id: Mapped[Optional[str]] = mapped_column(String(64))

@@ -139,10 +139,21 @@ def deploy_range_task(range_id: str):
                             interface_name
                         )
 
+                    # Configure DHCP server if enabled
+                    if network.dhcp_enabled:
+                        vyos.configure_dhcp_server(
+                            container_id=router.container_id,
+                            network_name=network.name,
+                            subnet=network.subnet,
+                            gateway=network.gateway,
+                            dns_servers=network.dns_servers,
+                            dns_search=network.dns_search
+                        )
+
                     interface_num += 1
                     db.commit()
 
-                logger.info(f"Provisioned network {network.name} (isolated={network.is_isolated}, internet={network.internet_enabled})")
+                logger.info(f"Provisioned network {network.name} (isolated={network.is_isolated}, internet={network.internet_enabled}, dhcp={network.dhcp_enabled})")
 
         # Step 2: Create and start all VMs
         vms = db.query(VM).filter(VM.range_id == UUID(range_id)).all()
@@ -173,6 +184,9 @@ def deploy_range_task(range_id: str):
                             memory_limit_mb=vm.ram_mb,
                             disk_size_gb=vm.disk_gb,
                             labels=labels,
+                            gateway=network.gateway,
+                            dns_servers=network.dns_servers,
+                            dns_search=network.dns_search,
                         )
                     else:
                         container_id = docker.create_container(
@@ -184,6 +198,8 @@ def deploy_range_task(range_id: str):
                             memory_limit_mb=vm.ram_mb,
                             hostname=vm.hostname,
                             labels=labels,
+                            dns_servers=network.dns_servers,
+                            dns_search=network.dns_search,
                         )
 
                     vm.container_id = container_id

@@ -5,7 +5,7 @@ import { rangesApi, networksApi, vmsApi, templatesApi, NetworkCreate, VMCreate }
 import type { Range, Network, VM, VMTemplate } from '../types'
 import {
   ArrowLeft, Plus, Loader2, X, Play, Square, RotateCw,
-  Network as NetworkIcon, Server, Trash2, Rocket, Activity, Monitor, Shield, Download, Pencil, Globe, Router
+  Network as NetworkIcon, Server, Trash2, Rocket, Activity, Monitor, Shield, Download, Pencil, Globe, Router, Wifi
 } from 'lucide-react'
 import clsx from 'clsx'
 import { VncConsole } from '../components/console/VncConsole'
@@ -218,6 +218,23 @@ export default function RangeDetail() {
       fetchData()
     } catch (err: any) {
       alert(err.response?.data?.detail || 'Failed to toggle internet access')
+    }
+  }
+
+  const handleToggleDhcp = async (network: Network) => {
+    if (!network.docker_network_id) {
+      alert('Network must be provisioned first (deploy the range)')
+      return
+    }
+    if (!network.vyos_interface) {
+      alert('VyOS router not connected to this network. Redeploy the range.')
+      return
+    }
+    try {
+      await networksApi.toggleDhcp(network.id)
+      fetchData()
+    } catch (err: any) {
+      alert(err.response?.data?.detail || 'Failed to toggle DHCP')
     }
   }
 
@@ -564,24 +581,44 @@ export default function RangeDetail() {
                           />
                         </button>
                         {network.vyos_interface && (
-                          <button
-                            onClick={() => handleToggleInternet(network)}
-                            className={clsx(
-                              "p-1",
-                              network.internet_enabled
-                                ? "text-green-600 hover:text-green-800"
-                                : "text-gray-400 hover:text-green-600"
-                            )}
-                            title={network.internet_enabled
-                              ? "Internet enabled - Click to disable"
-                              : "No internet - Click to enable NAT"
-                            }
-                          >
-                            <Globe
-                              className="h-4 w-4"
-                              fill={network.internet_enabled ? "currentColor" : "none"}
-                            />
-                          </button>
+                          <>
+                            <button
+                              onClick={() => handleToggleInternet(network)}
+                              className={clsx(
+                                "p-1",
+                                network.internet_enabled
+                                  ? "text-green-600 hover:text-green-800"
+                                  : "text-gray-400 hover:text-green-600"
+                              )}
+                              title={network.internet_enabled
+                                ? "Internet enabled - Click to disable"
+                                : "No internet - Click to enable NAT"
+                              }
+                            >
+                              <Globe
+                                className="h-4 w-4"
+                                fill={network.internet_enabled ? "currentColor" : "none"}
+                              />
+                            </button>
+                            <button
+                              onClick={() => handleToggleDhcp(network)}
+                              className={clsx(
+                                "p-1",
+                                network.dhcp_enabled
+                                  ? "text-blue-600 hover:text-blue-800"
+                                  : "text-gray-400 hover:text-blue-600"
+                              )}
+                              title={network.dhcp_enabled
+                                ? "DHCP enabled - Click to disable"
+                                : "DHCP disabled - Click to enable"
+                              }
+                            >
+                              <Wifi
+                                className="h-4 w-4"
+                                fill={network.dhcp_enabled ? "currentColor" : "none"}
+                              />
+                            </button>
+                          </>
                         )}
                       </>
                     )}
