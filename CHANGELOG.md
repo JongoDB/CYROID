@@ -5,6 +5,17 @@ All notable changes to CYROID will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.6] - 2026-01-17
+
+### Added
+
+- **AI-Friendly API Documentation** ([#12](../../issues/12)): Enhanced OpenAPI documentation with comprehensive descriptions, organized tags, and a dedicated `/api/v1/schema/ai-context` endpoint that provides a condensed API guide for AI assistants. Enables AI tools to generate valid CYROID configurations without source code access.
+
+### Changed
+
+- OpenAPI description now includes concepts guide, quick start, and authentication info
+- API endpoints organized with descriptive tags in Swagger UI
+
 ## [0.4.5] - 2026-01-17
 
 ### Fixed

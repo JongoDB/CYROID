@@ -49,11 +49,57 @@ async def lifespan(app: FastAPI):
     logger.info("Real-time event services stopped")
 
 
+API_DESCRIPTION = """
+# CYROID - Cyber Range Orchestrator In Docker
+
+CYROID is a platform for creating and managing cyber training ranges using Docker containers and VMs.
+
+## Concepts
+
+- **Range**: A complete training environment containing networks and VMs
+- **Network**: An isolated network segment (e.g., 172.16.0.0/24) for VM communication
+- **VM**: A virtual machine (container or QEMU VM) running in the range
+- **Template**: A predefined VM configuration (OS, resources, base image)
+
+## Quick Start
+
+1. **Create a range**: `POST /api/v1/ranges`
+2. **Add networks**: `POST /api/v1/networks`
+3. **Add VMs**: `POST /api/v1/vms`
+4. **Deploy**: `POST /api/v1/ranges/{id}/deploy`
+5. **Access consoles**: Use the WebSocket endpoints or UI
+
+## Authentication
+
+All endpoints (except `/health` and `/api/v1/auth/*`) require a JWT token.
+Include it in the `Authorization` header: `Bearer <token>`
+
+## API Documentation
+
+- **OpenAPI JSON**: `/openapi.json`
+- **Swagger UI**: `/docs`
+- **ReDoc**: `/redoc`
+- **AI Context**: `/api/v1/schema/ai-context` (condensed guide for AI assistants)
+"""
+
 app = FastAPI(
     title=settings.app_name,
-    description="Cyber Range Orchestrator In Docker",
+    description=API_DESCRIPTION,
     version=settings.app_version,
     lifespan=lifespan,
+    openapi_tags=[
+        {"name": "auth", "description": "Authentication and user management"},
+        {"name": "users", "description": "User account management"},
+        {"name": "ranges", "description": "Range lifecycle management"},
+        {"name": "networks", "description": "Network configuration"},
+        {"name": "vms", "description": "Virtual machine management"},
+        {"name": "templates", "description": "VM template library"},
+        {"name": "artifacts", "description": "File and artifact management"},
+        {"name": "snapshots", "description": "VM snapshot management"},
+        {"name": "events", "description": "Event logging and monitoring"},
+        {"name": "msel", "description": "Master Scenario Events List"},
+        {"name": "system", "description": "System configuration and status"},
+    ],
 )
 
 app.add_middleware(
@@ -95,4 +141,121 @@ async def get_version():
         "build_date": settings.build_date,
         "api_version": "v1",
         "app_name": settings.app_name,
+    }
+
+
+AI_CONTEXT = """# CYROID API Quick Reference (for AI Assistants)
+
+## Overview
+CYROID creates Docker-based cyber training ranges with isolated networks and VMs.
+
+## Core Workflow
+1. POST /api/v1/ranges - Create range (name, description)
+2. POST /api/v1/networks - Add networks to range (name, subnet, gateway, is_isolated)
+3. POST /api/v1/vms - Add VMs to range (hostname, template_id, network_id, ip_address)
+4. POST /api/v1/ranges/{id}/deploy - Deploy the range
+5. POST /api/v1/ranges/{id}/start - Start a stopped range
+6. POST /api/v1/ranges/{id}/stop - Stop a running range
+7. POST /api/v1/ranges/{id}/teardown - Destroy and reset to draft
+
+## Key Endpoints
+
+### Ranges
+- GET /api/v1/ranges - List all ranges
+- POST /api/v1/ranges - Create range {"name": "string", "description": "string"}
+- GET /api/v1/ranges/{id} - Get range details
+- DELETE /api/v1/ranges/{id} - Delete range
+
+### Networks
+- GET /api/v1/networks?range_id={id} - List networks in range
+- POST /api/v1/networks - Create network
+  ```json
+  {
+    "range_id": "uuid",
+    "name": "internal",
+    "subnet": "172.16.1.0/24",
+    "gateway": "172.16.1.1",
+    "is_isolated": true
+  }
+  ```
+
+### VMs
+- GET /api/v1/vms?range_id={id} - List VMs in range
+- POST /api/v1/vms - Create VM
+  ```json
+  {
+    "range_id": "uuid",
+    "template_id": "uuid",
+    "network_id": "uuid",
+    "hostname": "webserver",
+    "ip_address": "172.16.1.10",
+    "cpu": 2,
+    "ram_mb": 2048
+  }
+  ```
+- POST /api/v1/vms/{id}/start - Start VM
+- POST /api/v1/vms/{id}/stop - Stop VM
+- POST /api/v1/vms/{id}/networks/{network_id}?ip_address=x.x.x.x - Add network interface
+
+### Templates
+- GET /api/v1/templates - List available VM templates
+  Returns templates with: id, name, os_type, os_variant, base_image, default_cpu, default_ram_mb
+
+## Network Isolation Modes
+- is_isolated=false: Network has internet access via VyOS NAT router
+- is_isolated=true: Air-gapped network, no external access
+
+## VM Types (based on template)
+- Linux containers (KasmVNC for GUI, Docker exec for terminal)
+- Windows VMs (via dockur/windows, VNC console)
+- Linux VMs (via QEMU ISO boot, VNC console)
+
+## Common Patterns
+
+### Red Team Lab
+```json
+{
+  "networks": [
+    {"name": "internet", "subnet": "172.16.0.0/24", "is_isolated": false},
+    {"name": "dmz", "subnet": "172.16.1.0/24", "is_isolated": true},
+    {"name": "internal", "subnet": "172.16.2.0/24", "is_isolated": true}
+  ],
+  "vms": [
+    {"hostname": "kali", "network": "internet", "template": "Kali Linux"},
+    {"hostname": "webserver", "network": "dmz", "template": "Ubuntu Server"},
+    {"hostname": "dc01", "network": "internal", "template": "Windows Server 2019"}
+  ]
+}
+```
+
+## Authentication
+All API calls require: `Authorization: Bearer <jwt_token>`
+Get token via: POST /api/v1/auth/login {"username": "x", "password": "y"}
+
+## Status Values
+- Range: draft, deploying, running, stopped, error
+- VM: pending, creating, running, stopped, error
+- Network: pending, provisioned
+
+## Tips
+- Always deploy range after adding all networks and VMs
+- Use template names to find template_id from GET /templates
+- IP addresses must be within the network's subnet
+- VMs can have multiple network interfaces via POST /vms/{id}/networks/{network_id}
+"""
+
+
+@app.get("/api/v1/schema/ai-context", tags=["system"])
+async def get_ai_context():
+    """
+    Get a condensed API guide optimized for AI assistants.
+
+    This endpoint returns a markdown document that provides AI coding assistants
+    (Claude, GPT, Copilot, etc.) with the context needed to generate valid
+    CYROID API calls without access to source code.
+    """
+    return {
+        "content": AI_CONTEXT,
+        "format": "markdown",
+        "version": settings.app_version,
     }
