@@ -266,9 +266,11 @@ def deploy_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
                 )
                 network.docker_network_id = docker_network_id
 
+                # Connect traefik to this network for VNC/web console routing
+                docker.connect_traefik_to_network(docker_network_id)
+
                 # Apply iptables isolation if network is isolated
                 if network.is_isolated:
-                    docker.connect_traefik_to_network(docker_network_id)
                     docker.setup_network_isolation(docker_network_id, network.subnet)
 
                 db.commit()

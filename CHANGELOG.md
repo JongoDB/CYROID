@@ -5,6 +5,12 @@ All notable changes to CYROID will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.8] - 2026-01-17
+
+### Fixed
+
+- **Traefik Network Connection** ([#17](../../issues/17)): Fixed bug where Traefik was only connected to isolated networks during deployment, causing VNC console access to fail for non-isolated networks. Traefik is now connected to all range networks regardless of isolation status.
+
 ## [0.4.7] - 2026-01-17
 
 ### Fixed
