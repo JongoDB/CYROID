@@ -1,0 +1,98 @@
+// frontend/src/components/wizard/presets/segmentedNetwork.ts
+import { ScenarioPreset } from './types';
+
+export const segmentedNetwork: ScenarioPreset = {
+  id: 'segmented-network',
+  name: 'Segmented Network (DMZ)',
+  description: 'Multi-zone architecture with external, DMZ, and internal networks',
+  icon: 'Shield',
+  zones: [
+    {
+      id: 'external',
+      name: 'External Network',
+      subnet: '10.200.0.0/24',
+      gateway: '10.200.0.1',
+      isIsolated: true,
+      systems: [
+        {
+          id: 'kali',
+          name: 'Kali Linux',
+          ipOffset: 100,
+          templateName: 'Kali Linux',
+          osType: 'linux',
+          role: 'attacker',
+          cpu: 2,
+          ramMb: 4096,
+          diskGb: 40,
+        },
+      ],
+    },
+    {
+      id: 'dmz',
+      name: 'DMZ',
+      subnet: '10.201.0.0/24',
+      gateway: '10.201.0.1',
+      isIsolated: true,
+      systems: [
+        {
+          id: 'web',
+          name: 'Web Server',
+          ipOffset: 10,
+          templateName: 'Ubuntu 22.04',
+          osType: 'linux',
+          role: 'web-server',
+          cpu: 2,
+          ramMb: 2048,
+          diskGb: 20,
+        },
+        {
+          id: 'mail',
+          name: 'Mail Server',
+          ipOffset: 20,
+          templateName: 'Ubuntu 22.04',
+          osType: 'linux',
+          role: 'mail-server',
+          cpu: 2,
+          ramMb: 2048,
+          diskGb: 20,
+        },
+      ],
+    },
+    {
+      id: 'internal',
+      name: 'Internal Network',
+      subnet: '10.202.0.0/24',
+      gateway: '10.202.0.1',
+      isIsolated: true,
+      systems: [
+        {
+          id: 'dc1',
+          name: 'Domain Controller',
+          ipOffset: 10,
+          templateName: 'Windows Server 2022',
+          osType: 'windows',
+          role: 'domain-controller',
+          cpu: 4,
+          ramMb: 4096,
+          diskGb: 60,
+        },
+        {
+          id: 'ws1',
+          name: 'Workstation',
+          ipOffset: 50,
+          templateName: 'Windows 11',
+          osType: 'windows',
+          role: 'workstation',
+          cpu: 2,
+          ramMb: 4096,
+          diskGb: 40,
+        },
+      ],
+    },
+  ],
+  defaultConfig: {
+    domainName: 'internal.local',
+    userCount: 10,
+    vulnerabilityLevel: 'some',
+  },
+};
