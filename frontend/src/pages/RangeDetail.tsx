@@ -85,9 +85,29 @@ export default function RangeDetail() {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [linuxContainerType, setLinuxContainerType] = useState<'kasmvnc' | 'linuxserver' | null>(null)
 
-  // Console modal state
+  // Console state
   const [consoleVm, setConsoleVm] = useState<VM | null>(null)
   const token = useAuthStore((state) => state.token)
+
+  // Open console - new window by default, Shift+click for inline
+  const handleOpenConsole = async (vm: VM, event: React.MouseEvent) => {
+    if (event.shiftKey) {
+      // Shift+click: Open inline modal
+      setConsoleVm(vm)
+      return
+    }
+
+    // Default: Open in new window
+    const width = 1280
+    const height = 800
+    const left = (window.screen.width - width) / 2
+    const top = (window.screen.height - height) / 2
+    window.open(
+      `/console/${vm.id}`,
+      `console_${vm.id}`,
+      `width=${width},height=${height},left=${left},top=${top},menubar=no,toolbar=no,location=no,status=no,resizable=yes,scrollbars=no`
+    )
+  }
 
   // Export dialog state
   const [showExportDialog, setShowExportDialog] = useState(false)
@@ -223,6 +243,17 @@ export default function RangeDetail() {
   useEffect(() => {
     fetchData()
   }, [id])
+
+  // Handle Escape key to close console modal
+  useEffect(() => {
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && consoleVm) {
+        setConsoleVm(null)
+      }
+    }
+    document.addEventListener('keydown', handleEscape)
+    return () => document.removeEventListener('keydown', handleEscape)
+  }, [consoleVm])
 
   const handleDeploy = async () => {
     if (!id) return
@@ -830,9 +861,9 @@ export default function RangeDetail() {
                       {vm.status === 'running' && (
                         <>
                           <button
-                            onClick={() => setConsoleVm(vm)}
+                            onClick={(e) => handleOpenConsole(vm, e)}
                             className="p-1.5 text-gray-400 hover:text-blue-600"
-                            title="Open Console"
+                            title="Open Console (Shift+click for inline)"
                           >
                             <Monitor className="h-4 w-4" />
                           </button>

@@ -615,7 +615,7 @@ def deploy_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
 
 @router.post("/{range_id}/start", response_model=RangeResponse)
 def start_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
-    """Start all VMs in a stopped range"""
+    """Start all VMs and router in a stopped range."""
     range_obj = db.query(Range).filter(Range.id == range_id).first()
     if not range_obj:
         raise HTTPException(
@@ -631,13 +631,27 @@ def start_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
 
     try:
         docker = get_docker_service()
+        vyos = get_vyos_service()
 
+        # Step 1: Start the router first (VMs need networking)
+        range_router = db.query(RangeRouter).filter(RangeRouter.range_id == range_id).first()
+        if range_router and range_router.container_id:
+            try:
+                vyos.start_router(range_router.container_id)
+                range_router.status = RouterStatus.RUNNING
+                db.commit()
+                logger.info(f"Started VyOS router for range {range_id}")
+            except Exception as e:
+                logger.warning(f"Failed to start VyOS router: {e}")
+
+        # Step 2: Start all VM containers
         vms = db.query(VM).filter(VM.range_id == range_id).all()
         for vm in vms:
             if vm.container_id:
                 docker.start_container(vm.container_id)
                 vm.status = VMStatus.RUNNING
                 db.commit()
+                logger.info(f"Started VM {vm.hostname}")
 
         range_obj.status = RangeStatus.RUNNING
         db.commit()
@@ -655,7 +669,11 @@ def start_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
 
 @router.post("/{range_id}/stop", response_model=RangeResponse)
 def stop_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
-    """Stop all VMs in a running range"""
+    """Stop all VMs and router in a running range.
+
+    This stops all containers but preserves networks for quick restart.
+    Use teardown to fully clean up resources.
+    """
     range_obj = db.query(Range).filter(Range.id == range_id).first()
     if not range_obj:
         raise HTTPException(
@@ -671,13 +689,27 @@ def stop_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
 
     try:
         docker = get_docker_service()
+        vyos = get_vyos_service()
 
+        # Step 1: Stop all VM containers
         vms = db.query(VM).filter(VM.range_id == range_id).all()
         for vm in vms:
             if vm.container_id:
                 docker.stop_container(vm.container_id)
                 vm.status = VMStatus.STOPPED
                 db.commit()
+                logger.info(f"Stopped VM {vm.hostname}")
+
+        # Step 2: Stop the router container
+        range_router = db.query(RangeRouter).filter(RangeRouter.range_id == range_id).first()
+        if range_router and range_router.container_id:
+            try:
+                vyos.stop_router(range_router.container_id)
+                range_router.status = RouterStatus.STOPPED
+                db.commit()
+                logger.info(f"Stopped VyOS router for range {range_id}")
+            except Exception as e:
+                logger.warning(f"Failed to stop VyOS router: {e}")
 
         range_obj.status = RangeStatus.STOPPED
         db.commit()

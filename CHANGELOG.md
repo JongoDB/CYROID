@@ -5,6 +5,14 @@ All notable changes to CYROID will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.5] - 2026-01-17
+
+### Fixed
+
+- **Console Opens in New Window** ([#13](../../issues/13)): Console button on Range Detail page now opens console in a new browser window by default (Shift+click for inline modal). Previously only worked from Execution Console.
+- **Range Stop Cleans Up Router** ([#11](../../issues/11)): Stopping a range now properly stops the VyOS router container in addition to VMs. Starting a stopped range now starts the router before VMs.
+- **Escape Key Closes Console** ([#14](../../issues/14)): Pressing Escape now closes the inline console modal and returns to the range view.
+
 ## [0.4.4] - 2026-01-16
 
 ### Added
