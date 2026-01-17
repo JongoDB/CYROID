@@ -569,6 +569,7 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
     except Exception as e:
         logger.error(f"Failed to start VM {vm_id}: {e}")
         vm.status = VMStatus.ERROR
+        vm.error_message = str(e)[:1000]
         db.commit()
 
         # Log error event
@@ -1015,6 +1016,7 @@ def restart_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
     except Exception as e:
         logger.error(f"Failed to restart VM {vm_id}: {e}")
         vm.status = VMStatus.ERROR
+        vm.error_message = str(e)[:1000]
         db.commit()
 
         # Log error event

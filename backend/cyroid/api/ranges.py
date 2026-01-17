@@ -597,6 +597,7 @@ def deploy_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
     except Exception as e:
         logger.error(f"Failed to deploy range {range_id}: {e}")
         range_obj.status = RangeStatus.ERROR
+        range_obj.error_message = str(e)[:1000]
         db.commit()
 
         # Log deployment failure
