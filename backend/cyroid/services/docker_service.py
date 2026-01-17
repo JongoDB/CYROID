@@ -130,6 +130,26 @@ class DockerService:
         except NotFound:
             return None
 
+    def get_container_logs(self, container_id: str, tail: int = 100) -> list[str]:
+        """
+        Get last N lines of container logs.
+
+        Args:
+            container_id: Docker container ID
+            tail: Number of lines to retrieve
+
+        Returns:
+            List of log lines with timestamps
+        """
+        try:
+            container = self.client.containers.get(container_id)
+            logs = container.logs(tail=tail, timestamps=True).decode('utf-8')
+            return logs.strip().split('\n') if logs.strip() else []
+        except NotFound:
+            return ["Container not found - it may have been removed"]
+        except APIError as e:
+            return [f"Error fetching logs: {e}"]
+
     def _connect_to_traefik_network(self, container_id: str) -> None:
         """
         DEPRECATED: VMs should NOT be connected to traefik-routing for security.
