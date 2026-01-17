@@ -24,6 +24,9 @@ class Range(Base, UUIDMixin, TimestampMixin):
     description: Mapped[Optional[str]] = mapped_column(Text)
     status: Mapped[RangeStatus] = mapped_column(default=RangeStatus.DRAFT)
 
+    # Error tracking
+    error_message: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
+
     # Ownership
     created_by: Mapped[UUID] = mapped_column(ForeignKey("users.id"))
     created_by_user = relationship("User", back_populates="ranges")

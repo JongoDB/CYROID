@@ -33,6 +33,9 @@ class VM(Base, UUIDMixin, TimestampMixin):
 
     status: Mapped[VMStatus] = mapped_column(default=VMStatus.PENDING)
 
+    # Error tracking
+    error_message: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
+
     # Docker container ID (set after creation)
     container_id: Mapped[Optional[str]] = mapped_column(String(64))
 
