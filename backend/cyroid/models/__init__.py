@@ -13,6 +13,7 @@ from cyroid.models.connection import Connection, ConnectionProtocol, ConnectionS
 from cyroid.models.msel import MSEL
 from cyroid.models.inject import Inject, InjectStatus
 from cyroid.models.router import RangeRouter, RouterStatus
+from cyroid.models.walkthrough_progress import WalkthroughProgress
 
 __all__ = [
     "Base",
@@ -29,4 +30,5 @@ __all__ = [
     "MSEL",
     "Inject", "InjectStatus",
     "RangeRouter", "RouterStatus",
+    "WalkthroughProgress",
 ]
