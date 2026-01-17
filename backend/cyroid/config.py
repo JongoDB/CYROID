@@ -6,7 +6,7 @@ from functools import lru_cache
 
 class Settings(BaseSettings):
     # Application version
-    app_version: str = "0.4.10"
+    app_version: str = "0.4.11"
     git_commit: str = os.environ.get("GIT_COMMIT", "dev")
     build_date: str = os.environ.get("BUILD_DATE", "")
 

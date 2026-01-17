@@ -5,6 +5,20 @@ All notable changes to CYROID will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.11] - 2026-01-17
+
+### Added
+
+- **Student Lab Page with Walkthrough Panel** ([#8](../../issues/8)): New `/lab/:rangeId` page provides a student-focused experience with integrated step-by-step walkthrough alongside VNC consoles.
+  - WalkthroughPanel: Collapsible left panel with phase navigation, step checklist, and markdown content
+  - Progress tracking: Local storage + optional server sync with auto-save
+  - VM integration: "Open VM" button switches console to referenced VM
+  - Split-pane layout: Resizable panels with embedded VNC console
+  - Markdown rendering: Code blocks, blockquotes (tips/warnings), headers
+  - MSEL extension: Walkthrough content authored in YAML `walkthrough:` section
+  - New WalkthroughProgress model for server-side progress persistence
+  - "Open Lab" button on RangeDetail page for running ranges
+
 ## [0.4.10] - 2026-01-17
 
 ### Fixed
