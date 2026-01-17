@@ -654,3 +654,31 @@ export interface VMLogsResponse {
   lines: string[]
   note: string
 }
+
+// Walkthrough Types
+export interface WalkthroughStep {
+  id: string
+  title: string
+  content: string
+  vm?: string
+}
+
+export interface WalkthroughPhase {
+  id: string
+  name: string
+  steps: WalkthroughStep[]
+}
+
+export interface Walkthrough {
+  title: string
+  phases: WalkthroughPhase[]
+}
+
+export interface WalkthroughProgress {
+  range_id: string
+  user_id: string
+  completed_steps: string[]
+  current_phase: string | null
+  current_step: string | null
+  updated_at: string
+}

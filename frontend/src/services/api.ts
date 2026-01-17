@@ -160,7 +160,7 @@ export const usersApi = {
 }
 
 // Templates API
-import type { VMTemplate, Range, Network, VM, EventLog, EventLogList, VMStatsResponse, VMLogsResponse, ResourceTagsResponse } from '../types'
+import type { VMTemplate, Range, Network, VM, EventLog, EventLogList, VMStatsResponse, VMLogsResponse, ResourceTagsResponse, Walkthrough, WalkthroughProgress } from '../types'
 
 export interface VMTemplateCreate {
   name: string
@@ -566,6 +566,28 @@ export const cacheApi = {
   // Stats and info
   getStats: () => api.get<CacheStats>('/cache/stats'),
   getRecommendedImages: () => api.get<RecommendedImages>('/cache/recommended-images'),
+}
+
+// Walkthrough API
+export interface WalkthroughResponse {
+  walkthrough: Walkthrough | null
+}
+
+export interface WalkthroughProgressUpdate {
+  completed_steps: string[]
+  current_phase?: string
+  current_step?: string
+}
+
+export const walkthroughApi = {
+  get: (rangeId: string) =>
+    api.get<WalkthroughResponse>(`/ranges/${rangeId}/walkthrough`),
+
+  getProgress: (rangeId: string) =>
+    api.get<WalkthroughProgress | null>(`/ranges/${rangeId}/walkthrough/progress`),
+
+  updateProgress: (rangeId: string, data: WalkthroughProgressUpdate) =>
+    api.put<WalkthroughProgress>(`/ranges/${rangeId}/walkthrough/progress`, data),
 }
 
 export default api
