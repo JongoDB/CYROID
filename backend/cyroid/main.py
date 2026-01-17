@@ -18,6 +18,7 @@ from cyroid.api.snapshots import router as snapshots_router
 from cyroid.api.events import router as events_router
 from cyroid.api.connections import router as connections_router
 from cyroid.api.msel import router as msel_router
+from cyroid.api.walkthrough import router as walkthrough_router
 from cyroid.api.cache import router as cache_router
 from cyroid.api.system import router as system_router
 
@@ -98,6 +99,7 @@ app = FastAPI(
         {"name": "snapshots", "description": "VM snapshot management"},
         {"name": "events", "description": "Event logging and monitoring"},
         {"name": "msel", "description": "Master Scenario Events List"},
+        {"name": "walkthrough", "description": "Lab walkthrough and student progress"},
         {"name": "system", "description": "System configuration and status"},
     ],
 )
@@ -123,6 +125,7 @@ app.include_router(snapshots_router, prefix="/api/v1")
 app.include_router(events_router, prefix="/api/v1")
 app.include_router(connections_router, prefix="/api/v1")
 app.include_router(msel_router, prefix="/api/v1")
+app.include_router(walkthrough_router, prefix="/api/v1")
 app.include_router(cache_router, prefix="/api/v1")
 app.include_router(system_router, prefix="/api/v1")
 
