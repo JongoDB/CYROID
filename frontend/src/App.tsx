@@ -11,6 +11,7 @@ import Ranges from './pages/Ranges'
 import RangeDetail from './pages/RangeDetail'
 import ExecutionConsole from './pages/ExecutionConsole'
 import StandaloneConsole from './pages/StandaloneConsole'
+import StudentLab from './pages/StudentLab'
 import ImageCache from './pages/ImageCache'
 import UserManagement from './pages/UserManagement'
 import ProtectedRoute from './components/common/ProtectedRoute'
@@ -40,6 +41,15 @@ function App() {
         element={
           <ProtectedRoute>
             <StandaloneConsole />
+          </ProtectedRoute>
+        }
+      />
+      {/* Student Lab - protected but no layout (immersive experience) */}
+      <Route
+        path="/lab/:rangeId"
+        element={
+          <ProtectedRoute>
+            <StudentLab />
           </ProtectedRoute>
         }
       />
