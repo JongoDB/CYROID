@@ -43,6 +43,7 @@ class RangeUpdate(BaseModel):
 class RangeResponse(RangeBase):
     id: UUID
     status: RangeStatus
+    error_message: Optional[str] = None
     created_by: UUID
     created_at: datetime
     updated_at: datetime
@@ -60,6 +61,7 @@ class RangeResponse(RangeBase):
             name=range_obj.name,
             description=range_obj.description,
             status=range_obj.status,
+            error_message=range_obj.error_message,
             created_by=range_obj.created_by,
             created_at=range_obj.created_at,
             updated_at=range_obj.updated_at,

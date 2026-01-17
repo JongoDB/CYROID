@@ -97,6 +97,7 @@ class VMResponse(VMBase):
     network_id: UUID
     template_id: UUID
     status: VMStatus
+    error_message: Optional[str] = None
     container_id: Optional[str] = None
     # Windows-specific fields
     windows_version: Optional[str] = None

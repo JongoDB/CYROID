@@ -38,6 +38,7 @@ export interface Range {
   name: string
   description: string | null
   status: 'draft' | 'deploying' | 'running' | 'stopped' | 'archived' | 'error'
+  error_message: string | null
   created_by: string
   created_at: string
   updated_at: string
@@ -87,6 +88,7 @@ export interface VM {
   ram_mb: number
   disk_gb: number
   status: 'pending' | 'creating' | 'running' | 'stopped' | 'error'
+  error_message: string | null
   container_id: string | null
   // Windows-specific settings (for dockur/windows VMs)
   windows_version: string | null
@@ -643,3 +645,12 @@ export interface WebSocketMessage {
 }
 
 export type WebSocketConnectionState = 'connecting' | 'connected' | 'disconnected' | 'error'
+
+export interface VMLogsResponse {
+  vm_id: string
+  hostname: string
+  container_id: string
+  tail: number
+  lines: string[]
+  note: string
+}
