@@ -160,7 +160,7 @@ export const usersApi = {
 }
 
 // Templates API
-import type { VMTemplate, Range, Network, VM, EventLog, EventLogList, VMStatsResponse, ResourceTagsResponse } from '../types'
+import type { VMTemplate, Range, Network, VM, EventLog, EventLogList, VMStatsResponse, VMLogsResponse, ResourceTagsResponse } from '../types'
 
 export interface VMTemplateCreate {
   name: string
@@ -385,6 +385,12 @@ export const vmsApi = {
   stop: (id: string) => api.post<VM>(`/vms/${id}/stop`),
   restart: (id: string) => api.post<VM>(`/vms/${id}/restart`),
   getStats: (id: string) => api.get<VMStatsResponse>(`/vms/${id}/stats`),
+  getVmLogs: async (vmId: string, tail: number = 100) => {
+    const response = await api.get<VMLogsResponse>(`/vms/${vmId}/logs`, {
+      params: { tail }
+    })
+    return response.data
+  },
   // Network interface management
   getNetworks: (id: string) => api.get<VMNetworkInfo>(`/vms/${id}/networks`),
   getRangeNetworks: (rangeId: string) => api.get<RangeNetworkInfo>(`/vms/range/${rangeId}/networks`),
