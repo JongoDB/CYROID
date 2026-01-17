@@ -3,7 +3,7 @@ from typing import List, Optional, Tuple
 from uuid import UUID
 import logging
 
-from fastapi import APIRouter, HTTPException, status, Request
+from fastapi import APIRouter, HTTPException, status, Request, Query
 
 from cyroid.api.deps import DBSession, CurrentUser
 from cyroid.models.vm import VM, VMStatus
@@ -1033,3 +1033,54 @@ def restart_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
 
     template = db.query(VMTemplate).filter(VMTemplate.id == vm.template_id).first()
     return vm_to_response(vm, template)
+
+
+@router.get("/{vm_id}/logs")
+def get_vm_logs(
+    vm_id: UUID,
+    db: DBSession,
+    current_user: CurrentUser,
+    tail: int = Query(100, ge=10, le=1000, description="Number of log lines to retrieve"),
+):
+    """
+    Fetch container logs for a VM.
+
+    Returns the last N lines of the container's stdout/stderr with timestamps.
+    For QEMU/Windows VMs, this shows hypervisor output, not guest OS logs.
+    """
+    vm = db.query(VM).filter(VM.id == vm_id).first()
+    if not vm:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="VM not found",
+        )
+
+    range_obj = db.query(Range).filter(Range.id == vm.range_id).first()
+    if not range_obj:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Range not found",
+        )
+    if range_obj.created_by != current_user.id and not current_user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized",
+        )
+
+    if not vm.container_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="VM has no container - it may not be deployed yet",
+        )
+
+    docker = get_docker_service()
+    lines = docker.get_container_logs(vm.container_id, tail=tail)
+
+    return {
+        "vm_id": str(vm_id),
+        "hostname": vm.hostname,
+        "container_id": vm.container_id[:12],
+        "tail": tail,
+        "lines": lines,
+        "note": "For QEMU/Windows VMs, these are hypervisor logs. Use the console for guest OS access.",
+    }
