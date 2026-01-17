@@ -5,7 +5,7 @@ import { rangesApi, networksApi, vmsApi, templatesApi, NetworkCreate, VMCreate }
 import type { Range, Network, VM, VMTemplate, RealtimeEvent } from '../types'
 import {
   ArrowLeft, Plus, Loader2, X, Play, Square, RotateCw,
-  Network as NetworkIcon, Server, Trash2, Rocket, Activity, Monitor, Shield, Download, Pencil, Globe, Router, Wifi, Radio
+  Network as NetworkIcon, Server, Trash2, Rocket, Activity, Monitor, Shield, Download, Pencil, Globe, Router, Wifi, Radio, Wrench
 } from 'lucide-react'
 import clsx from 'clsx'
 import { VncConsole } from '../components/console/VncConsole'
@@ -16,6 +16,7 @@ import ExportRangeDialog from '../components/export/ExportRangeDialog'
 import { DeploymentProgress } from '../components/range/DeploymentProgress'
 import { useRealtimeRange } from '../hooks/useRealtimeRange'
 import { toast } from '../stores/toastStore'
+import { DiagnosticsTab } from '../components/diagnostics'
 
 const statusColors: Record<string, string> = {
   draft: 'bg-gray-100 text-gray-800',
@@ -35,6 +36,9 @@ export default function RangeDetail() {
   const [vms, setVms] = useState<VM[]>([])
   const [templates, setTemplates] = useState<VMTemplate[]>([])
   const [loading, setLoading] = useState(true)
+
+  // Tab state
+  const [activeTab, setActiveTab] = useState<'builder' | 'diagnostics'>('builder')
 
   // Network modal state
   const [showNetworkModal, setShowNetworkModal] = useState(false)
@@ -194,6 +198,16 @@ export default function RangeDetail() {
     onStatusChange: handleStatusChange,
     enabled: !!id,
   })
+
+  // Calculate error count for diagnostics badge
+  const errorCount = useMemo(() => {
+    if (!range) return 0
+    let count = 0
+    if (range.status === 'error') count++
+    if (range.router?.status === 'error') count++
+    count += vms.filter(vm => vm.status === 'error').length
+    return count
+  }, [range, vms])
 
   // Get the currently selected template for the VM form
   const selectedTemplate = useMemo(() => {
@@ -684,7 +698,44 @@ export default function RangeDetail() {
         </div>
       )}
 
-      {/* Networks Section */}
+      {/* Tab Navigation */}
+      <div className="mb-6 border-b border-gray-200">
+        <nav className="-mb-px flex space-x-8">
+          <button
+            onClick={() => setActiveTab('builder')}
+            className={clsx(
+              "py-2 px-1 border-b-2 font-medium text-sm",
+              activeTab === 'builder'
+                ? "border-primary-500 text-primary-600"
+                : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+            )}
+          >
+            Builder
+          </button>
+          <button
+            onClick={() => setActiveTab('diagnostics')}
+            className={clsx(
+              "py-2 px-1 border-b-2 font-medium text-sm flex items-center gap-2",
+              activeTab === 'diagnostics'
+                ? "border-primary-500 text-primary-600"
+                : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+            )}
+          >
+            <Wrench className="h-4 w-4" />
+            Diagnostics
+            {errorCount > 0 && (
+              <span className="px-1.5 py-0.5 text-xs bg-red-100 text-red-700 rounded-full">
+                {errorCount}
+              </span>
+            )}
+          </button>
+        </nav>
+      </div>
+
+      {/* Builder Tab Content */}
+      {activeTab === 'builder' && (
+        <>
+        {/* Networks Section */}
       <div className="bg-white shadow rounded-lg mb-6">
         <div className="px-4 py-5 sm:px-6 flex items-center justify-between border-b">
           <h3 className="text-lg font-medium text-gray-900">Networks</h3>
@@ -898,6 +949,17 @@ export default function RangeDetail() {
           )}
         </div>
       </div>
+        </>
+      )}
+
+      {/* Diagnostics Tab Content */}
+      {activeTab === 'diagnostics' && (
+        <DiagnosticsTab
+          range={range}
+          networks={networks}
+          vms={vms}
+        />
+      )}
 
       {/* Network Modal */}
       {showNetworkModal && (
