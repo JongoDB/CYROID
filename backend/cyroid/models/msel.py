@@ -1,7 +1,7 @@
 # backend/cyroid/models/msel.py
 from typing import Optional, List, TYPE_CHECKING
 from uuid import UUID
-from sqlalchemy import String, Text, ForeignKey
+from sqlalchemy import String, Text, ForeignKey, JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from cyroid.models.base import Base, TimestampMixin, UUIDMixin
@@ -23,6 +23,7 @@ class MSEL(Base, UUIDMixin, TimestampMixin):
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)  # Raw markdown
+    walkthrough: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
 
     # Relationships
     range: Mapped["Range"] = relationship("Range", back_populates="msel")
