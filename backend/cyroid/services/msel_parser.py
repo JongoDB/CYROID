@@ -2,6 +2,8 @@
 import re
 from typing import List, Dict, Any, Optional
 
+import yaml
+
 
 class MSELParser:
     """Parses MSEL markdown documents into structured inject definitions."""
@@ -92,3 +94,55 @@ class MSELParser:
             'description': description,
             'actions': actions
         }
+
+    def parse_walkthrough(self, content: str) -> Optional[dict]:
+        """Extract walkthrough section from MSEL content.
+
+        Supports both pure YAML format and Markdown with YAML front matter.
+        """
+        # Try to parse as YAML first
+        try:
+            data = yaml.safe_load(content)
+            if isinstance(data, dict) and 'walkthrough' in data:
+                return self._validate_walkthrough(data['walkthrough'])
+        except yaml.YAMLError:
+            pass
+
+        # Try to extract from YAML front matter (---\n...\n---)
+        if content.startswith('---'):
+            parts = content.split('---', 2)
+            if len(parts) >= 3:
+                try:
+                    front_matter = yaml.safe_load(parts[1])
+                    if isinstance(front_matter, dict) and 'walkthrough' in front_matter:
+                        return self._validate_walkthrough(front_matter['walkthrough'])
+                except yaml.YAMLError:
+                    pass
+
+        return None
+
+    def _validate_walkthrough(self, walkthrough: dict) -> Optional[dict]:
+        """Validate walkthrough structure."""
+        if not isinstance(walkthrough, dict):
+            return None
+
+        if 'title' not in walkthrough:
+            return None
+
+        if 'phases' not in walkthrough or not isinstance(walkthrough['phases'], list):
+            return None
+
+        for phase in walkthrough['phases']:
+            if not isinstance(phase, dict):
+                return None
+            if 'id' not in phase or 'name' not in phase:
+                return None
+            if 'steps' not in phase or not isinstance(phase['steps'], list):
+                return None
+            for step in phase['steps']:
+                if not isinstance(step, dict):
+                    return None
+                if 'id' not in step or 'title' not in step:
+                    return None
+
+        return walkthrough
