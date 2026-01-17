@@ -5,6 +5,17 @@ All notable changes to CYROID will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.7] - 2026-01-17
+
+### Fixed
+
+- **Console Connection Feedback** ([#15](../../issues/15)): Console windows now provide clear feedback when connections fail or timeout instead of showing blank screens.
+  - VNC console shows 30-second timeout warning with troubleshooting options
+  - Terminal console shows connection status and helpful error messages
+  - Both consoles have a Help button with troubleshooting tips
+  - Loading states clearly indicate connection progress
+  - Error states provide actionable guidance (Retry, Keep Waiting, Close)
+
 ## [0.4.6] - 2026-01-17
 
 ### Added
