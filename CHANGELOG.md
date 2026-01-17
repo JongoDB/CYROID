@@ -5,6 +5,18 @@ All notable changes to CYROID will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.9] - 2026-01-17
+
+### Added
+
+- **Diagnostics Dashboard** ([#4](../../issues/4)): New "Diagnostics" tab on RangeDetail page provides visibility into component health, error history, and container logs without requiring SSH or Docker CLI access.
+  - ComponentHealth: Collapsible status tree showing Range → Router → Networks → VMs with color-coded health indicators
+  - ErrorTimeline: Chronological display of error events (vm_error, deployment_failed, inject_failed) with filtering
+  - LogViewer: On-demand container log retrieval with refresh, copy-to-clipboard, and auto-scroll
+  - Error badge on tab shows count of components in error state
+  - `error_message` field added to VM and Range models to persist error details
+  - New `GET /api/v1/vms/{id}/logs` endpoint for fetching container logs
+
 ## [0.4.8] - 2026-01-17
 
 ### Fixed
