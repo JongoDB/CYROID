@@ -4,6 +4,8 @@ import { templatesApi, cacheApi, VMTemplateCreate } from '../services/api'
 import type { VMTemplate, CachedImage, WindowsVersionsResponse, LinuxVersionsResponse, CustomISOList, RecommendedImages } from '../types'
 import { Plus, Pencil, Trash2, Copy, Loader2, X, Server, Monitor, Info, RefreshCw, Tag, LayoutGrid, List, Disc } from 'lucide-react'
 import clsx from 'clsx'
+import { ConfirmDialog } from '../components/common/ConfirmDialog'
+import { toast } from '../stores/toastStore'
 
 // Core CYROID service images to exclude from the dropdown
 const CYROID_SERVICE_IMAGES = [
@@ -80,6 +82,12 @@ export default function Templates() {
   const [visibilityTags, setVisibilityTags] = useState<string[]>([])
   const [newVisibilityTag, setNewVisibilityTag] = useState('')
   const [visibilityTagsLoading, setVisibilityTagsLoading] = useState(false)
+
+  // Delete confirmation
+  const [deleteConfirm, setDeleteConfirm] = useState<{
+    template: VMTemplate | null
+    isLoading: boolean
+  }>({ template: null, isLoading: false })
 
 
   const fetchTemplates = async () => {
@@ -308,14 +316,20 @@ export default function Templates() {
     }
   }
 
-  const handleDelete = async (template: VMTemplate) => {
-    if (!confirm(`Are you sure you want to delete "${template.name}"?`)) return
+  const handleDelete = (template: VMTemplate) => {
+    setDeleteConfirm({ template, isLoading: false })
+  }
 
+  const confirmDelete = async () => {
+    if (!deleteConfirm.template) return
+    setDeleteConfirm(prev => ({ ...prev, isLoading: true }))
     try {
-      await templatesApi.delete(template.id)
+      await templatesApi.delete(deleteConfirm.template.id)
+      setDeleteConfirm({ template: null, isLoading: false })
       fetchTemplates()
     } catch (err: any) {
-      alert(err.response?.data?.detail || 'Failed to delete template')
+      setDeleteConfirm({ template: null, isLoading: false })
+      toast.error(err.response?.data?.detail || 'Failed to delete template')
     }
   }
 
@@ -324,7 +338,7 @@ export default function Templates() {
       await templatesApi.clone(template.id)
       fetchTemplates()
     } catch (err: any) {
-      alert(err.response?.data?.detail || 'Failed to clone template')
+      toast.error(err.response?.data?.detail || 'Failed to clone template')
     }
   }
 
@@ -1118,6 +1132,18 @@ export default function Templates() {
           </div>
         </div>
       )}
+
+      {/* Delete Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={deleteConfirm.template !== null}
+        title="Delete Template"
+        message={`Are you sure you want to delete "${deleteConfirm.template?.name}"? This action cannot be undone.`}
+        confirmLabel="Delete"
+        variant="danger"
+        onConfirm={confirmDelete}
+        onCancel={() => setDeleteConfirm({ template: null, isLoading: false })}
+        isLoading={deleteConfirm.isLoading}
+      />
     </div>
   )
 }

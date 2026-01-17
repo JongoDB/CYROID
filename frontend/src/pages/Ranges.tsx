@@ -6,6 +6,8 @@ import type { Range } from '../types'
 import { Plus, Loader2, Network, X, Play, Square, Trash2, Upload } from 'lucide-react'
 import clsx from 'clsx'
 import ImportRangeWizard from '../components/import/ImportRangeWizard'
+import { ConfirmDialog } from '../components/common/ConfirmDialog'
+import { toast } from '../stores/toastStore'
 
 const statusColors: Record<string, string> = {
   draft: 'bg-gray-100 text-gray-800',
@@ -24,6 +26,10 @@ export default function Ranges() {
   const [formData, setFormData] = useState<RangeCreate>({ name: '', description: '' })
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [deleteConfirm, setDeleteConfirm] = useState<{
+    range: Range | null
+    isLoading: boolean
+  }>({ range: null, isLoading: false })
 
   const fetchRanges = async () => {
     try {
@@ -71,18 +77,24 @@ export default function Ranges() {
       await rangesApi.stop(range.id)
       fetchRanges()
     } catch (err: any) {
-      alert(err.response?.data?.detail || 'Failed to stop range')
+      toast.error(err.response?.data?.detail || 'Failed to stop range')
     }
   }
 
-  const handleDelete = async (range: Range) => {
-    if (!confirm(`Are you sure you want to delete "${range.name}"?`)) return
+  const handleDelete = (range: Range) => {
+    setDeleteConfirm({ range, isLoading: false })
+  }
 
+  const confirmDelete = async () => {
+    if (!deleteConfirm.range) return
+    setDeleteConfirm(prev => ({ ...prev, isLoading: true }))
     try {
-      await rangesApi.delete(range.id)
+      await rangesApi.delete(deleteConfirm.range.id)
+      setDeleteConfirm({ range: null, isLoading: false })
       fetchRanges()
     } catch (err: any) {
-      alert(err.response?.data?.detail || 'Failed to delete range')
+      setDeleteConfirm({ range: null, isLoading: false })
+      toast.error(err.response?.data?.detail || 'Failed to delete range')
     }
   }
 
@@ -281,6 +293,18 @@ export default function Ranges() {
           setShowImportWizard(false)
           fetchRanges()  // Refresh list after import
         }}
+      />
+
+      {/* Delete Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={deleteConfirm.range !== null}
+        title="Delete Range"
+        message={`Are you sure you want to delete "${deleteConfirm.range?.name}"? This will permanently remove the range and all associated VMs and networks. This action cannot be undone.`}
+        confirmLabel="Delete"
+        variant="danger"
+        onConfirm={confirmDelete}
+        onCancel={() => setDeleteConfirm({ range: null, isLoading: false })}
+        isLoading={deleteConfirm.isLoading}
       />
     </div>
   )

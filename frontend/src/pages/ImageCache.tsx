@@ -37,6 +37,8 @@ import {
   Terminal,
 } from 'lucide-react'
 import clsx from 'clsx'
+import { ConfirmDialog } from '../components/common/ConfirmDialog'
+import { toast } from '../stores/toastStore'
 
 type TabType = 'overview' | 'docker' | 'isos' | 'linux-isos' | 'custom-isos' | 'snapshots'
 
@@ -81,6 +83,14 @@ export default function ImageCache() {
   const [customISODownloadStatus, setCustomISODownloadStatus] = useState<Record<string, CustomISOStatusResponse>>({})
   // Pull state for tracking Docker image pulls
   const [dockerPullStatus, setDockerPullStatus] = useState<Record<string, DockerPullStatus>>({})
+
+  // Delete confirmation state
+  const [deleteConfirm, setDeleteConfirm] = useState<{
+    type: 'docker' | 'snapshot' | 'windows-iso' | 'linux-iso' | 'custom-iso' | null
+    name: string
+    id?: string
+    isLoading: boolean
+  }>({ type: null, name: '', isLoading: false })
 
   const loadData = async () => {
     setLoading(true)
@@ -439,37 +449,12 @@ export default function ImageCache() {
     }
   }
 
-  const handleRemoveImage = async (imageId: string, tag: string) => {
-    if (!confirm(`Remove cached image ${tag}?`)) return
-
-    setActionLoading(imageId)
-    setError(null)
-    try {
-      await cacheApi.removeImage(imageId)
-      setSuccess(`Removed ${tag}`)
-      await loadData()
-    } catch (err: any) {
-      setError(err.response?.data?.detail || `Failed to remove ${tag}`)
-    } finally {
-      setActionLoading(null)
-    }
+  const handleRemoveImage = (imageId: string, tag: string) => {
+    setDeleteConfirm({ type: 'docker', name: tag, id: imageId, isLoading: false })
   }
 
-  const handleDeleteSnapshot = async (snapshotType: 'windows' | 'docker', name: string) => {
-    const typeLabel = snapshotType === 'windows' ? 'Windows golden image' : 'Docker snapshot'
-    if (!confirm(`Delete ${typeLabel} "${name}"? This cannot be undone.`)) return
-
-    setActionLoading(`snapshot-${snapshotType}-${name}`)
-    setError(null)
-    try {
-      await cacheApi.deleteSnapshot(snapshotType, name)
-      setSuccess(`Deleted ${typeLabel}: ${name}`)
-      await loadData()
-    } catch (err: any) {
-      setError(err.response?.data?.detail || `Failed to delete ${name}`)
-    } finally {
-      setActionLoading(null)
-    }
+  const handleDeleteSnapshot = (snapshotType: 'windows' | 'docker', name: string) => {
+    setDeleteConfirm({ type: 'snapshot', name: `${snapshotType}:${name}`, isLoading: false })
   }
 
   const handleDownloadCustomISO = async () => {
@@ -517,42 +502,12 @@ export default function ImageCache() {
     }
   }
 
-  const handleDeleteCustomISO = async (filename: string, name: string) => {
-    if (!confirm(`Delete custom ISO "${name}"? This cannot be undone.`)) return
-
-    setActionLoading(`custom-iso-${filename}`)
-    setError(null)
-    try {
-      await cacheApi.deleteCustomISO(filename)
-      setSuccess(`Deleted custom ISO: ${name}`)
-      // Clear download status
-      setCustomISODownloadStatus(prev => {
-        const newStatus = { ...prev }
-        delete newStatus[filename]
-        return newStatus
-      })
-      await loadData()
-    } catch (err: any) {
-      setError(err.response?.data?.detail || `Failed to delete ${name}`)
-    } finally {
-      setActionLoading(null)
-    }
+  const handleDeleteCustomISO = (filename: string, name: string) => {
+    setDeleteConfirm({ type: 'custom-iso', name, id: filename, isLoading: false })
   }
 
-  const handleDeleteWindowsISO = async (version: string, name: string) => {
-    if (!confirm(`Delete Windows ISO "${name}" (${version})? This cannot be undone.`)) return
-
-    setActionLoading(`windows-iso-${version}`)
-    setError(null)
-    try {
-      await cacheApi.deleteWindowsISO(version)
-      setSuccess(`Deleted Windows ISO: ${name}`)
-      await loadData()
-    } catch (err: any) {
-      setError(err.response?.data?.detail || `Failed to delete ${name}`)
-    } finally {
-      setActionLoading(null)
-    }
+  const handleDeleteWindowsISO = (version: string, name: string) => {
+    setDeleteConfirm({ type: 'windows-iso', name: `${name} (${version})`, id: version, isLoading: false })
   }
 
   const handleDownloadWindowsISO = async (version: WindowsVersion, customUrl?: string) => {
@@ -693,25 +648,63 @@ export default function ImageCache() {
     }
   }
 
-  const handleDeleteLinuxISO = async (version: string) => {
-    if (!confirm(`Delete Linux ISO for ${version}?`)) return
+  const handleDeleteLinuxISO = (version: string) => {
+    setDeleteConfirm({ type: 'linux-iso', name: version, id: version, isLoading: false })
+  }
 
-    setActionLoading(`delete-linux-${version}`)
+  const confirmDelete = async () => {
+    if (!deleteConfirm.type) return
+    setDeleteConfirm(prev => ({ ...prev, isLoading: true }))
     setError(null)
+
     try {
-      await cacheApi.deleteLinuxISO(version)
-      setSuccess(`Deleted Linux ISO: ${version}`)
-      // Clear download status
-      setLinuxDownloadStatus(prev => {
-        const newStatus = { ...prev }
-        delete newStatus[version]
-        return newStatus
-      })
+      switch (deleteConfirm.type) {
+        case 'docker':
+          if (deleteConfirm.id) {
+            await cacheApi.removeImage(deleteConfirm.id)
+            toast.success(`Removed ${deleteConfirm.name}`)
+          }
+          break
+        case 'snapshot': {
+          const [snapshotType, name] = deleteConfirm.name.split(':')
+          await cacheApi.deleteSnapshot(snapshotType as 'windows' | 'docker', name)
+          toast.success(`Deleted snapshot: ${name}`)
+          break
+        }
+        case 'custom-iso':
+          if (deleteConfirm.id) {
+            await cacheApi.deleteCustomISO(deleteConfirm.id)
+            setCustomISODownloadStatus(prev => {
+              const newStatus = { ...prev }
+              delete newStatus[deleteConfirm.id!]
+              return newStatus
+            })
+            toast.success(`Deleted custom ISO: ${deleteConfirm.name}`)
+          }
+          break
+        case 'windows-iso':
+          if (deleteConfirm.id) {
+            await cacheApi.deleteWindowsISO(deleteConfirm.id)
+            toast.success(`Deleted Windows ISO: ${deleteConfirm.name}`)
+          }
+          break
+        case 'linux-iso':
+          if (deleteConfirm.id) {
+            await cacheApi.deleteLinuxISO(deleteConfirm.id)
+            setLinuxDownloadStatus(prev => {
+              const newStatus = { ...prev }
+              delete newStatus[deleteConfirm.id!]
+              return newStatus
+            })
+            toast.success(`Deleted Linux ISO: ${deleteConfirm.name}`)
+          }
+          break
+      }
+      setDeleteConfirm({ type: null, name: '', isLoading: false })
       await loadData()
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to delete ISO')
-    } finally {
-      setActionLoading(null)
+      setDeleteConfirm({ type: null, name: '', isLoading: false })
+      toast.error(err.response?.data?.detail || `Failed to delete ${deleteConfirm.name}`)
     }
   }
 
@@ -1832,6 +1825,24 @@ export default function ImageCache() {
           </div>
         </div>
       )}
+
+      {/* Delete Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={deleteConfirm.type !== null}
+        title={
+          deleteConfirm.type === 'docker' ? 'Remove Docker Image' :
+          deleteConfirm.type === 'snapshot' ? 'Delete Snapshot' :
+          deleteConfirm.type === 'windows-iso' ? 'Delete Windows ISO' :
+          deleteConfirm.type === 'linux-iso' ? 'Delete Linux ISO' :
+          deleteConfirm.type === 'custom-iso' ? 'Delete Custom ISO' : 'Delete'
+        }
+        message={`Are you sure you want to delete "${deleteConfirm.name}"? This action cannot be undone.`}
+        confirmLabel="Delete"
+        variant="danger"
+        onConfirm={confirmDelete}
+        onCancel={() => setDeleteConfirm({ type: null, name: '', isLoading: false })}
+        isLoading={deleteConfirm.isLoading}
+      />
     </div>
   )
 }
@@ -2216,7 +2227,7 @@ function LinuxVersionSection({ title, versions, icon: Icon, colorClass, onDelete
   versions: LinuxVersion[]
   icon: typeof Monitor
   colorClass: string
-  onDelete: (version: string) => Promise<void>
+  onDelete: (version: string) => void
   onDownload: (version: LinuxVersion, customUrl?: string) => Promise<void>
   onCancel: (version: string) => Promise<void>
   downloadStatus: Record<string, LinuxISODownloadStatus>

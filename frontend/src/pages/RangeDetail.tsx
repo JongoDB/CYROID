@@ -17,6 +17,7 @@ import { DeploymentProgress } from '../components/range/DeploymentProgress'
 import { useRealtimeRange } from '../hooks/useRealtimeRange'
 import { toast } from '../stores/toastStore'
 import { DiagnosticsTab } from '../components/diagnostics'
+import { ConfirmDialog } from '../components/common/ConfirmDialog'
 
 const statusColors: Record<string, string> = {
   draft: 'bg-gray-100 text-gray-800',
@@ -130,6 +131,13 @@ export default function RangeDetail() {
 
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // Delete confirmation state
+  const [deleteConfirm, setDeleteConfirm] = useState<{
+    type: 'network' | 'vm' | null
+    item: Network | VM | null
+    isLoading: boolean
+  }>({ type: null, item: null, isLoading: false })
 
   // Architecture detection for emulation warning
   const isArmHost = useIsArmHost()
@@ -324,13 +332,21 @@ export default function RangeDetail() {
     }
   }
 
-  const handleDeleteNetwork = async (network: Network) => {
-    if (!confirm(`Delete network "${network.name}"?`)) return
+  const handleDeleteNetwork = (network: Network) => {
+    setDeleteConfirm({ type: 'network', item: network, isLoading: false })
+  }
+
+  const confirmDeleteNetwork = async () => {
+    if (!deleteConfirm.item || deleteConfirm.type !== 'network') return
+    const network = deleteConfirm.item as Network
+    setDeleteConfirm(prev => ({ ...prev, isLoading: true }))
     try {
       await networksApi.delete(network.id)
+      setDeleteConfirm({ type: null, item: null, isLoading: false })
       fetchData()
     } catch (err: any) {
-      alert(err.response?.data?.detail || 'Failed to delete network')
+      setDeleteConfirm({ type: null, item: null, isLoading: false })
+      toast.error(err.response?.data?.detail || 'Failed to delete network')
     }
   }
 
@@ -545,17 +561,25 @@ export default function RangeDetail() {
       else if (action === 'restart') await vmsApi.restart(vm.id)
       fetchData()
     } catch (err: any) {
-      alert(err.response?.data?.detail || `Failed to ${action} VM`)
+      toast.error(err.response?.data?.detail || `Failed to ${action} VM`)
     }
   }
 
-  const handleDeleteVm = async (vm: VM) => {
-    if (!confirm(`Delete VM "${vm.hostname}"?`)) return
+  const handleDeleteVm = (vm: VM) => {
+    setDeleteConfirm({ type: 'vm', item: vm, isLoading: false })
+  }
+
+  const confirmDeleteVm = async () => {
+    if (!deleteConfirm.item || deleteConfirm.type !== 'vm') return
+    const vm = deleteConfirm.item as VM
+    setDeleteConfirm(prev => ({ ...prev, isLoading: true }))
     try {
       await vmsApi.delete(vm.id)
+      setDeleteConfirm({ type: null, item: null, isLoading: false })
       fetchData()
     } catch (err: any) {
-      alert(err.response?.data?.detail || 'Failed to delete VM')
+      setDeleteConfirm({ type: null, item: null, isLoading: false })
+      toast.error(err.response?.data?.detail || 'Failed to delete VM')
     }
   }
 
@@ -1837,6 +1861,22 @@ export default function RangeDetail() {
           </div>
         </div>
       )}
+
+      {/* Delete Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={deleteConfirm.type !== null}
+        title={deleteConfirm.type === 'network' ? 'Delete Network' : 'Delete VM'}
+        message={
+          deleteConfirm.type === 'network'
+            ? `Are you sure you want to delete "${(deleteConfirm.item as Network)?.name}"? This action cannot be undone.`
+            : `Are you sure you want to delete "${(deleteConfirm.item as VM)?.hostname}"? This action cannot be undone.`
+        }
+        confirmLabel="Delete"
+        variant="danger"
+        onConfirm={deleteConfirm.type === 'network' ? confirmDeleteNetwork : confirmDeleteVm}
+        onCancel={() => setDeleteConfirm({ type: null, item: null, isLoading: false })}
+        isLoading={deleteConfirm.isLoading}
+      />
     </div>
   )
 }
