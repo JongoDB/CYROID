@@ -5,6 +5,15 @@ All notable changes to CYROID will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.10] - 2026-01-17
+
+### Fixed
+
+- **Delete Confirmation UX** ([#20](../../issues/20)): Replaced browser native `window.confirm()` popups with styled confirmation dialogs. Fixed double-click issue and improved visual consistency across all delete operations.
+  - Created reusable ConfirmDialog component with danger/warning/info variants
+  - Updated Range, Network, VM, Template, and Image Cache delete confirmations
+  - Replaced `alert()` error messages with toast notifications
+
 ## [0.4.9] - 2026-01-17
 
 ### Added
