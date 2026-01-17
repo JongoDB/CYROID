@@ -43,6 +43,7 @@ class MSELResponse(BaseModel):
     name: str
     range_id: UUID
     content: Optional[str] = None
+    walkthrough: Optional[dict] = None
     injects: List[InjectResponse]
 
     class Config:
@@ -72,12 +73,14 @@ def import_msel(
     # Parse MSEL
     parser = MSELParser()
     parsed_injects = parser.parse(data.content)
+    walkthrough = parser.parse_walkthrough(data.content)
 
     # Create MSEL
     msel = MSEL(
         range_id=range_id,
         name=data.name,
-        content=data.content
+        content=data.content,
+        walkthrough=walkthrough
     )
     db.add(msel)
     db.commit()
@@ -104,6 +107,7 @@ def import_msel(
         id=msel.id,
         name=msel.name,
         range_id=msel.range_id,
+        walkthrough=msel.walkthrough,
         injects=[
             InjectResponse(
                 id=i.id,
@@ -144,6 +148,7 @@ def get_msel(
         name=msel.name,
         range_id=msel.range_id,
         content=msel.content,
+        walkthrough=msel.walkthrough,
         injects=[
             InjectResponse(
                 id=i.id,
