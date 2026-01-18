@@ -1,8 +1,8 @@
 # CYROID VyOS Router Template
-# VyOS network router for internal routing between network segments
-
 seed_id: vyos-router
 name: "VyOS Router"
+os_family: vyos
+os_version: "1.2"
 description: |
   VyOS network router container for internal routing between network segments.
   Deploy under the edge router to segment your range into multiple LANs with
@@ -15,9 +15,6 @@ description: |
   - Firewall/ACL support
   - VPN capabilities (IPsec, WireGuard, OpenVPN)
 
-  Note: Each range gets an automatic edge router for external connectivity.
-  This template is for deploying additional internal routers.
-
 os_type: network
 os_variant: "VyOS 1.2.x"
 vm_type: container
@@ -25,7 +22,7 @@ base_image: 2stacks/vyos:1.2.0-rc11
 
 default_cpu: 1
 default_ram_mb: 512
-default_disk_gb: 10  # Minimum required by schema (not used for containers)
+default_disk_gb: 10
 
 native_arch: both
 

@@ -77,10 +77,20 @@ export default function RangeWizardPage() {
 
       // Step 3: Create VMs
       for (const vm of networks.vms) {
-        // Find template by name or ID
-        const template = templates.find((t) => t.id === vm.templateId || t.name === vm.templateName);
+        // Find template by ID, name, or os_family + os_version combination
+        let template = templates.find((t) => t.id === vm.templateId);
         if (!template) {
-          console.warn(`Template not found for VM ${vm.hostname}: ${vm.templateName}`);
+          template = templates.find((t) => t.name === vm.templateName);
+        }
+        if (!template && vm.osFamily && vm.osVersion) {
+          // Match by os_family and os_version for more precise resolution
+          template = templates.find(
+            (t) => t.os_family === vm.osFamily && t.os_version === vm.osVersion
+          );
+        }
+        if (!template) {
+          console.warn(`Template not found for VM ${vm.hostname}: ${vm.templateName} (osFamily: ${vm.osFamily}, osVersion: ${vm.osVersion})`);
+          toast.error(`Template not found: ${vm.templateName}. Please ensure the template exists.`);
           continue;
         }
 

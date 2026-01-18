@@ -165,7 +165,7 @@ import type { VMTemplate, Range, Network, VM, EventLog, EventLogList, VMStatsRes
 export interface VMTemplateCreate {
   name: string
   description?: string
-  os_type: 'windows' | 'linux' | 'custom'
+  os_type: 'windows' | 'linux' | 'custom' | 'network'
   os_variant: string
   base_image: string
   default_cpu?: number

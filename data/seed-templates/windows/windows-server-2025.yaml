@@ -1,0 +1,28 @@
+# CYROID Windows Server 2025 Template
+seed_id: windows-server-2025
+name: "Windows Server 2025"
+os_family: windows-server
+os_version: "2025"
+description: |
+  Windows Server 2025 Standard as a full virtual machine.
+  Latest Windows Server with improved security and management features.
+
+os_type: windows
+os_variant: "Windows Server 2025"
+vm_type: windows_vm
+base_image: dockurr/windows:latest
+
+default_cpu: 4
+default_ram_mb: 4096
+default_disk_gb: 60
+
+native_arch: x86_64
+
+tags:
+  - server
+  - windows
+  - infrastructure
+
+config:
+  windows_version: "2025"
+  display_type: server

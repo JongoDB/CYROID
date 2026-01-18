@@ -20,7 +20,7 @@ export interface VMTemplate {
   id: string
   name: string
   description: string | null
-  os_type: 'windows' | 'linux' | 'custom'
+  os_type: 'windows' | 'linux' | 'custom' | 'network'
   os_variant: string
   base_image: string
   default_cpu: number
@@ -31,6 +31,9 @@ export interface VMTemplate {
   created_by: string
   created_at: string
   updated_at: string
+  // OS family grouping for wizard version selection
+  os_family?: string   // e.g., "windows-server", "ubuntu-server"
+  os_version?: string  // e.g., "2022", "22.04"
 }
 
 export interface Range {

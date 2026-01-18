@@ -20,7 +20,11 @@ import { useWizardStore, NetworkSegment } from '../../../stores/wizardStore';
 import { WizardNetworkNode } from '../nodes/WizardNetworkNode';
 import { WizardVMNode } from '../nodes/WizardVMNode';
 import { NetworkPropertiesPanel } from '../panels/NetworkPropertiesPanel';
-import { SERVICE_CATALOG } from '../data/servicePresets';
+import {
+  SERVICE_CATALOG,
+  getEffectiveVersion,
+  resolveTemplateName,
+} from '../data/servicePresets';
 
 export function NetworkStep() {
   const { environment, services, networks, addNetwork, addVM, updateVM, addConnection } = useWizardStore();
@@ -53,17 +57,21 @@ export function NetworkStep() {
 
           if (targetNetwork) {
             const baseIp = targetNetwork.subnet.replace('.0/24', '');
+            const effectiveVersion = getEffectiveVersion(serviceId);
+            const templateName = resolveTemplateName(service.osFamily, effectiveVersion);
             addVM({
               id: `vm-${Date.now()}-${i}`,
               hostname: service.name.toLowerCase().replace(/\s+/g, '-'),
               templateId: '',
-              templateName: service.templateName,
+              templateName,
               networkId: targetNetwork.id,
               ip: `${baseIp}.${10 + i}`,
               cpu: service.cpu || 2,
               ramMb: service.ramMb || 2048,
               diskGb: service.diskGb || 20,
               position: { x: targetNetwork.position.x + 50, y: targetNetwork.position.y + 150 + i * 80 },
+              osFamily: service.osFamily,
+              osVersion: effectiveVersion,
             });
           }
         }
@@ -219,13 +227,15 @@ export function NetworkStep() {
       id,
       hostname: `vm-${num}`,
       templateId: '',
-      templateName: 'Ubuntu Server',
+      templateName: 'Ubuntu Server 22.04',
       networkId: targetNetwork.id,
       ip: `${baseIp}.${10 + num}`,
       cpu: 2,
       ramMb: 2048,
       diskGb: 20,
       position: { x: targetNetwork.position.x + 50, y: targetNetwork.position.y + 150 + (num - 1) * 80 },
+      osFamily: 'ubuntu-server',
+      osVersion: '22.04',
     });
   };
 

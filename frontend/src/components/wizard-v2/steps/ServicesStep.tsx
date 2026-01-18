@@ -1,16 +1,47 @@
 // frontend/src/components/wizard-v2/steps/ServicesStep.tsx
 import { useEffect, useState } from 'react';
-import { Plus, Cpu, HardDrive, MemoryStick, X } from 'lucide-react';
+import { Plus, Cpu, HardDrive, MemoryStick, X, ChevronDown, ChevronRight } from 'lucide-react';
 import clsx from 'clsx';
 import { useWizardStore, VMPlacement } from '../../../stores/wizardStore';
-import { SERVICE_CATALOG, getServicesForEnvironment } from '../data/servicePresets';
+import {
+  SERVICE_CATALOG,
+  getServicesForEnvironment,
+  OS_FAMILY_VERSIONS,
+  OS_FAMILY_NAMES,
+  resolveTemplateName,
+} from '../data/servicePresets';
 import { templatesApi } from '../../../services/api';
 import type { VMTemplate } from '../../../types';
+
+// Track version overrides per service (serviceId -> version)
+type VersionOverrides = Record<string, string>;
 
 export function ServicesStep() {
   const { environment, services, toggleService, addCustomVM, removeCustomVM } = useWizardStore();
   const [templates, setTemplates] = useState<VMTemplate[]>([]);
   const [showTemplateModal, setShowTemplateModal] = useState(false);
+  const [expandedServices, setExpandedServices] = useState<Set<string>>(new Set());
+  const [versionOverrides, setVersionOverrides] = useState<VersionOverrides>({});
+
+  const toggleExpanded = (serviceId: string) => {
+    setExpandedServices((prev) => {
+      const next = new Set(prev);
+      if (next.has(serviceId)) {
+        next.delete(serviceId);
+      } else {
+        next.add(serviceId);
+      }
+      return next;
+    });
+  };
+
+  const setServiceVersion = (serviceId: string, version: string) => {
+    setVersionOverrides((prev) => ({ ...prev, [serviceId]: version }));
+  };
+
+  const getServiceVersion = (serviceId: string, defaultVersion: string): string => {
+    return versionOverrides[serviceId] || defaultVersion;
+  };
 
   // Load templates on mount
   useEffect(() => {
@@ -51,10 +82,30 @@ export function ServicesStep() {
       ramMb: template.default_ram_mb,
       diskGb: template.default_disk_gb,
       position: { x: 0, y: 0 },
+      osFamily: template.os_family,
+      osVersion: template.os_version,
     };
     addCustomVM(vm);
     setShowTemplateModal(false);
   };
+
+  // Expose version overrides for use by NetworkStep when generating VMs
+  // Store them in session storage so they persist across step navigation
+  useEffect(() => {
+    sessionStorage.setItem('wizard-version-overrides', JSON.stringify(versionOverrides));
+  }, [versionOverrides]);
+
+  // Load version overrides from session storage on mount
+  useEffect(() => {
+    const stored = sessionStorage.getItem('wizard-version-overrides');
+    if (stored) {
+      try {
+        setVersionOverrides(JSON.parse(stored));
+      } catch {
+        // Ignore parse errors
+      }
+    }
+  }, []);
 
   return (
     <div className="max-w-5xl mx-auto">
@@ -131,23 +182,63 @@ export function ServicesStep() {
             </div>
           ) : (
             <div className="space-y-2 mb-4">
-              {selectedServices.map((service) => (
-                <div
-                  key={service.id}
-                  className="flex items-center justify-between p-3 bg-gray-50 rounded-lg"
-                >
-                  <div>
-                    <div className="text-sm font-medium text-gray-900">{service.name}</div>
-                    <div className="text-xs text-gray-500">{service.templateName}</div>
-                  </div>
-                  <button
-                    onClick={() => toggleService(service.id)}
-                    className="text-gray-400 hover:text-red-500"
+              {selectedServices.map((service) => {
+                const isExpanded = expandedServices.has(service.id);
+                const currentVersion = getServiceVersion(service.id, service.defaultVersion);
+                const availableVersions = OS_FAMILY_VERSIONS[service.osFamily] || [service.defaultVersion];
+                const osName = OS_FAMILY_NAMES[service.osFamily] || service.osFamily;
+
+                return (
+                  <div
+                    key={service.id}
+                    className="bg-gray-50 rounded-lg overflow-hidden"
                   >
-                    <X className="h-4 w-4" />
-                  </button>
-                </div>
-              ))}
+                    <div className="flex items-center justify-between p-3">
+                      <button
+                        onClick={() => toggleExpanded(service.id)}
+                        className="flex items-center gap-2 text-left flex-1"
+                      >
+                        {isExpanded ? (
+                          <ChevronDown className="h-4 w-4 text-gray-400" />
+                        ) : (
+                          <ChevronRight className="h-4 w-4 text-gray-400" />
+                        )}
+                        <div>
+                          <div className="text-sm font-medium text-gray-900">{service.name}</div>
+                          <div className="text-xs text-gray-500">
+                            {osName}: {currentVersion}
+                          </div>
+                        </div>
+                      </button>
+                      <button
+                        onClick={() => toggleService(service.id)}
+                        className="text-gray-400 hover:text-red-500 ml-2"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+
+                    {isExpanded && (
+                      <div className="px-3 pb-3 pt-0 ml-6 border-t border-gray-200">
+                        <label className="block text-xs font-medium text-gray-600 mt-2 mb-1">
+                          OS Version
+                        </label>
+                        <select
+                          value={currentVersion}
+                          onChange={(e) => setServiceVersion(service.id, e.target.value)}
+                          className="w-full text-sm border border-gray-300 rounded-md px-2 py-1.5 focus:ring-primary-500 focus:border-primary-500"
+                        >
+                          {availableVersions.map((version) => (
+                            <option key={version} value={version}>
+                              {resolveTemplateName(service.osFamily, version)}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
 
               {services.customVMs.map((vm) => (
                 <div

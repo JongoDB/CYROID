@@ -63,6 +63,10 @@ class VMTemplate(Base, UUIDMixin, TimestampMixin):
     os_variant: Mapped[str] = mapped_column(String(100))  # e.g., "Ubuntu 22.04", "Windows Server 2022"
     base_image: Mapped[str] = mapped_column(String(255))  # Docker image, linux distro, or windows version
 
+    # OS family grouping for wizard version selection
+    os_family: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, index=True)  # e.g., "windows-server", "ubuntu-server"
+    os_version: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)  # e.g., "2022", "22.04"
+
     # VM implementation type
     vm_type: Mapped[VMType] = mapped_column(default=VMType.CONTAINER)  # container, linux_vm, or windows_vm
 

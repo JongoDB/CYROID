@@ -1,0 +1,28 @@
+# CYROID Samba Domain Controller Template
+seed_id: samba-dc
+name: "Samba DC"
+os_family: samba-dc
+os_version: "latest"
+description: |
+  Samba Active Directory Domain Controller running in a Docker container.
+  Provides AD-compatible authentication and directory services for Linux
+  environments or mixed Windows/Linux networks.
+
+os_type: linux
+os_variant: "Samba AD DC"
+vm_type: container
+base_image: cyroid/samba-dc:latest
+
+default_cpu: 2
+default_ram_mb: 2048
+default_disk_gb: 20
+
+native_arch: both
+
+tags:
+  - server
+  - linux
+  - domain-controller
+  - active-directory
+  - samba
+  - infrastructure

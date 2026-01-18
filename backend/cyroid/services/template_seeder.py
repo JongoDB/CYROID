@@ -83,6 +83,9 @@ def seed_template(db: Session, template_data: dict) -> Optional[VMTemplate]:
         existing.linux_distro = template_data.get("linux_distro")
         existing.boot_mode = template_data.get("boot_mode", "uefi")
         existing.disk_type = template_data.get("disk_type", "scsi")
+        # OS family/version for wizard grouping
+        existing.os_family = template_data.get("os_family")
+        existing.os_version = template_data.get("os_version")
         db.flush()
         return existing
     else:
@@ -106,6 +109,9 @@ def seed_template(db: Session, template_data: dict) -> Optional[VMTemplate]:
             is_seed=True,
             seed_id=seed_id,
             created_by=None,  # No user for seed templates
+            # OS family/version for wizard grouping
+            os_family=template_data.get("os_family"),
+            os_version=template_data.get("os_version"),
         )
         db.add(template)
         db.flush()

@@ -1,0 +1,29 @@
+# CYROID Ubuntu Desktop 22.04 LTS Template
+seed_id: ubuntu-desktop-22.04
+name: "Ubuntu Desktop 22.04"
+os_family: ubuntu-desktop
+os_version: "22.04"
+description: |
+  Ubuntu Desktop 22.04 LTS with GNOME desktop environment.
+  Suitable for user workstations and graphical applications.
+
+os_type: linux
+os_variant: "Ubuntu Desktop 22.04 LTS"
+vm_type: linux_vm
+linux_distro: ubuntu
+base_image: qemus/qemu:latest
+
+default_cpu: 2
+default_ram_mb: 4096
+default_disk_gb: 40
+
+boot_mode: uefi
+disk_type: scsi
+
+native_arch: both
+
+tags:
+  - desktop
+  - ubuntu
+  - linux
+  - workstation

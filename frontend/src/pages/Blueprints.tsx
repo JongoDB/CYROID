@@ -5,14 +5,12 @@ import { blueprintsApi, Blueprint, InstanceDeploy } from '../services/api';
 import {
   LayoutTemplate,
   Loader2,
-  Plus,
   Rocket,
   Trash2,
   Network,
   Server,
   Users,
 } from 'lucide-react';
-import clsx from 'clsx';
 import { ConfirmDialog } from '../components/common/ConfirmDialog';
 import { toast } from '../stores/toastStore';
 import DeployInstanceModal from '../components/blueprints/DeployInstanceModal';

@@ -1,0 +1,31 @@
+# CYROID Kali Linux Attack Box Template
+seed_id: kali-attack
+name: "Kali Attack Box"
+os_family: kali
+os_version: "attack"
+description: |
+  Kali Linux configured as an attack platform with common tools pre-installed.
+  Optimized for red team operations and penetration testing scenarios.
+
+os_type: linux
+os_variant: "Kali Linux Attack"
+vm_type: linux_vm
+linux_distro: kali
+base_image: qemus/qemu:latest
+
+default_cpu: 2
+default_ram_mb: 4096
+default_disk_gb: 60
+
+boot_mode: uefi
+disk_type: scsi
+
+native_arch: both
+
+tags:
+  - desktop
+  - kali
+  - linux
+  - security
+  - red-team
+  - attack

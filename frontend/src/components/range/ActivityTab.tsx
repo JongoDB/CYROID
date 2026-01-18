@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { rangesApi } from '../../services/api'
+import { eventsApi } from '../../services/api'
 import type { EventLog } from '../../types'
 import {
   Rocket, Play, Square, Server, Network, AlertCircle,
@@ -66,8 +66,8 @@ export function ActivityTab({ rangeId }: Props) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    rangesApi.getEvents(rangeId, 100)
-      .then(res => setEvents(res.data.events))
+    eventsApi.getEvents(rangeId, { limit: 100 })
+      .then((res) => setEvents(res.data.events))
       .catch(console.error)
       .finally(() => setLoading(false))
   }, [rangeId])

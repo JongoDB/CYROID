@@ -21,7 +21,7 @@ const CYROID_SERVICE_IMAGES = [
 interface TemplateFormData {
   name: string
   description: string
-  os_type: 'windows' | 'linux' | 'custom'
+  os_type: 'windows' | 'linux' | 'custom' | 'network'
   os_variant: string
   base_image: string
   default_cpu: number

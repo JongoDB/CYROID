@@ -9,7 +9,8 @@ export type VulnPreset = 'none' | 'beginner' | 'intermediate' | 'advanced' | 'cu
 export interface ServiceConfig {
   id: string;
   name: string;
-  templateName: string;
+  osFamily: string;          // e.g., 'windows-server', 'ubuntu-server'
+  defaultVersion: string;    // e.g., '2022', '22.04'
   description: string;
   category: 'infrastructure' | 'security' | 'application' | 'database';
   defaultNetwork: string;
@@ -42,6 +43,10 @@ export interface VMPlacement {
   ramMb: number;
   diskGb: number;
   position: { x: number; y: number };
+
+  // OS family/version for template resolution
+  osFamily?: string;         // e.g., 'windows-server', 'ubuntu-server'
+  osVersion?: string;        // e.g., '2022', '22.04'
 
   // OS-specific configuration (all optional)
   // Credentials (all OS types)

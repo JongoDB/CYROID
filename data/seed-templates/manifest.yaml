@@ -1,53 +1,70 @@
 # CYROID Seed Templates Manifest
 # These templates ship with CYROID and are automatically seeded on first boot
 
-version: 1
+version: 2
 
 templates:
-  # ============ Offensive Security ============
-  - seed_id: kali-attack
-    file: kali-attack.yaml
-    category: offensive
-    arch: both
-
-  # ============ Network Infrastructure ============
-  - seed_id: vyos-router
-    file: vyos-router.yaml
-    category: network
-    arch: both
-    description: "VyOS router for internal network segments"
-
-  # ============ Infrastructure / Domain Controllers ============
-  - seed_id: samba-dc
-    file: samba-dc.yaml
-    category: infrastructure
-    arch: both
-    description: "ARM-compatible AD DC using Samba"
-
+  # ============ Windows Server Templates ============
+  - seed_id: windows-server-2019
+    file: windows/windows-server-2019.yaml
+    category: server
+    arch: x86_64
+  - seed_id: windows-server-2022
+    file: windows/windows-server-2022.yaml
+    category: server
+    arch: x86_64
+  - seed_id: windows-server-2025
+    file: windows/windows-server-2025.yaml
+    category: server
+    arch: x86_64
   - seed_id: windows-dc-2022
-    file: windows-dc-2022.yaml
+    file: windows/windows-dc-2022.yaml
     category: infrastructure
     arch: x86_64
     description: "Windows Server 2022 Domain Controller"
 
-  # ============ Desktop Environments ============
-  - seed_id: ubuntu-desktop
-    file: ubuntu-desktop.yaml
+  # ============ Ubuntu Templates ============
+  - seed_id: ubuntu-server-22.04
+    file: linux/ubuntu-server-22.04.yaml
+    category: server
+    arch: both
+  - seed_id: ubuntu-server-24.04
+    file: linux/ubuntu-server-24.04.yaml
+    category: server
+    arch: both
+  - seed_id: ubuntu-desktop-22.04
+    file: linux/ubuntu-desktop-22.04.yaml
     category: desktop
     arch: both
 
+  # ============ Security / Penetration Testing ============
   - seed_id: kali-desktop
-    file: kali-desktop.yaml
-    category: desktop
+    file: linux/kali-desktop.yaml
+    category: offensive
     arch: both
-
-  # ============ Server Environments ============
-  - seed_id: ubuntu-server
-    file: ubuntu-server.yaml
-    category: server
+  - seed_id: kali-attack
+    file: linux/kali-attack.yaml
+    category: offensive
     arch: both
-
-  - seed_id: windows-server-2022
-    file: windows-server-2022.yaml
-    category: server
+  - seed_id: security-onion
+    file: linux/security-onion.yaml
+    category: security
     arch: x86_64
+    description: "Security monitoring and threat hunting platform"
+
+  # ============ Network / Infrastructure ============
+  - seed_id: pfsense
+    file: linux/pfsense.yaml
+    category: network
+    arch: x86_64
+    description: "pfSense firewall/router"
+  - seed_id: samba-dc
+    file: linux/samba-dc.yaml
+    category: infrastructure
+    arch: both
+    description: "ARM-compatible AD DC using Samba"
+  - seed_id: vyos-router
+    file: network/vyos-router.yaml
+    category: network
+    arch: both
+    description: "VyOS router for internal network segments"

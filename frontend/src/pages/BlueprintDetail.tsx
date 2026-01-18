@@ -1,6 +1,6 @@
 // frontend/src/pages/BlueprintDetail.tsx
 import { useEffect, useState } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useParams, Link } from 'react-router-dom';
 import {
   blueprintsApi,
   instancesApi,
@@ -15,9 +15,6 @@ import {
   Rocket,
   Network,
   Server,
-  Play,
-  Square,
-  RefreshCw,
   Copy,
   Trash2,
   ExternalLink,
@@ -37,7 +34,6 @@ const statusColors: Record<string, string> = {
 
 export default function BlueprintDetail() {
   const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
   const [blueprint, setBlueprint] = useState<BlueprintDetailType | null>(null);
   const [instances, setInstances] = useState<Instance[]>([]);
   const [loading, setLoading] = useState(true);

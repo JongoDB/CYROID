@@ -1,8 +1,8 @@
 # CYROID Windows Server 2022 Template
-# Standard Windows Server 2022 via dockur/windows
-
 seed_id: windows-server-2022
 name: "Windows Server 2022"
+os_family: windows-server
+os_version: "2022"
 description: |
   Windows Server 2022 Standard as a full virtual machine.
   Suitable for file servers, IIS, SQL Server, and general Windows server workloads.

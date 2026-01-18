@@ -160,7 +160,15 @@
       "Bash(docker-compose stop:*)",
       "Bash(docker-compose rm:*)",
       "Bash(docker-compose run:*)",
-      "mcp__plugin_playwright_playwright__browser_select_option"
+      "mcp__plugin_playwright_playwright__browser_select_option",
+      "Bash(gh pr list:*)",
+      "Bash(gh pr diff:*)",
+      "Bash(gh pr close:*)",
+      "Bash(git rev-parse:*)",
+      "Bash(git -C /Users/JonWFH/jondev/CYROID rev-parse:*)",
+      "Bash(gh issue create:*)",
+      "Skill(superpowers:finishing-a-development-branch)",
+      "Bash(gh pr view:*)"
     ]
   },
   "enableAllProjectMcpServers": true,
