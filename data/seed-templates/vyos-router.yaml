@@ -25,7 +25,7 @@ base_image: 2stacks/vyos:1.2.0-rc11
 
 default_cpu: 1
 default_ram_mb: 512
-default_disk_gb: 0
+default_disk_gb: 10  # Minimum required by schema (not used for containers)
 
 native_arch: both
 

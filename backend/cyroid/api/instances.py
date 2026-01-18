@@ -7,7 +7,7 @@ from cyroid.api.deps import DBSession, CurrentUser
 from cyroid.models import Range, RangeBlueprint, RangeInstance
 from cyroid.schemas.blueprint import InstanceResponse, BlueprintConfig
 from cyroid.services.blueprint_service import create_range_from_blueprint
-from cyroid.services.docker_service import DockerService
+from cyroid.tasks.deployment import deploy_range_task, teardown_range_task
 
 router = APIRouter(prefix="/instances", tags=["instances"])
 
@@ -32,13 +32,8 @@ def reset_instance(instance_id: UUID, db: DBSession, current_user: CurrentUser):
     blueprint = instance.blueprint
     range_obj = instance.range
 
-    # Stop and delete current range resources
-    docker_service = DockerService()
-    try:
-        docker_service.stop_range(db, range_obj.id)
-        docker_service.cleanup_range(db, range_obj.id)
-    except Exception as e:
-        print(f"Cleanup warning: {e}")
+    # Teardown current range resources (async task)
+    teardown_range_task.send(str(range_obj.id))
 
     # Redeploy from same config
     config = BlueprintConfig.model_validate(blueprint.config)
@@ -54,10 +49,9 @@ def reset_instance(instance_id: UUID, db: DBSession, current_user: CurrentUser):
         db, range_obj, config, blueprint.base_subnet_prefix, instance.subnet_offset
     )
 
-    # Redeploy
-    docker_service.deploy_range(db, range_obj.id)
-
+    # Redeploy (queue async task)
     db.commit()
+    deploy_range_task.send(str(range_obj.id))
     db.refresh(instance)
 
     return _instance_to_response(instance, db)
@@ -73,13 +67,8 @@ def redeploy_instance(instance_id: UUID, db: DBSession, current_user: CurrentUse
     blueprint = instance.blueprint
     range_obj = instance.range
 
-    # Stop and cleanup
-    docker_service = DockerService()
-    try:
-        docker_service.stop_range(db, range_obj.id)
-        docker_service.cleanup_range(db, range_obj.id)
-    except Exception as e:
-        print(f"Cleanup warning: {e}")
+    # Teardown first (sync for now to ensure cleanup before recreate)
+    teardown_range_task.send(str(range_obj.id))
 
     # Get LATEST config from blueprint
     config = BlueprintConfig.model_validate(blueprint.config)
@@ -98,10 +87,9 @@ def redeploy_instance(instance_id: UUID, db: DBSession, current_user: CurrentUse
     # Update instance to latest version
     instance.blueprint_version = blueprint.version
 
-    # Redeploy
-    docker_service.deploy_range(db, range_obj.id)
-
+    # Redeploy (queue async task)
     db.commit()
+    deploy_range_task.send(str(range_obj.id))
     db.refresh(instance)
 
     return _instance_to_response(instance, db)
@@ -156,13 +144,8 @@ def delete_instance(instance_id: UUID, db: DBSession, current_user: CurrentUser)
 
     range_obj = instance.range
 
-    # Stop and cleanup range
-    docker_service = DockerService()
-    try:
-        docker_service.stop_range(db, range_obj.id)
-        docker_service.cleanup_range(db, range_obj.id)
-    except Exception as e:
-        print(f"Cleanup warning: {e}")
+    # Teardown range resources (async task)
+    teardown_range_task.send(str(range_obj.id))
 
     # Delete range (cascades to VMs, networks)
     db.delete(range_obj)

@@ -13,7 +13,7 @@ from cyroid.schemas.blueprint import (
 from cyroid.services.blueprint_service import (
     extract_config_from_range, extract_subnet_prefix, create_range_from_blueprint
 )
-from cyroid.services.docker_service import DockerService
+from cyroid.tasks.deployment import deploy_range_task
 
 router = APIRouter(prefix="/blueprints", tags=["blueprints"])
 
@@ -150,14 +150,9 @@ def deploy_instance(
     db.commit()
     db.refresh(instance)
 
-    # Auto-deploy if requested
+    # Auto-deploy if requested (queue async task)
     if data.auto_deploy:
-        try:
-            docker_service = DockerService()
-            docker_service.deploy_range(db, range_obj.id)
-        except Exception as e:
-            # Don't fail the whole operation, just log
-            print(f"Auto-deploy failed: {e}")
+        deploy_range_task.send(str(range_obj.id))
 
     return _instance_to_response(instance, db)
 
