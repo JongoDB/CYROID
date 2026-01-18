@@ -661,9 +661,9 @@ export default function RangeDetail() {
               </button>
               <span className={clsx(
                 "ml-2 px-2.5 py-0.5 text-sm font-medium rounded-full",
-                statusColors[range.status]
+                statusColors[range.status.toLowerCase()]
               )}>
-                {range.status}
+                {range.status.toLowerCase()}
               </span>
               {range.router && (
                 <span className={clsx(
@@ -1003,10 +1003,10 @@ export default function RangeDetail() {
                           <p className="text-sm font-medium text-gray-900">{vm.hostname}</p>
                           <span className={clsx(
                             "ml-2 px-1.5 py-0.5 text-xs font-medium rounded transition-all",
-                            statusColors[vm.status],
+                            statusColors[vm.status.toLowerCase()],
                             recentlyChangedVms.has(vm.id) && "animate-pulse-once ring-2 ring-blue-400"
                           )}>
-                            {vm.status}
+                            {vm.status.toLowerCase()}
                           </span>
                         </div>
                         <p className="text-xs text-gray-500">

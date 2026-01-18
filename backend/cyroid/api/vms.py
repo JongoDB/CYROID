@@ -708,15 +708,8 @@ def get_vm_vnc_info(vm_id: UUID, db: DBSession, current_user: CurrentUser, reque
         # VNC is proxied through traefik at /vnc/{vm_id}
         vnc_path = f"/vnc/{vm.id}"
 
-        # Determine WebSocket path based on container type
-        # - KasmVNC containers (kasmweb/*): use empty path (root /)
-        # - qemu/dockur containers: use "websockify" path
-        template = db.query(VMTemplate).filter(VMTemplate.id == vm.template_id).first()
-        base_image = template.base_image if template else ""
-        is_kasmweb = "kasmweb/" in base_image or "lscr.io/linuxserver" in base_image
-
-        # KasmVNC handles WebSocket on root path, noVNC/websockify uses /websockify
-        websocket_path = "" if is_kasmweb else "websockify"
+        # All VNC implementations (KasmVNC, noVNC/websockify, dockur) use /websockify path
+        websocket_path = "websockify"
 
         # Return the path - frontend will construct full URL using browser hostname
         # This avoids issues with Docker internal hostnames in the Host header

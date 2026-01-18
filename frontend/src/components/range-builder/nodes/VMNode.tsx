@@ -29,7 +29,7 @@ export const VMNode = memo(({ data }: VMNodeProps) => {
     <div
       className={clsx(
         'px-3 py-2 rounded-lg border-2 shadow-sm min-w-[140px]',
-        statusColors[vm.status] || 'border-gray-300 bg-white'
+        statusColors[vm.status.toLowerCase()] || 'border-gray-300 bg-white'
       )}
     >
       <Handle type="target" position={Position.Top} className="w-2 h-2" />

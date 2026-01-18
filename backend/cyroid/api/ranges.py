@@ -28,7 +28,7 @@ from cyroid.schemas.range import (
     RangeTemplateExport, RangeTemplateImport, NetworkTemplateData, VMTemplateData
 )
 from cyroid.schemas.deployment_status import (
-    DeploymentStatusResponse, DeploymentSummary, ResourceStatus, NetworkStatus, VMStatus
+    DeploymentStatusResponse, DeploymentSummary, ResourceStatus, NetworkStatus, VMStatus as VMStatusSchema
 )
 from cyroid.schemas.scenario import ApplyScenarioRequest, ApplyScenarioResponse
 from sqlalchemy.orm import joinedload
@@ -79,7 +79,7 @@ def compute_deployment_status(range_obj, events: list) -> DeploymentStatusRespon
     # Initialize VM statuses
     vm_statuses = {}
     for v in range_obj.vms:
-        vm_statuses[v.id] = VMStatus(
+        vm_statuses[v.id] = VMStatusSchema(
             id=str(v.id), name=v.hostname, hostname=v.hostname,
             ip=v.ip_address, status="pending"
         )
@@ -679,6 +679,9 @@ def deploy_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
                     )
                 else:
                     # Docker container
+                    # Samba AD DC needs privileged mode for filesystem ACLs
+                    needs_privileged = "samba-dc" in (template.base_image or "")
+
                     container_id = docker.create_container(
                         name=f"cyroid-{vm.hostname}-{str(vm.id)[:8]}",
                         image=template.base_image,
@@ -693,6 +696,7 @@ def deploy_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
                         linux_user_sudo=vm.linux_user_sudo,
                         dns_servers=network.dns_servers,
                         dns_search=network.dns_search,
+                        privileged=needs_privileged,
                     )
 
                 vm.container_id = container_id
@@ -764,7 +768,9 @@ def deploy_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
         db.refresh(range_obj)
 
     except Exception as e:
-        logger.error(f"Failed to deploy range {range_id}: {e}")
+        import traceback
+        logger.error(f"Failed to deploy range {range_id}: {type(e).__name__}: {e}")
+        logger.error(f"Full traceback:\n{traceback.format_exc()}")
         range_obj.status = RangeStatus.ERROR
         range_obj.error_message = str(e)[:1000]
         db.commit()

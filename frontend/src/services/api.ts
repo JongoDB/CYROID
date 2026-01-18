@@ -803,4 +803,47 @@ export const scenariosApi = {
   refresh: () => api.post<{ message: string; total: number; scenarios: string[] }>('/scenarios/refresh'),
 }
 
+// ============ Admin API ============
+
+export interface CleanupRequest {
+  clean_database?: boolean
+  force?: boolean
+}
+
+export interface CleanupResult {
+  ranges_cleaned: number
+  containers_removed: number
+  networks_removed: number
+  database_records_updated: number
+  errors: string[]
+  orphaned_resources_cleaned: number
+}
+
+export interface DockerContainerInfo {
+  name: string
+  status: string
+  range_id?: string
+  vm_id?: string
+}
+
+export interface DockerNetworkInfo {
+  name: string
+  id: string
+}
+
+export interface DockerStatusResponse {
+  containers: DockerContainerInfo[]
+  container_count: number
+  networks: DockerNetworkInfo[]
+  network_count: number
+  system_info: Record<string, unknown>
+}
+
+export const adminApi = {
+  cleanupAll: (options?: CleanupRequest) =>
+    api.post<CleanupResult>('/admin/cleanup-all', options || {}),
+  getDockerStatus: () =>
+    api.get<DockerStatusResponse>('/admin/docker-status'),
+}
+
 export default api

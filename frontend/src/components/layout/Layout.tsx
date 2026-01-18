@@ -16,7 +16,8 @@ import {
   Shield,
   Key,
   LayoutTemplate,
-  Target
+  Target,
+  Settings
 } from 'lucide-react'
 import clsx from 'clsx'
 import PasswordChangeModal from '../common/PasswordChangeModal'
@@ -40,8 +41,8 @@ const navigation: NavItem[] = [
   { name: 'Range Blueprints', href: '/blueprints', icon: LayoutTemplate },
   { name: 'Training Scenarios', href: '/scenarios', icon: Target },
   { name: 'Ranges', href: '/ranges', icon: Network },
-  { name: 'Users', href: '/users', icon: Users, adminOnly: true },
   { name: 'Artifacts', href: '/artifacts', icon: FileBox },
+  { name: 'Admin', href: '/admin', icon: Settings, adminOnly: true },
 ]
 
 export default function Layout({ children }: LayoutProps) {

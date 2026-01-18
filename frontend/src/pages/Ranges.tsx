@@ -188,7 +188,7 @@ export default function Ranges() {
                           <p className="text-sm font-medium text-gray-900 truncate">{range.name}</p>
                           <span className={clsx(
                             "ml-2 px-2 py-0.5 text-xs font-medium rounded-full",
-                            statusColors[range.status]
+                            statusColors[range.status.toLowerCase()]
                           )}>
                             {range.status}
                           </span>

@@ -18,6 +18,7 @@ import TrainingScenarios from './pages/TrainingScenarios'
 import StudentLab from './pages/StudentLab'
 import ImageCache from './pages/ImageCache'
 import UserManagement from './pages/UserManagement'
+import Admin from './pages/Admin'
 import ProtectedRoute from './components/common/ProtectedRoute'
 import Layout from './components/layout/Layout'
 
@@ -74,6 +75,7 @@ function App() {
                 <Route path="/execution/:rangeId" element={<ExecutionConsole />} />
                 <Route path="/cache" element={<ImageCache />} />
                 <Route path="/users" element={<UserManagement />} />
+                <Route path="/admin" element={<Admin />} />
                 <Route path="/artifacts" element={<div>Artifacts - Coming Soon</div>} />
               </Routes>
             </Layout>
