@@ -5,6 +5,25 @@ All notable changes to CYROID will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-01-18
+
+### Added
+
+- **Training Scenarios** ([#25](../../issues/25)): Pre-built MSEL packages for deploying realistic cyber training exercises with one click.
+  - 4 ready-to-use scenarios: Ransomware Attack, APT Intrusion, Insider Threat, Incident Response Drill
+  - New Training Scenarios page at `/scenarios` showing scenario cards with filtering
+  - Role-based VM mapping: map scenario roles (e.g., "domain-controller") to actual range VMs
+  - "Add Scenario" button on Range Detail page for running ranges
+  - Scenario seeding from YAML files in `data/seed-scenarios/`
+  - New API endpoints: `GET /scenarios`, `GET /scenarios/{id}`, `POST /ranges/{id}/scenario`
+
+### Changed
+
+- **Naming Updates**: Improved naming consistency across the application
+  - Templates → VM Templates
+  - Blueprints → Range Blueprints
+  - Guided Builder → Range Wizard
+
 ## [0.7.3] - 2026-01-18
 
 ### Fixed
