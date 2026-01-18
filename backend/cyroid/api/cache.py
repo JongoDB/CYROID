@@ -1017,9 +1017,12 @@ def get_cache_stats(current_user: CurrentUser):
 #
 # Download sources (from dockur/windows):
 # - Primary: dl.bobpony.com/windows (MSDN ISOs)
-# - Fallback: files.dog/MSDN
-# - Archive: archive.org
-# - Microsoft: Evaluation Center for enterprise/server
+# - Primary: files.dog/MSDN (community mirror)
+# - Fallback: archive.org (legacy versions)
+# - Microsoft: Evaluation Center for server editions (official, 180-day eval)
+#
+# Note: dl.bobpony.com was previously used but now returns 403 Forbidden.
+# The download_urls list supports fallback - first working URL is used.
 
 DOCKUR_WINDOWS_VERSIONS = [
     # Desktop versions - Windows 11
@@ -1028,14 +1031,20 @@ DOCKUR_WINDOWS_VERSIONS = [
         "name": "Windows 11 Pro",
         "size_gb": 6.3,
         "category": "desktop",
-        "download_url": "https://dl.bobpony.com/windows/11/en-us_windows_11_24h2_x64.iso",
+        "download_url": "https://files.dog/MSDN/Windows%2011%2C%20Version%2024H2%20(Updated%20October%202024)/en-us_windows_11_consumer_editions_version_24h2_updated_oct_2024_x64_dvd_5fc00aec.iso",
+        "download_urls": [
+            "https://files.dog/MSDN/Windows%2011%2C%20Version%2024H2%20(Updated%20October%202024)/en-us_windows_11_consumer_editions_version_24h2_updated_oct_2024_x64_dvd_5fc00aec.iso",
+        ],
     },
     {
         "version": "11e",
         "name": "Windows 11 Enterprise",
         "size_gb": 5.8,
         "category": "desktop",
-        "download_url": "https://dl.bobpony.com/windows/11/en-us_windows_11_enterprise_24h2_x64.iso",
+        "download_url": "https://files.dog/MSDN/Windows%2011%2C%20Version%2024H2%20(Updated%20October%202024)/en-us_windows_11_business_editions_version_24h2_updated_oct_2024_x64_dvd_0cae2f00.iso",
+        "download_urls": [
+            "https://files.dog/MSDN/Windows%2011%2C%20Version%2024H2%20(Updated%20October%202024)/en-us_windows_11_business_editions_version_24h2_updated_oct_2024_x64_dvd_0cae2f00.iso",
+        ],
     },
     # Desktop versions - Windows 10
     {
@@ -1043,21 +1052,30 @@ DOCKUR_WINDOWS_VERSIONS = [
         "name": "Windows 10 Pro",
         "size_gb": 5.7,
         "category": "desktop",
-        "download_url": "https://dl.bobpony.com/windows/10/en-us_windows_10_22h2_x64.iso",
+        "download_url": "https://files.dog/MSDN/Windows%2010%2C%20Version%2022H2%20(Updated%20May%202024)/en-us_windows_10_consumer_editions_version_22h2_updated_may_2024_x64_dvd_5a846042.iso",
+        "download_urls": [
+            "https://files.dog/MSDN/Windows%2010%2C%20Version%2022H2%20(Updated%20May%202024)/en-us_windows_10_consumer_editions_version_22h2_updated_may_2024_x64_dvd_5a846042.iso",
+        ],
     },
     {
         "version": "10e",
         "name": "Windows 10 Enterprise",
         "size_gb": 5.5,
         "category": "desktop",
-        "download_url": "https://dl.bobpony.com/windows/10/en-us_windows_10_enterprise_22h2_x64.iso",
+        "download_url": "https://files.dog/MSDN/Windows%2010%2C%20Version%2022H2%20(Updated%20May%202024)/en-us_windows_10_business_editions_version_22h2_updated_may_2024_x64_dvd_108d3e87.iso",
+        "download_urls": [
+            "https://files.dog/MSDN/Windows%2010%2C%20Version%2022H2%20(Updated%20May%202024)/en-us_windows_10_business_editions_version_22h2_updated_may_2024_x64_dvd_108d3e87.iso",
+        ],
     },
     {
         "version": "10l",
-        "name": "Windows 10 LTSC",
+        "name": "Windows 10 LTSC 2021",
         "size_gb": 4.6,
         "category": "desktop",
-        "download_url": "https://dl.bobpony.com/windows/10/en-us_windows_10_enterprise_ltsc_2021_x64_dvd_d289cf96.iso",
+        "download_url": "https://files.dog/MSDN/Windows%2010%20Enterprise%20LTSC%202021/en-us_windows_10_enterprise_ltsc_2021_x64_dvd_d289cf96.iso",
+        "download_urls": [
+            "https://files.dog/MSDN/Windows%2010%20Enterprise%20LTSC%202021/en-us_windows_10_enterprise_ltsc_2021_x64_dvd_d289cf96.iso",
+        ],
     },
     # Desktop versions - Windows 8.1
     {
@@ -1065,79 +1083,117 @@ DOCKUR_WINDOWS_VERSIONS = [
         "name": "Windows 8.1 Pro",
         "size_gb": 3.7,
         "category": "desktop",
-        "download_url": "https://dl.bobpony.com/windows/8.x/8.1/en_windows_8.1_with_update_x64_dvd_6051480.iso",
+        "download_url": "https://files.dog/MSDN/Windows%208.1%20with%20Update/en_windows_8.1_with_update_x64_dvd_6051480.iso",
+        "download_urls": [
+            "https://files.dog/MSDN/Windows%208.1%20with%20Update/en_windows_8.1_with_update_x64_dvd_6051480.iso",
+        ],
     },
     # Desktop versions - Legacy
     {
         "version": "7",
-        "name": "Windows 7 Ultimate",
+        "name": "Windows 7 Ultimate SP1",
         "size_gb": 3.1,
         "category": "legacy",
-        "download_url": "https://dl.bobpony.com/windows/7/en_windows_7_with_sp1_x64.iso",
+        "download_url": "https://files.dog/MSDN/Windows%207/en_windows_7_ultimate_with_sp1_x64_dvd_u_677332.iso",
+        "download_urls": [
+            "https://files.dog/MSDN/Windows%207/en_windows_7_ultimate_with_sp1_x64_dvd_u_677332.iso",
+            "https://archive.org/download/en_windows_7_ultimate_with_sp1_x64_dvd_u_677332_202409/en_windows_7_ultimate_with_sp1_x64_dvd_u_677332.iso",
+        ],
     },
     {
         "version": "vista",
-        "name": "Windows Vista Ultimate",
+        "name": "Windows Vista Ultimate SP2",
         "size_gb": 3.0,
         "category": "legacy",
-        "download_url": "https://dl.bobpony.com/windows/vista/en_windows_vista_sp2_x64_dvd_342267.iso",
+        "download_url": "https://files.dog/MSDN/Windows%20Vista/en_windows_vista_sp2_x64_dvd_342267.iso",
+        "download_urls": [
+            "https://files.dog/MSDN/Windows%20Vista/en_windows_vista_sp2_x64_dvd_342267.iso",
+            "https://archive.org/download/windows-vista-sp2-x64/en_windows_vista_sp2_x64_dvd_342267.iso",
+        ],
     },
     {
         "version": "xp",
-        "name": "Windows XP Professional",
+        "name": "Windows XP Professional SP3",
         "size_gb": 0.6,
         "category": "legacy",
-        "download_url": "https://dl.bobpony.com/windows/xp/professional/en_windows_xp_professional_with_service_pack_3_x86_cd_x14-80428.iso",
+        "download_url": "https://files.dog/MSDN/Windows%20XP/en_windows_xp_professional_with_service_pack_3_x86_cd_x14-80428.iso",
+        "download_urls": [
+            "https://files.dog/MSDN/Windows%20XP/en_windows_xp_professional_with_service_pack_3_x86_cd_x14-80428.iso",
+            "https://archive.org/download/WinXPProSP3x86/en_windows_xp_professional_with_service_pack_3_x86_cd_x14-80428.iso",
+        ],
     },
     {
         "version": "2k",
-        "name": "Windows 2000 Professional",
+        "name": "Windows 2000 Professional SP4",
         "size_gb": 0.3,
         "category": "legacy",
         "download_url": "https://archive.org/download/win-2000-pro-sp-4/Win2000ProSP4.iso",
+        "download_urls": [
+            "https://archive.org/download/win-2000-pro-sp-4/Win2000ProSP4.iso",
+        ],
     },
-    # Server versions
+    # Server versions - Modern (Microsoft Evaluation Center - 180-day eval)
     {
         "version": "2025",
-        "name": "Windows Server 2025",
+        "name": "Windows Server 2025 (Eval)",
         "size_gb": 5.5,
         "category": "server",
         "download_url": "https://software-static.download.prss.microsoft.com/dbazure/888969d5-f34g-4e03-ac9d-1f9786c66749/26100.1742.240906-0331.ge_release_svc_refresh_SERVER_EVAL_x64FRE_en-us.iso",
+        "download_urls": [
+            "https://software-static.download.prss.microsoft.com/dbazure/888969d5-f34g-4e03-ac9d-1f9786c66749/26100.1742.240906-0331.ge_release_svc_refresh_SERVER_EVAL_x64FRE_en-us.iso",
+        ],
     },
     {
         "version": "2022",
-        "name": "Windows Server 2022",
+        "name": "Windows Server 2022 (Eval)",
         "size_gb": 5.3,
         "category": "server",
         "download_url": "https://software-static.download.prss.microsoft.com/sg/download/888969d5-f34g-4e03-ac9d-1f9786c66749/SERVER_EVAL_x64FRE_en-us.iso",
+        "download_urls": [
+            "https://software-static.download.prss.microsoft.com/sg/download/888969d5-f34g-4e03-ac9d-1f9786c66749/SERVER_EVAL_x64FRE_en-us.iso",
+        ],
     },
     {
         "version": "2019",
-        "name": "Windows Server 2019",
+        "name": "Windows Server 2019 (Eval)",
         "size_gb": 5.0,
         "category": "server",
         "download_url": "https://software-static.download.prss.microsoft.com/pr/download/17763.3650.221105-1748.rs5_release_svc_refresh_SERVER_EVAL_x64FRE_en-us.iso",
+        "download_urls": [
+            "https://software-static.download.prss.microsoft.com/pr/download/17763.3650.221105-1748.rs5_release_svc_refresh_SERVER_EVAL_x64FRE_en-us.iso",
+        ],
     },
     {
         "version": "2016",
-        "name": "Windows Server 2016",
+        "name": "Windows Server 2016 (Eval)",
         "size_gb": 6.0,
         "category": "server",
         "download_url": "https://software-static.download.prss.microsoft.com/pr/download/Windows_Server_2016_Datacenter_EVAL_en-us_14393_refresh.ISO",
+        "download_urls": [
+            "https://software-static.download.prss.microsoft.com/pr/download/Windows_Server_2016_Datacenter_EVAL_en-us_14393_refresh.ISO",
+        ],
     },
+    # Server versions - Legacy (files.dog MSDN mirror)
     {
         "version": "2012",
         "name": "Windows Server 2012 R2",
         "size_gb": 4.3,
         "category": "server",
-        "download_url": "https://dl.bobpony.com/windows/server/2012r2/en_windows_server_2012_r2_with_update_x64_dvd_6052708.iso",
+        "download_url": "https://files.dog/MSDN/Windows%20Server%202012%20R2/en_windows_server_2012_r2_with_update_x64_dvd_6052708.iso",
+        "download_urls": [
+            "https://files.dog/MSDN/Windows%20Server%202012%20R2/en_windows_server_2012_r2_with_update_x64_dvd_6052708.iso",
+        ],
     },
     {
         "version": "2008",
-        "name": "Windows Server 2008 R2",
+        "name": "Windows Server 2008 R2 SP1",
         "size_gb": 3.0,
         "category": "server",
-        "download_url": "https://dl.bobpony.com/windows/server/2008r2/en_windows_server_2008_r2_with_sp1_x64_dvd_617601.iso",
+        "download_url": "https://files.dog/MSDN/Windows%20Server%202008%20R2/en_windows_server_2008_r2_with_sp1_x64_dvd_617601.iso",
+        "download_urls": [
+            "https://files.dog/MSDN/Windows%20Server%202008%20R2/en_windows_server_2008_r2_with_sp1_x64_dvd_617601.iso",
+            "https://archive.org/download/en_windows_server_2008_r2_with_sp1_x64_dvd_617601/en_windows_server_2008_r2_with_sp1_x64_dvd_617601.iso",
+        ],
     },
     {
         "version": "2003",
@@ -1145,6 +1201,9 @@ DOCKUR_WINDOWS_VERSIONS = [
         "size_gb": 0.6,
         "category": "legacy",
         "download_url": "https://archive.org/download/en_win_srv_2003_r2_standard_x64_with_sp2_cd1_x13-05757/en_win_srv_2003_r2_standard_x64_with_sp2_cd1_x13-05757.iso",
+        "download_urls": [
+            "https://archive.org/download/en_win_srv_2003_r2_standard_x64_with_sp2_cd1_x13-05757/en_win_srv_2003_r2_standard_x64_with_sp2_cd1_x13-05757.iso",
+        ],
     },
 ]
 
@@ -2553,10 +2612,19 @@ def download_windows_iso(
             detail=f"Invalid version '{request.version}'. Valid versions: {', '.join(valid_versions)}"
         )
 
-    # Determine download URL
-    download_url = request.url or version_info.get("download_url")
+    # Determine download URLs (support multiple fallbacks)
+    download_urls = []
+    if request.url:
+        download_urls = [request.url]
+    else:
+        # Try download_urls list first, then fall back to single download_url
+        download_urls = version_info.get("download_urls", [])
+        if not download_urls:
+            single_url = version_info.get("download_url")
+            if single_url:
+                download_urls = [single_url]
 
-    if not download_url:
+    if not download_urls:
         # No direct download URL available
         download_page = version_info.get("download_page")
         download_note = version_info.get("download_note", "No direct download available")
@@ -2577,6 +2645,9 @@ def download_windows_iso(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=response
         )
+
+    # Use the first URL for the response (actual download tries all URLs)
+    primary_download_url = download_urls[0]
 
     windows_iso_dir = get_windows_iso_dir()
     os.makedirs(windows_iso_dir, exist_ok=True)
@@ -2607,59 +2678,89 @@ def download_windows_iso(
         "error": None
     }
 
-    def download_iso(url: str, dest_path: str, version: str):
-        """Download ISO in background with progress tracking."""
+    def download_iso(urls: list, dest_path: str, version: str):
+        """Download ISO in background with progress tracking and fallback URL support."""
         import requests
         import time
 
-        try:
-            # Use streaming download with progress
-            response = requests.get(url, stream=True, timeout=3600, allow_redirects=True)
-            response.raise_for_status()
+        last_error = None
 
-            # Get total size if available
-            total_size = response.headers.get('content-length')
-            if total_size:
-                total_size = int(total_size)
-                _active_downloads[version]["total_bytes"] = total_size
+        for url_index, url in enumerate(urls):
+            try:
+                # Update status with current URL being tried
+                if url_index > 0:
+                    _active_downloads[version]["fallback_attempt"] = url_index + 1
+                    _active_downloads[version]["progress_bytes"] = 0
 
-            # Download with progress tracking
-            downloaded = 0
-            with open(dest_path, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=1024 * 1024):  # 1MB chunks
-                    # Check if download was cancelled
-                    if version not in _active_downloads or _active_downloads[version].get("cancelled"):
-                        if os.path.exists(dest_path):
-                            os.remove(dest_path)
-                        if version in _active_downloads:
-                            del _active_downloads[version]
-                        return
-                    if chunk:
-                        f.write(chunk)
-                        downloaded += len(chunk)
-                        _active_downloads[version]["progress_bytes"] = downloaded
+                # Use streaming download with progress
+                response = requests.get(url, stream=True, timeout=3600, allow_redirects=True)
+                response.raise_for_status()
 
-            _active_downloads[version]["status"] = "completed"
-            _active_downloads[version]["progress_bytes"] = os.path.getsize(dest_path)
+                # Get total size if available
+                total_size = response.headers.get('content-length')
+                if total_size:
+                    total_size = int(total_size)
+                    _active_downloads[version]["total_bytes"] = total_size
 
-            # Clear from active downloads after a delay (allow frontend to see completion)
-            time.sleep(3)
+                # Download with progress tracking
+                downloaded = 0
+                with open(dest_path, 'wb') as f:
+                    for chunk in response.iter_content(chunk_size=1024 * 1024):  # 1MB chunks
+                        # Check if download was cancelled
+                        if version not in _active_downloads or _active_downloads[version].get("cancelled"):
+                            if os.path.exists(dest_path):
+                                os.remove(dest_path)
+                            if version in _active_downloads:
+                                del _active_downloads[version]
+                            return
+                        if chunk:
+                            f.write(chunk)
+                            downloaded += len(chunk)
+                            _active_downloads[version]["progress_bytes"] = downloaded
+
+                _active_downloads[version]["status"] = "completed"
+                _active_downloads[version]["progress_bytes"] = os.path.getsize(dest_path)
+
+                # Clear from active downloads after a delay (allow frontend to see completion)
+                time.sleep(3)
+                if version in _active_downloads:
+                    del _active_downloads[version]
+                return  # Success!
+
+            except requests.exceptions.HTTPError as e:
+                last_error = e
+                # Clean up partial download before trying next URL
+                if os.path.exists(dest_path):
+                    os.remove(dest_path)
+
+                # Only try next URL for 403/404 errors
+                if e.response is not None and e.response.status_code in [403, 404]:
+                    if url_index < len(urls) - 1:
+                        # More URLs to try
+                        continue
+                # For other HTTP errors or no more URLs, fail
+                raise
+
+            except Exception as e:
+                last_error = e
+                # Clean up partial download
+                if os.path.exists(dest_path):
+                    os.remove(dest_path)
+                # Try next URL
+                if url_index < len(urls) - 1:
+                    continue
+                raise
+
+        # All URLs failed
+        if version in _active_downloads:
+            _active_downloads[version]["status"] = "failed"
+            _active_downloads[version]["error"] = f"All download mirrors failed. Last error: {last_error}"
+            # Clear failed downloads after a delay
+            time.sleep(5)
             if version in _active_downloads:
                 del _active_downloads[version]
 
-        except Exception as e:
-            # Clean up partial download
-            if os.path.exists(dest_path):
-                os.remove(dest_path)
-            if version in _active_downloads:
-                _active_downloads[version]["status"] = "failed"
-                _active_downloads[version]["error"] = str(e)
-                # Clear failed downloads after a delay
-                time.sleep(5)
-                if version in _active_downloads:
-                    del _active_downloads[version]
-
-    background_tasks.add_task(download_iso, download_url, filepath, request.version)
+    background_tasks.add_task(download_iso, download_urls, filepath, request.version)
 
     return {
         "status": "downloading",
@@ -2667,7 +2768,7 @@ def download_windows_iso(
         "name": version_info["name"],
         "filename": filename,
         "destination": filepath,
-        "source_url": download_url,
+        "source_url": primary_download_url,
         "expected_size_gb": version_info.get("size_gb"),
         "message": f"Downloading {version_info['name']} ISO..."
     }

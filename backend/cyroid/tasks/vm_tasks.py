@@ -49,6 +49,22 @@ def start_vm_task(vm_id: str):
             }
 
             if template.os_type == "windows":
+                # Resolve Windows version from VM, template, or base_image
+                # Priority: vm.windows_version > template.os_version > base_image extraction > default
+                win_version = vm.windows_version
+                if not win_version and template.os_version:
+                    win_version = template.os_version
+                if not win_version and template.base_image:
+                    # Extract version from base_image like "dockurr/windows:2022" or just "2022"
+                    img = template.base_image
+                    if ":" in img:
+                        win_version = img.split(":")[-1]
+                    elif img.replace(".", "").isdigit() or img in ["11", "10", "2025", "2022", "2019", "2016", "2012", "2008"]:
+                        win_version = img
+                if not win_version:
+                    win_version = "11"  # Default to Windows 11
+
+                logger.info(f"Creating Windows VM {vm.hostname} with version: {win_version}")
                 container_id = docker.create_windows_container(
                     name=f"cyroid-{vm.hostname}-{str(vm.id)[:8]}",
                     network_id=network.docker_network_id,
@@ -56,6 +72,7 @@ def start_vm_task(vm_id: str):
                     cpu_limit=vm.cpu,
                     memory_limit_mb=vm.ram_mb,
                     disk_size_gb=vm.disk_gb,
+                    windows_version=win_version,
                     labels=labels,
                 )
             else:
