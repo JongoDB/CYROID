@@ -40,3 +40,4 @@ class Network(Base, UUIDMixin, TimestampMixin):
     # Relationships
     range = relationship("Range", back_populates="networks")
     vms: Mapped[List["VM"]] = relationship("VM", back_populates="network")
+    event_logs: Mapped[List["EventLog"]] = relationship("EventLog", back_populates="network")

@@ -45,9 +45,13 @@ class EventLog(Base, UUIDMixin, TimestampMixin):
 
     range_id: Mapped[UUID] = mapped_column(ForeignKey("ranges.id", ondelete="CASCADE"), index=True)
     vm_id: Mapped[Optional[UUID]] = mapped_column(ForeignKey("vms.id", ondelete="SET NULL"), nullable=True, index=True)
+    network_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey("networks.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     event_type: Mapped[EventType] = mapped_column(index=True)
     message: Mapped[str] = mapped_column(Text)
     extra_data: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON string for extra data
 
     range = relationship("Range", back_populates="event_logs")
     vm = relationship("VM", back_populates="event_logs")
+    network = relationship("Network", back_populates="event_logs")
