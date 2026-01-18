@@ -65,6 +65,8 @@ services:
       - /data/cyroid/template-storage:/data/cyroid/template-storage
       - /data/cyroid/vm-storage:/data/cyroid/vm-storage
       - /data/cyroid/shared:/data/cyroid/shared
+      # Seed templates for built-in CYROID templates
+      - ./data/seed-templates:/data/seed-templates:ro
     expose:
       - "8000"
     depends_on:

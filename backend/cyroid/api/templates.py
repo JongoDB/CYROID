@@ -22,20 +22,23 @@ def list_templates(db: DBSession, current_user: CurrentUser):
     Visibility rules:
     - Admins see ALL templates
     - Users see templates they own
+    - Users see seed templates (built-in templates shipped with CYROID)
     - Users see templates with matching tags (if they have tags)
     - Users see untagged templates (public)
     """
     if current_user.is_admin:
         return db.query(VMTemplate).all()
 
-    # Non-admins: own templates + visibility-filtered shared templates
+    # Non-admins: own templates + visibility-filtered shared templates + seed templates
+    # Seed templates (is_seed=True) are always visible to all users
     shared_query = db.query(VMTemplate).filter(VMTemplate.created_by != current_user.id)
     shared_query = filter_by_visibility(shared_query, 'template', current_user, db, VMTemplate)
 
     query = db.query(VMTemplate).filter(
         or_(
-            VMTemplate.created_by == current_user.id,
-            VMTemplate.id.in_(shared_query.with_entities(VMTemplate.id).subquery())
+            VMTemplate.created_by == current_user.id,  # Own templates
+            VMTemplate.is_seed == True,  # Seed templates always visible
+            VMTemplate.id.in_(shared_query.with_entities(VMTemplate.id).subquery())  # Shared templates
         )
     )
     return query.all()
