@@ -559,13 +559,16 @@ class VyOSService:
         self,
         container_id: str,
         timeout: int = 60,
-        check_interval: int = 5
+        check_interval: int = 2
     ) -> bool:
         """
-        Wait for the VyOS router to be ready to accept commands.
+        Wait for the VyOS router container to be ready for routing.
+
+        Checks that ip_forward is enabled and iptables is functional.
+        This works for VyOS routers even before the full CLI is available.
 
         Args:
-            container_id: VyOS container ID
+            container_id: Router container ID
             timeout: Maximum wait time in seconds
             check_interval: Time between checks in seconds
 
@@ -576,19 +579,29 @@ class VyOSService:
         while elapsed < timeout:
             status = self.get_router_status(container_id)
             if status == "running":
-                # Try a simple command to verify VyOS is operational
+                # Check basic routing capability (works before VyOS CLI is ready)
                 try:
-                    exit_code, _ = self.exec_vyos_command(container_id, "show version")
-                    if exit_code == 0:
-                        logger.info(f"VyOS router {container_id[:12]} is ready")
-                        return True
+                    # Check ip_forward is enabled
+                    exit_code, output = self.exec_shell_command(
+                        container_id,
+                        "cat /proc/sys/net/ipv4/ip_forward"
+                    )
+                    if exit_code == 0 and output.strip() == "1":
+                        # Check iptables is working
+                        exit_code2, _ = self.exec_shell_command(
+                            container_id,
+                            "iptables -L -n"
+                        )
+                        if exit_code2 == 0:
+                            logger.info(f"Router {container_id[:12]} is ready (iptables + ip_forward OK)")
+                            return True
                 except Exception:
-                    pass  # VyOS not ready yet
+                    pass  # Router not ready yet
 
             time.sleep(check_interval)
             elapsed += check_interval
 
-        logger.warning(f"VyOS router {container_id[:12]} not ready after {timeout}s")
+        logger.warning(f"Router {container_id[:12]} not ready after {timeout}s")
         return False
 
     # Internet Access Methods (via iptables NAT)
