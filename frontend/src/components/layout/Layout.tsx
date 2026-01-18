@@ -14,7 +14,8 @@ import {
   HardDrive,
   Users,
   Shield,
-  Key
+  Key,
+  LayoutTemplate
 } from 'lucide-react'
 import clsx from 'clsx'
 import PasswordChangeModal from '../common/PasswordChangeModal'
@@ -35,6 +36,7 @@ const navigation: NavItem[] = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
   { name: 'Image Cache', href: '/cache', icon: HardDrive },
   { name: 'Templates', href: '/templates', icon: Server },
+  { name: 'Blueprints', href: '/blueprints', icon: LayoutTemplate },
   { name: 'Ranges', href: '/ranges', icon: Network },
   { name: 'Users', href: '/users', icon: Users, adminOnly: true },
   { name: 'Artifacts', href: '/artifacts', icon: FileBox },
