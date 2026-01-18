@@ -1,7 +1,7 @@
 // frontend/src/pages/StudentLab.tsx
 import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels'
+import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from 'react-resizable-panels'
 import { BookOpen, Loader2, AlertCircle } from 'lucide-react'
 import { rangesApi, vmsApi, walkthroughApi } from '../services/api'
 import { Range, VM, Walkthrough } from '../types'
@@ -118,7 +118,7 @@ export default function StudentLab() {
 
   return (
     <div className="h-screen w-screen bg-gray-900 flex flex-col">
-      <PanelGroup direction="horizontal" className="flex-1">
+      <PanelGroup orientation="horizontal" className="flex-1">
         {/* Walkthrough Panel */}
         {!isCollapsed && (
           <>
