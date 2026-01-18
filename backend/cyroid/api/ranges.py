@@ -19,6 +19,9 @@ from cyroid.models.resource_tag import ResourceTag
 from cyroid.models.user import User
 from cyroid.models.router import RangeRouter, RouterStatus
 from cyroid.models.event_log import EventType
+from cyroid.models.scenario import Scenario
+from cyroid.models.msel import MSEL
+from cyroid.models.inject import Inject, InjectStatus
 from cyroid.services.event_service import EventService
 from cyroid.schemas.range import (
     RangeCreate, RangeUpdate, RangeResponse, RangeDetailResponse,
@@ -27,6 +30,7 @@ from cyroid.schemas.range import (
 from cyroid.schemas.deployment_status import (
     DeploymentStatusResponse, DeploymentSummary, ResourceStatus, NetworkStatus, VMStatus
 )
+from cyroid.schemas.scenario import ApplyScenarioRequest, ApplyScenarioResponse
 from sqlalchemy.orm import joinedload
 from cyroid.schemas.user import ResourceTagCreate, ResourceTagsResponse
 
@@ -1164,6 +1168,97 @@ def clone_range(
 
     db.refresh(cloned_range)
     return cloned_range
+
+
+@router.post("/{range_id}/scenario", response_model=ApplyScenarioResponse)
+def apply_scenario(
+    range_id: UUID,
+    request: ApplyScenarioRequest,
+    db: DBSession,
+    current_user: CurrentUser,
+):
+    """Apply a training scenario to a range, generating MSEL and injects."""
+    # Get range
+    range_obj = db.query(Range).filter(Range.id == range_id).first()
+    if not range_obj:
+        raise HTTPException(status_code=404, detail="Range not found")
+
+    # Get scenario
+    scenario = db.query(Scenario).filter(Scenario.id == request.scenario_id).first()
+    if not scenario:
+        raise HTTPException(status_code=404, detail="Scenario not found")
+
+    # Validate role mapping - all required roles must be mapped
+    missing_roles = set(scenario.required_roles) - set(request.role_mapping.keys())
+    if missing_roles:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Missing role mappings: {', '.join(missing_roles)}"
+        )
+
+    # Validate VM IDs exist in this range
+    vm_ids = set(request.role_mapping.values())
+    existing_vms = db.query(VM).filter(
+        VM.range_id == range_id,
+        VM.id.in_([UUID(vid) for vid in vm_ids])
+    ).all()
+    existing_vm_ids = {str(vm.id) for vm in existing_vms}
+    invalid_vms = vm_ids - existing_vm_ids
+    if invalid_vms:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid VM IDs: {', '.join(invalid_vms)}"
+        )
+
+    # Delete existing MSEL if any
+    existing_msel = db.query(MSEL).filter(MSEL.range_id == range_id).first()
+    if existing_msel:
+        db.delete(existing_msel)
+        db.flush()
+
+    # Create MSEL content from scenario
+    msel_content = f"# {scenario.name}\n\n{scenario.description}\n\n"
+    msel_content += "## Events\n\n"
+    for event in scenario.events:
+        msel_content += f"### T+{event['delay_minutes']}min: {event['title']}\n"
+        msel_content += f"{event.get('description', '')}\n\n"
+
+    # Create MSEL
+    msel = MSEL(
+        range_id=range_id,
+        name=f"Scenario: {scenario.name}",
+        content=msel_content,
+    )
+    db.add(msel)
+    db.flush()
+
+    # Create Injects from scenario events
+    inject_count = 0
+    for event in scenario.events:
+        # Map target_role to actual VM ID
+        target_role = event.get("target_role", "")
+        target_vm_id = request.role_mapping.get(target_role)
+
+        inject = Inject(
+            msel_id=msel.id,
+            sequence_number=event["sequence"],
+            inject_time_minutes=event["delay_minutes"],
+            title=event["title"],
+            description=event.get("description"),
+            target_vm_ids=[target_vm_id] if target_vm_id else [],
+            actions=event.get("actions", []),
+            status=InjectStatus.PENDING,
+        )
+        db.add(inject)
+        inject_count += 1
+
+    db.commit()
+
+    return ApplyScenarioResponse(
+        msel_id=msel.id,
+        inject_count=inject_count,
+        status="applied"
+    )
 
 
 # ============================================================================
