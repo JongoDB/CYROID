@@ -5,6 +5,20 @@ All notable changes to CYROID will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-01-17
+
+### Added
+
+- **Range Blueprints** ([#18](../../issues/18)): Save ranges as reusable blueprints and deploy multiple isolated instances with auto-allocated subnets.
+  - Save any range as a blueprint with "Save as Blueprint" button
+  - Deploy instances from blueprints with automatic subnet offset (10.100 → 10.101 → 10.102)
+  - Instance actions: reset (same version), redeploy (latest version), clone
+  - Blueprints page with card grid showing all blueprints
+  - Blueprint detail page with instances tab
+  - Instance info banner on RangeDetail for blueprint-deployed ranges
+  - New API endpoints: /blueprints, /instances
+  - RangeBlueprint and RangeInstance database models
+
 ## [0.5.0] - 2026-01-17
 
 ### Added
