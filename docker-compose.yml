@@ -159,7 +159,7 @@ services:
       - "traefik.http.routers.frontend-secure.service=frontend"
 
   traefik:
-    image: traefik:v3.0
+    image: traefik:v3.3
     command:
       - "--api.insecure=true"
       - "--providers.docker=true"
@@ -178,7 +178,7 @@ services:
       - "443:443"
       - "8080:8080"
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/run/docker.sock:/var/run/docker.sock
       - ./traefik-dynamic.yml:/etc/traefik/dynamic.yml:ro
       - ./certs:/etc/traefik/certs:ro
     networks:
