@@ -47,6 +47,9 @@ class RangeResponse(RangeBase):
     created_by: UUID
     created_at: datetime
     updated_at: datetime
+    deployed_at: Optional[datetime] = None
+    started_at: Optional[datetime] = None
+    stopped_at: Optional[datetime] = None
     network_count: int = 0
     vm_count: int = 0
 
@@ -65,6 +68,9 @@ class RangeResponse(RangeBase):
             created_by=range_obj.created_by,
             created_at=range_obj.created_at,
             updated_at=range_obj.updated_at,
+            deployed_at=range_obj.deployed_at,
+            started_at=range_obj.started_at,
+            stopped_at=range_obj.stopped_at,
             network_count=len(range_obj.networks) if range_obj.networks else 0,
             vm_count=len(range_obj.vms) if range_obj.vms else 0,
         )

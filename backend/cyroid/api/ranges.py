@@ -324,6 +324,7 @@ def deploy_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
         range_id=range_id,
         event_type=EventType.DEPLOYMENT_STARTED,
         message=f"Starting deployment of range '{range_obj.name}'",
+        user_id=current_user.id,
         extra_data=json.dumps({
             "total_networks": len(networks),
             "total_vms": len(vms),
@@ -356,7 +357,8 @@ def deploy_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
                 event_service.log_event(
                     range_id=range_id,
                     event_type=EventType.ROUTER_CREATING,
-                    message=f"Creating VyOS router (management IP: {range_router.management_ip})"
+                    message=f"Creating VyOS router (management IP: {range_router.management_ip})",
+                    user_id=current_user.id
                 )
 
                 container_id = vyos.create_router_container(
@@ -376,7 +378,8 @@ def deploy_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
                 event_service.log_event(
                     range_id=range_id,
                     event_type=EventType.ROUTER_CREATED,
-                    message="VyOS router created and running"
+                    message="VyOS router created and running",
+                    user_id=current_user.id
                 )
                 logger.info(f"VyOS router created for range {range_id}")
             except Exception as e:
@@ -390,7 +393,8 @@ def deploy_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
         event_service.log_event(
             range_id=range_id,
             event_type=EventType.DEPLOYMENT_STEP,
-            message=f"Provisioning {len(networks)} network(s)"
+            message=f"Provisioning {len(networks)} network(s)",
+            user_id=current_user.id
         )
         interface_num = 1  # eth0 is management, start from eth1
         for idx, network in enumerate(networks):
@@ -400,6 +404,7 @@ def deploy_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
                     network_id=network.id,
                     event_type=EventType.NETWORK_CREATING,
                     message=f"Creating network '{network.name}' ({idx + 1}/{len(networks)})",
+                    user_id=current_user.id,
                     extra_data=json.dumps({"subnet": network.subnet, "gateway": network.gateway})
                 )
                 docker_network_id = docker.create_network(
@@ -427,7 +432,8 @@ def deploy_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
                     range_id=range_id,
                     network_id=network.id,
                     event_type=EventType.NETWORK_CREATED,
-                    message=f"Network '{network.name}' created ({network.subnet})"
+                    message=f"Network '{network.name}' created ({network.subnet})",
+                    user_id=current_user.id
                 )
 
             # Connect VyOS router to this network as the gateway
@@ -475,7 +481,8 @@ def deploy_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
         event_service.log_event(
             range_id=range_id,
             event_type=EventType.DEPLOYMENT_STEP,
-            message=f"Starting {len(vms)} VM(s)"
+            message=f"Starting {len(vms)} VM(s)",
+            user_id=current_user.id
         )
         for vm_idx, vm in enumerate(vms):
             if vm.container_id:
@@ -484,7 +491,8 @@ def deploy_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
                     range_id=range_id,
                     event_type=EventType.VM_CREATING,
                     message=f"Starting existing VM '{vm.hostname}' ({vm_idx + 1}/{len(vms)})",
-                    vm_id=vm.id
+                    vm_id=vm.id,
+                    user_id=current_user.id
                 )
                 docker.start_container(vm.container_id)
             else:
@@ -508,6 +516,7 @@ def deploy_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
                     event_type=EventType.VM_CREATING,
                     message=f"Creating {vm_type} '{vm.hostname}' ({vm_idx + 1}/{len(vms)})",
                     vm_id=vm.id,
+                    user_id=current_user.id,
                     extra_data=json.dumps({
                         "image": template.base_image,
                         "ip_address": vm.ip_address,
@@ -725,10 +734,16 @@ def deploy_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
                 range_id=range_id,
                 event_type=EventType.VM_STARTED,
                 message=f"VM '{vm.hostname}' is now running",
-                vm_id=vm.id
+                vm_id=vm.id,
+                user_id=current_user.id
             )
 
         range_obj.status = RangeStatus.RUNNING
+        # Set lifecycle timestamps
+        from datetime import timezone
+        now = datetime.now(timezone.utc)
+        range_obj.deployed_at = now
+        range_obj.started_at = now
         db.commit()
 
         # Log deployment completion
@@ -736,6 +751,7 @@ def deploy_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
             range_id=range_id,
             event_type=EventType.DEPLOYMENT_COMPLETED,
             message=f"Range '{range_obj.name}' deployed successfully",
+            user_id=current_user.id,
             extra_data=json.dumps({
                 "networks_deployed": len(networks),
                 "vms_deployed": len(vms)
@@ -754,6 +770,7 @@ def deploy_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
             range_id=range_id,
             event_type=EventType.DEPLOYMENT_FAILED,
             message=f"Deployment failed: {str(e)[:200]}",
+            user_id=current_user.id,
             extra_data=json.dumps({"error": str(e)})
         )
 
@@ -806,7 +823,19 @@ def start_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
                 logger.info(f"Started VM {vm.hostname}")
 
         range_obj.status = RangeStatus.RUNNING
+        # Set lifecycle timestamp
+        from datetime import timezone
+        range_obj.started_at = datetime.now(timezone.utc)
         db.commit()
+
+        # Log the start event
+        event_service = EventService(db)
+        event_service.log_event(
+            range_id=range_id,
+            event_type=EventType.RANGE_STARTED,
+            message=f"Range '{range_obj.name}' started",
+            user_id=current_user.id
+        )
         db.refresh(range_obj)
 
     except Exception as e:
@@ -864,7 +893,19 @@ def stop_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
                 logger.warning(f"Failed to stop VyOS router: {e}")
 
         range_obj.status = RangeStatus.STOPPED
+        # Set lifecycle timestamp
+        from datetime import timezone
+        range_obj.stopped_at = datetime.now(timezone.utc)
         db.commit()
+
+        # Log the stop event
+        event_service = EventService(db)
+        event_service.log_event(
+            range_id=range_id,
+            event_type=EventType.RANGE_STOPPED,
+            message=f"Range '{range_obj.name}' stopped",
+            user_id=current_user.id
+        )
         db.refresh(range_obj)
 
     except Exception as e:

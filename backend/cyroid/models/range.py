@@ -1,8 +1,9 @@
 # backend/cyroid/models/range.py
+from datetime import datetime
 from enum import Enum
 from typing import Optional, List
 from uuid import UUID
-from sqlalchemy import String, Text, ForeignKey
+from sqlalchemy import String, Text, ForeignKey, DateTime
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from cyroid.models.base import Base, TimestampMixin, UUIDMixin
@@ -26,6 +27,17 @@ class Range(Base, UUIDMixin, TimestampMixin):
 
     # Error tracking
     error_message: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
+
+    # Lifecycle timestamps
+    deployed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    started_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    stopped_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     # Ownership
     created_by: Mapped[UUID] = mapped_column(ForeignKey("users.id"))

@@ -10,6 +10,7 @@ import {
 import clsx from 'clsx'
 import { VncConsole } from '../components/console/VncConsole'
 import { useAuthStore } from '../stores/authStore'
+import { RelativeTime } from '../components/common/RelativeTime'
 import { useIsArmHost } from '../stores/systemStore'
 import { EmulationWarning } from '../components/common/EmulationWarning'
 import ExportRangeDialog from '../components/export/ExportRangeDialog'
@@ -17,6 +18,7 @@ import { DeploymentProgress } from '../components/range/DeploymentProgress'
 import { useRealtimeRange } from '../hooks/useRealtimeRange'
 import { toast } from '../stores/toastStore'
 import { DiagnosticsTab } from '../components/diagnostics'
+import { ActivityTab } from '../components/range/ActivityTab'
 import { ConfirmDialog } from '../components/common/ConfirmDialog'
 import { SaveBlueprintModal } from '../components/blueprints'
 
@@ -40,7 +42,7 @@ export default function RangeDetail() {
   const [loading, setLoading] = useState(true)
 
   // Tab state
-  const [activeTab, setActiveTab] = useState<'builder' | 'diagnostics'>('builder')
+  const [activeTab, setActiveTab] = useState<'builder' | 'diagnostics' | 'activity'>('builder')
 
   // Network modal state
   const [showNetworkModal, setShowNetworkModal] = useState(false)
@@ -653,6 +655,28 @@ export default function RangeDetail() {
               )}
             </div>
             <p className="mt-1 text-sm text-gray-500">{range.description || 'No description'}</p>
+            {/* Lifecycle timestamps */}
+            <div className="mt-1 text-sm text-gray-500 flex items-center gap-2">
+              <RelativeTime date={range.created_at} prefix="Created " />
+              {range.deployed_at && (
+                <>
+                  <span>-</span>
+                  <RelativeTime date={range.deployed_at} prefix="Deployed " />
+                </>
+              )}
+              {range.started_at && (
+                <>
+                  <span>-</span>
+                  <RelativeTime date={range.started_at} prefix="Started " />
+                </>
+              )}
+              {range.stopped_at && range.status === 'stopped' && (
+                <>
+                  <span>-</span>
+                  <RelativeTime date={range.stopped_at} prefix="Stopped " />
+                </>
+              )}
+            </div>
             {/* Real-time connection indicator */}
             <div className="mt-1 flex items-center gap-1.5">
               <Radio className={clsx(
@@ -776,6 +800,18 @@ export default function RangeDetail() {
                 {errorCount}
               </span>
             )}
+          </button>
+          <button
+            onClick={() => setActiveTab('activity')}
+            className={clsx(
+              "py-2 px-1 border-b-2 font-medium text-sm flex items-center gap-2",
+              activeTab === 'activity'
+                ? "border-primary-500 text-primary-600"
+                : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+            )}
+          >
+            <Activity className="h-4 w-4" />
+            Activity
           </button>
         </nav>
       </div>
@@ -1007,6 +1043,13 @@ export default function RangeDetail() {
           networks={networks}
           vms={vms}
         />
+      )}
+
+      {/* Activity Tab Content */}
+      {activeTab === 'activity' && (
+        <div className="bg-white shadow rounded-lg">
+          <ActivityTab rangeId={range.id} />
+        </div>
       )}
 
       {/* Network Modal */}

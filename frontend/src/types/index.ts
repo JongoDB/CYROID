@@ -42,6 +42,9 @@ export interface Range {
   created_by: string
   created_at: string
   updated_at: string
+  deployed_at: string | null
+  started_at: string | null
+  stopped_at: string | null
   network_count: number
   vm_count: number
   networks?: Network[]
@@ -175,11 +178,19 @@ export type EventType =
   | 'connection_established'
   | 'connection_closed'
 
+export interface UserBasic {
+  id: string
+  username: string
+  email: string
+}
+
 export interface EventLog {
   id: string
   range_id: string
   vm_id: string | null
   network_id: string | null
+  user_id: string | null
+  user: UserBasic | null
   event_type: EventType
   message: string
   extra_data: string | null

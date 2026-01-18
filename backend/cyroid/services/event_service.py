@@ -4,7 +4,7 @@ import json
 import logging
 from uuid import UUID
 from typing import Optional, List
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import desc
 from cyroid.models.event_log import EventLog, EventType
 
@@ -22,6 +22,7 @@ class EventService:
         message: str,
         vm_id: Optional[UUID] = None,
         network_id: Optional[UUID] = None,
+        user_id: Optional[UUID] = None,
         extra_data: Optional[str] = None,
         broadcast: bool = True
     ) -> EventLog:
@@ -34,6 +35,7 @@ class EventService:
             message: Human-readable message
             vm_id: Optional VM this event relates to
             network_id: Optional network this event relates to
+            user_id: Optional user who triggered this event
             extra_data: Optional JSON string with additional data
             broadcast: Whether to broadcast to WebSocket clients (default True)
 
@@ -44,6 +46,7 @@ class EventService:
             range_id=range_id,
             vm_id=vm_id,
             network_id=network_id,
+            user_id=user_id,
             event_type=event_type,
             message=message,
             extra_data=extra_data
@@ -110,7 +113,9 @@ class EventService:
         offset: int = 0,
         event_types: Optional[List[EventType]] = None
     ) -> tuple[List[EventLog], int]:
-        query = self.db.query(EventLog).filter(EventLog.range_id == range_id)
+        query = self.db.query(EventLog).options(
+            joinedload(EventLog.user)
+        ).filter(EventLog.range_id == range_id)
 
         if event_types:
             query = query.filter(EventLog.event_type.in_(event_types))
@@ -121,6 +126,8 @@ class EventService:
         return events, total
 
     def get_vm_events(self, vm_id: UUID, limit: int = 50) -> List[EventLog]:
-        return self.db.query(EventLog).filter(
+        return self.db.query(EventLog).options(
+            joinedload(EventLog.user)
+        ).filter(
             EventLog.vm_id == vm_id
         ).order_by(desc(EventLog.created_at)).limit(limit).all()

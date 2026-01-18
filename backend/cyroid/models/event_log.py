@@ -48,6 +48,9 @@ class EventLog(Base, UUIDMixin, TimestampMixin):
     network_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey("networks.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    user_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     event_type: Mapped[EventType] = mapped_column(index=True)
     message: Mapped[str] = mapped_column(Text)
     extra_data: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON string for extra data
@@ -55,3 +58,4 @@ class EventLog(Base, UUIDMixin, TimestampMixin):
     range = relationship("Range", back_populates="event_logs")
     vm = relationship("VM", back_populates="event_logs")
     network = relationship("Network", back_populates="event_logs")
+    user = relationship("User")

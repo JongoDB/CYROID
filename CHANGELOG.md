@@ -5,6 +5,17 @@ All notable changes to CYROID will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.3] - 2026-01-17
+
+### Added
+
+- **Lifecycle Timestamps & Activity History** ([#23](../../issues/23)): Track when ranges are deployed, started, and stopped with user attribution.
+  - Range model now includes `deployed_at`, `started_at`, `stopped_at` timestamps
+  - EventLog now includes `user_id` to track who triggered events
+  - Timestamps displayed in Range header with relative time (hover for exact)
+  - New Activity tab on RangeDetail showing event history grouped by day
+  - Events show username/email of who triggered them
+
 ## [0.6.2] - 2026-01-17
 
 ### Added
