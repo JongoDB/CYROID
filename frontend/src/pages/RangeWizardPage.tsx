@@ -77,8 +77,8 @@ export default function RangeWizardPage() {
 
       // Step 3: Create VMs
       for (const vm of networks.vms) {
-        // Find template by name
-        const template = templates.find((t) => t.name === vm.templateName);
+        // Find template by name or ID
+        const template = templates.find((t) => t.id === vm.templateId || t.name === vm.templateName);
         if (!template) {
           console.warn(`Template not found for VM ${vm.hostname}: ${vm.templateName}`);
           continue;
@@ -89,6 +89,9 @@ export default function RangeWizardPage() {
           console.warn(`Network not found for VM ${vm.hostname}: ${vm.networkId}`);
           continue;
         }
+
+        // Detect OS type for field mapping
+        const isWindows = template.os_type === 'windows';
 
         await vmsApi.create({
           range_id: rangeId,
@@ -101,6 +104,30 @@ export default function RangeWizardPage() {
           disk_gb: vm.diskGb,
           position_x: vm.position.x,
           position_y: vm.position.y,
+          // Credentials - mapped to OS-specific fields
+          ...(isWindows ? {
+            windows_username: vm.username,
+            windows_password: vm.password,
+          } : {
+            linux_username: vm.username,
+            linux_password: vm.password,
+            linux_user_sudo: vm.sudoEnabled,
+          }),
+          // Network settings
+          use_dhcp: vm.useDhcp,
+          gateway: vm.gateway,
+          dns_servers: vm.dnsServers,
+          // Storage
+          disk2_gb: vm.disk2Gb || null,
+          disk3_gb: vm.disk3Gb || null,
+          // Shared folders
+          enable_shared_folder: vm.enableSharedFolder,
+          enable_global_shared: vm.enableGlobalShared,
+          // Display and locale
+          display_type: vm.displayType,
+          language: vm.language || null,
+          keyboard: vm.keyboard || null,
+          region: vm.region || null,
         });
       }
 

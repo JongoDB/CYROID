@@ -42,6 +42,33 @@ export interface VMPlacement {
   ramMb: number;
   diskGb: number;
   position: { x: number; y: number };
+
+  // OS-specific configuration (all optional)
+  // Credentials (all OS types)
+  username?: string;
+  password?: string;
+  sudoEnabled?: boolean;
+
+  // Network settings (Windows & Linux ISO only)
+  useDhcp?: boolean;
+  gateway?: string;
+  dnsServers?: string;
+
+  // Additional storage (Windows & Linux ISO only)
+  disk2Gb?: number;
+  disk3Gb?: number;
+
+  // Shared folders (all OS types)
+  enableSharedFolder?: boolean;
+  enableGlobalShared?: boolean;
+
+  // Display type (Windows & Linux ISO only)
+  displayType?: 'desktop' | 'server';
+
+  // Locale settings (Windows & Linux ISO only)
+  language?: string;
+  keyboard?: string;
+  region?: string;
 }
 
 // Connection between network elements
