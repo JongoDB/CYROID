@@ -9,6 +9,7 @@ import Dashboard from './pages/Dashboard'
 import Templates from './pages/Templates'
 import Ranges from './pages/Ranges'
 import RangeDetail from './pages/RangeDetail'
+import RangeWizardPage from './pages/RangeWizardPage'
 import ExecutionConsole from './pages/ExecutionConsole'
 import StandaloneConsole from './pages/StandaloneConsole'
 import Blueprints from './pages/Blueprints'
@@ -65,6 +66,7 @@ function App() {
                 <Route path="/" element={<Dashboard />} />
                 <Route path="/templates" element={<Templates />} />
                 <Route path="/ranges" element={<Ranges />} />
+                <Route path="/ranges/new" element={<RangeWizardPage />} />
                 <Route path="/ranges/:id" element={<RangeDetail />} />
                 <Route path="/blueprints" element={<Blueprints />} />
                 <Route path="/blueprints/:id" element={<BlueprintDetail />} />
