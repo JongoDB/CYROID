@@ -397,6 +397,7 @@ def deploy_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
             if not network.docker_network_id:
                 event_service.log_event(
                     range_id=range_id,
+                    network_id=network.id,
                     event_type=EventType.NETWORK_CREATING,
                     message=f"Creating network '{network.name}' ({idx + 1}/{len(networks)})",
                     extra_data=json.dumps({"subnet": network.subnet, "gateway": network.gateway})
@@ -424,6 +425,7 @@ def deploy_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
 
                 event_service.log_event(
                     range_id=range_id,
+                    network_id=network.id,
                     event_type=EventType.NETWORK_CREATED,
                     message=f"Network '{network.name}' created ({network.subnet})"
                 )
