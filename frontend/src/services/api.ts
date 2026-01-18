@@ -590,4 +590,100 @@ export const walkthroughApi = {
     api.put<WalkthroughProgress>(`/ranges/${rangeId}/walkthrough/progress`, data),
 }
 
+// ============ Blueprint Types ============
+
+export interface NetworkConfig {
+  name: string;
+  subnet: string;
+  gateway: string;
+  is_isolated: boolean;
+}
+
+export interface VMConfig {
+  hostname: string;
+  ip_address: string;
+  network_name: string;
+  template_name: string;
+  cpu: number;
+  ram_mb: number;
+  disk_gb: number;
+  position_x?: number;
+  position_y?: number;
+}
+
+export interface BlueprintConfig {
+  networks: NetworkConfig[];
+  vms: VMConfig[];
+  router?: { enabled: boolean; dhcp_enabled: boolean };
+  msel?: { content?: string; format: string };
+}
+
+export interface Blueprint {
+  id: string;
+  name: string;
+  description?: string;
+  version: number;
+  base_subnet_prefix: string;
+  next_offset: number;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+  network_count: number;
+  vm_count: number;
+  instance_count: number;
+}
+
+export interface BlueprintDetail extends Blueprint {
+  config: BlueprintConfig;
+  created_by_username?: string;
+}
+
+export interface BlueprintCreate {
+  range_id: string;
+  name: string;
+  description?: string;
+  base_subnet_prefix: string;
+}
+
+export interface Instance {
+  id: string;
+  name: string;
+  blueprint_id: string;
+  blueprint_version: number;
+  subnet_offset: number;
+  instructor_id: string;
+  range_id: string;
+  created_at: string;
+  range_name?: string;
+  range_status?: string;
+  instructor_username?: string;
+}
+
+export interface InstanceDeploy {
+  name: string;
+  auto_deploy?: boolean;
+}
+
+// ============ Blueprint API ============
+
+export const blueprintsApi = {
+  list: () => api.get<Blueprint[]>('/blueprints'),
+  get: (id: string) => api.get<BlueprintDetail>(`/blueprints/${id}`),
+  create: (data: BlueprintCreate) => api.post<BlueprintDetail>('/blueprints', data),
+  update: (id: string, data: { name?: string; description?: string }) =>
+    api.put<BlueprintDetail>(`/blueprints/${id}`, data),
+  delete: (id: string) => api.delete(`/blueprints/${id}`),
+  deploy: (id: string, data: InstanceDeploy) =>
+    api.post<Instance>(`/blueprints/${id}/deploy`, data),
+  listInstances: (id: string) => api.get<Instance[]>(`/blueprints/${id}/instances`),
+};
+
+export const instancesApi = {
+  get: (id: string) => api.get<Instance>(`/instances/${id}`),
+  reset: (id: string) => api.post<Instance>(`/instances/${id}/reset`),
+  redeploy: (id: string) => api.post<Instance>(`/instances/${id}/redeploy`),
+  clone: (id: string) => api.post<Instance>(`/instances/${id}/clone`),
+  delete: (id: string) => api.delete(`/instances/${id}`),
+};
+
 export default api
