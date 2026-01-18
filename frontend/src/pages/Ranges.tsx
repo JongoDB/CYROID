@@ -6,7 +6,7 @@ import type { Range } from '../types'
 import { Plus, Loader2, Network, X, Play, Square, Trash2, Upload, Wand2 } from 'lucide-react'
 import clsx from 'clsx'
 import ImportRangeWizard from '../components/import/ImportRangeWizard'
-import { GuidedBuilderWizard } from '../components/wizard'
+import { RangeWizard } from '../components/wizard'
 import { ConfirmDialog } from '../components/common/ConfirmDialog'
 import { toast } from '../stores/toastStore'
 
@@ -24,7 +24,7 @@ export default function Ranges() {
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
   const [showImportWizard, setShowImportWizard] = useState(false)
-  const [showGuidedBuilder, setShowGuidedBuilder] = useState(false)
+  const [showRangeWizard, setShowRangeWizard] = useState(false)
   const [formData, setFormData] = useState<RangeCreate>({ name: '', description: '' })
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -119,11 +119,11 @@ export default function Ranges() {
         </div>
         <div className="mt-4 sm:mt-0 flex space-x-3">
           <button
-            onClick={() => setShowGuidedBuilder(true)}
+            onClick={() => setShowRangeWizard(true)}
             className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
           >
             <Wand2 className="h-4 w-4 mr-2" />
-            Guided Builder
+            Range Wizard
           </button>
           <button
             onClick={() => setShowImportWizard(true)}
@@ -151,11 +151,11 @@ export default function Ranges() {
           </p>
           <div className="mt-6 flex flex-col sm:flex-row items-center justify-center gap-3">
             <button
-              onClick={() => setShowGuidedBuilder(true)}
+              onClick={() => setShowRangeWizard(true)}
               className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
             >
               <Wand2 className="h-4 w-4 mr-2" />
-              Guided Builder
+              Range Wizard
             </button>
             <button
               onClick={() => setShowModal(true)}
@@ -325,11 +325,11 @@ export default function Ranges() {
         isLoading={deleteConfirm.isLoading}
       />
 
-      {/* Guided Builder Wizard */}
-      <GuidedBuilderWizard
-        isOpen={showGuidedBuilder}
+      {/* Range Wizard */}
+      <RangeWizard
+        isOpen={showRangeWizard}
         onClose={() => {
-          setShowGuidedBuilder(false)
+          setShowRangeWizard(false)
           fetchRanges() // Refresh list after wizard closes
         }}
       />

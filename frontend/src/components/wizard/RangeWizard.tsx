@@ -1,4 +1,4 @@
-// frontend/src/components/wizard/GuidedBuilderWizard.tsx
+// frontend/src/components/wizard/RangeWizard.tsx
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { X, Loader2, ChevronLeft, ChevronRight, Rocket } from 'lucide-react';
@@ -125,7 +125,7 @@ function WizardContent({ onClose }: { onClose: () => void }) {
         <div className="relative bg-white rounded-xl shadow-xl w-full max-w-2xl">
           {/* Header */}
           <div className="flex items-center justify-between px-6 py-4 border-b">
-            <h2 className="text-lg font-semibold text-gray-900">Guided Range Builder</h2>
+            <h2 className="text-lg font-semibold text-gray-900">Range Wizard</h2>
             <button
               onClick={onClose}
               className="text-gray-400 hover:text-gray-500"
@@ -227,7 +227,7 @@ function WizardContent({ onClose }: { onClose: () => void }) {
   );
 }
 
-export function GuidedBuilderWizard({ isOpen, onClose }: Props) {
+export function RangeWizard({ isOpen, onClose }: Props) {
   if (!isOpen) return null;
 
   return (
