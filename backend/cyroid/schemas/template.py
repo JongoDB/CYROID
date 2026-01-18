@@ -54,9 +54,12 @@ class VMTemplateUpdate(BaseModel):
 
 class VMTemplateResponse(VMTemplateBase):
     id: UUID
-    created_by: UUID
+    created_by: Optional[UUID] = None  # None for seed templates
     created_at: datetime
     updated_at: datetime
+    # Seed template identification
+    is_seed: bool = False
+    seed_id: Optional[str] = None
 
     class Config:
         from_attributes = True
