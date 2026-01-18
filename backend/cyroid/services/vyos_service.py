@@ -559,10 +559,14 @@ class VyOSService:
         self,
         container_id: str,
         timeout: int = 60,
-        check_interval: int = 5
+        check_interval: int = 2
     ) -> bool:
         """
-        Wait for the VyOS router to be ready to accept commands.
+        Wait for the VyOS router to be ready for routing.
+
+        Note: We check ip_forward + iptables instead of VyOS CLI commands because
+        the 2stacks/vyos image doesn't support 'show version' in the expected way.
+        This check confirms the router is functionally ready for routing traffic.
 
         Args:
             container_id: VyOS container ID
@@ -576,14 +580,23 @@ class VyOSService:
         while elapsed < timeout:
             status = self.get_router_status(container_id)
             if status == "running":
-                # Try a simple command to verify VyOS is operational
+                # Check routing capability (ip_forward + iptables)
+                # This works reliably with 2stacks/vyos image
                 try:
-                    exit_code, _ = self.exec_vyos_command(container_id, "show version")
-                    if exit_code == 0:
-                        logger.info(f"VyOS router {container_id[:12]} is ready")
-                        return True
+                    exit_code, output = self.exec_shell_command(
+                        container_id,
+                        "cat /proc/sys/net/ipv4/ip_forward"
+                    )
+                    if exit_code == 0 and output.strip() == "1":
+                        exit_code2, _ = self.exec_shell_command(
+                            container_id,
+                            "iptables -L -n"
+                        )
+                        if exit_code2 == 0:
+                            logger.info(f"VyOS router {container_id[:12]} is ready")
+                            return True
                 except Exception:
-                    pass  # VyOS not ready yet
+                    pass  # Router not ready yet
 
             time.sleep(check_interval)
             elapsed += check_interval

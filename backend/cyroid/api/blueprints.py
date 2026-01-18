@@ -1,7 +1,10 @@
 # backend/cyroid/api/blueprints.py
+import os
+import tempfile
 from typing import List
 from uuid import UUID
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, UploadFile, File, Query
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from cyroid.api.deps import DBSession, CurrentUser
@@ -10,9 +13,15 @@ from cyroid.schemas.blueprint import (
     BlueprintCreate, BlueprintUpdate, BlueprintResponse, BlueprintDetailResponse,
     InstanceDeploy, InstanceResponse, BlueprintConfig
 )
+from cyroid.schemas.blueprint_export import (
+    BlueprintImportValidation,
+    BlueprintImportOptions,
+    BlueprintImportResult,
+)
 from cyroid.services.blueprint_service import (
     extract_config_from_range, extract_subnet_prefix, create_range_from_blueprint
 )
+from cyroid.services.blueprint_export_service import get_blueprint_export_service
 from cyroid.tasks.deployment import deploy_range_task
 
 router = APIRouter(prefix="/blueprints", tags=["blueprints"])
@@ -169,6 +178,137 @@ def list_instances(blueprint_id: UUID, db: DBSession, current_user: CurrentUser)
     ).all()
 
     return [_instance_to_response(i, db) for i in instances]
+
+
+# ============ Export/Import Endpoints ============
+
+@router.get("/{blueprint_id}/export")
+def export_blueprint(blueprint_id: UUID, db: DBSession, current_user: CurrentUser):
+    """
+    Export a blueprint as a portable ZIP package.
+
+    The package includes:
+    - Blueprint configuration (networks, VMs, MSEL)
+    - All referenced VM templates
+    - Manifest with checksums
+    """
+    export_service = get_blueprint_export_service()
+
+    try:
+        archive_path, filename = export_service.export_blueprint(
+            blueprint_id=blueprint_id,
+            user=current_user,
+            db=db,
+        )
+
+        return FileResponse(
+            path=str(archive_path),
+            filename=filename,
+            media_type="application/zip",
+            background=None,  # Don't delete file immediately
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Export failed: {str(e)}")
+
+
+@router.post("/import/validate", response_model=BlueprintImportValidation)
+async def validate_blueprint_import(
+    file: UploadFile = File(...),
+    db: DBSession = None,
+    current_user: CurrentUser = None,
+):
+    """
+    Validate a blueprint import package (dry-run).
+
+    Checks for:
+    - Blueprint name conflicts
+    - Template availability (exists or included in package)
+    - Missing dependencies
+    """
+    if not file.filename or not file.filename.endswith(".zip"):
+        raise HTTPException(status_code=400, detail="File must be a ZIP archive")
+
+    # Save uploaded file temporarily
+    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".zip")
+    try:
+        content = await file.read()
+        temp_file.write(content)
+        temp_file.close()
+
+        export_service = get_blueprint_export_service()
+        result = export_service.validate_import(
+            archive_path=temp_file.name,
+            db=db,
+        )
+        return result
+    finally:
+        # Clean up temp file
+        try:
+            os.unlink(temp_file.name)
+        except Exception:
+            pass
+
+
+@router.post("/import", response_model=BlueprintImportResult)
+async def import_blueprint(
+    file: UploadFile = File(...),
+    template_conflict_strategy: str = Query(
+        default="skip",
+        description="How to handle template conflicts: skip, update, or error"
+    ),
+    new_name: str = Query(
+        default=None,
+        description="Rename blueprint on import to avoid name conflicts"
+    ),
+    db: DBSession = None,
+    current_user: CurrentUser = None,
+):
+    """
+    Import a blueprint from a ZIP package.
+
+    Creates:
+    - Missing VM templates from package
+    - The blueprint with new IDs
+
+    Options:
+    - template_conflict_strategy: skip (use existing), update (overwrite), error (fail)
+    - new_name: Rename the blueprint to avoid conflicts
+    """
+    if not file.filename or not file.filename.endswith(".zip"):
+        raise HTTPException(status_code=400, detail="File must be a ZIP archive")
+
+    # Save uploaded file temporarily
+    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".zip")
+    try:
+        content = await file.read()
+        temp_file.write(content)
+        temp_file.close()
+
+        options = BlueprintImportOptions(
+            template_conflict_strategy=template_conflict_strategy,
+            new_name=new_name,
+        )
+
+        export_service = get_blueprint_export_service()
+        result = export_service.import_blueprint(
+            archive_path=temp_file.name,
+            options=options,
+            user=current_user,
+            db=db,
+        )
+
+        if not result.success:
+            raise HTTPException(status_code=400, detail=result.errors[0] if result.errors else "Import failed")
+
+        return result
+    finally:
+        # Clean up temp file
+        try:
+            os.unlink(temp_file.name)
+        except Exception:
+            pass
 
 
 # ============ Helper Functions ============

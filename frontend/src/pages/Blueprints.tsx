@@ -10,10 +10,12 @@ import {
   Network,
   Server,
   Users,
+  Upload,
 } from 'lucide-react';
 import { ConfirmDialog } from '../components/common/ConfirmDialog';
 import { toast } from '../stores/toastStore';
 import DeployInstanceModal from '../components/blueprints/DeployInstanceModal';
+import { ImportBlueprintModal } from '../components/blueprints';
 
 export default function Blueprints() {
   const [blueprints, setBlueprints] = useState<Blueprint[]>([]);
@@ -23,6 +25,7 @@ export default function Blueprints() {
     isLoading: boolean;
   }>({ blueprint: null, isLoading: false });
   const [deployModal, setDeployModal] = useState<Blueprint | null>(null);
+  const [showImportModal, setShowImportModal] = useState(false);
 
   const fetchBlueprints = async () => {
     try {
@@ -86,6 +89,15 @@ export default function Blueprints() {
           <p className="mt-2 text-sm text-gray-700">
             Reusable range configurations for deploying multiple isolated instances
           </p>
+        </div>
+        <div className="mt-4 sm:mt-0">
+          <button
+            onClick={() => setShowImportModal(true)}
+            className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+          >
+            <Upload className="h-4 w-4 mr-2" />
+            Import Blueprint
+          </button>
         </div>
       </div>
 
@@ -188,6 +200,17 @@ export default function Blueprints() {
           blueprint={deployModal}
           onClose={() => setDeployModal(null)}
           onDeploy={handleDeploy}
+        />
+      )}
+
+      {/* Import Blueprint Modal */}
+      {showImportModal && (
+        <ImportBlueprintModal
+          onClose={() => setShowImportModal(false)}
+          onSuccess={() => {
+            fetchBlueprints();
+            toast.success('Blueprint imported successfully');
+          }}
         />
       )}
     </div>

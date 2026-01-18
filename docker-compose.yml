@@ -53,18 +53,18 @@ services:
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: cyroid
       MINIO_SECRET_KEY: cyroid123
-      ISO_CACHE_DIR: /data/cyroid/iso-cache
-      TEMPLATE_STORAGE_DIR: /data/cyroid/template-storage
-      VM_STORAGE_DIR: /data/cyroid/vm-storage
-      GLOBAL_SHARED_DIR: /data/cyroid/shared
+      ISO_CACHE_DIR: ${CYROID_DATA_DIR:-/data/cyroid}/iso-cache
+      TEMPLATE_STORAGE_DIR: ${CYROID_DATA_DIR:-/data/cyroid}/template-storage
+      VM_STORAGE_DIR: ${CYROID_DATA_DIR:-/data/cyroid}/vm-storage
+      GLOBAL_SHARED_DIR: ${CYROID_DATA_DIR:-/data/cyroid}/shared
     volumes:
       - ./backend:/app
       - /var/run/docker.sock:/var/run/docker.sock
       # Use bind mounts so spawned VM containers can access these paths
-      - /data/cyroid/iso-cache:/data/cyroid/iso-cache
-      - /data/cyroid/template-storage:/data/cyroid/template-storage
-      - /data/cyroid/vm-storage:/data/cyroid/vm-storage
-      - /data/cyroid/shared:/data/cyroid/shared
+      - ${CYROID_DATA_DIR:-/data/cyroid}/iso-cache:${CYROID_DATA_DIR:-/data/cyroid}/iso-cache
+      - ${CYROID_DATA_DIR:-/data/cyroid}/template-storage:${CYROID_DATA_DIR:-/data/cyroid}/template-storage
+      - ${CYROID_DATA_DIR:-/data/cyroid}/vm-storage:${CYROID_DATA_DIR:-/data/cyroid}/vm-storage
+      - ${CYROID_DATA_DIR:-/data/cyroid}/shared:${CYROID_DATA_DIR:-/data/cyroid}/shared
       # Seed templates for built-in CYROID templates
       - ./data/seed-templates:/data/seed-templates:ro
       # Training scenarios (read from filesystem, writable for uploads)
@@ -112,18 +112,18 @@ services:
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: cyroid
       MINIO_SECRET_KEY: cyroid123
-      ISO_CACHE_DIR: /data/cyroid/iso-cache
-      TEMPLATE_STORAGE_DIR: /data/cyroid/template-storage
-      VM_STORAGE_DIR: /data/cyroid/vm-storage
-      GLOBAL_SHARED_DIR: /data/cyroid/shared
+      ISO_CACHE_DIR: ${CYROID_DATA_DIR:-/data/cyroid}/iso-cache
+      TEMPLATE_STORAGE_DIR: ${CYROID_DATA_DIR:-/data/cyroid}/template-storage
+      VM_STORAGE_DIR: ${CYROID_DATA_DIR:-/data/cyroid}/vm-storage
+      GLOBAL_SHARED_DIR: ${CYROID_DATA_DIR:-/data/cyroid}/shared
     volumes:
       - ./backend:/app
       - /var/run/docker.sock:/var/run/docker.sock
       # Use bind mounts so spawned VM containers can access these paths
-      - /data/cyroid/iso-cache:/data/cyroid/iso-cache
-      - /data/cyroid/template-storage:/data/cyroid/template-storage
-      - /data/cyroid/vm-storage:/data/cyroid/vm-storage
-      - /data/cyroid/shared:/data/cyroid/shared
+      - ${CYROID_DATA_DIR:-/data/cyroid}/iso-cache:${CYROID_DATA_DIR:-/data/cyroid}/iso-cache
+      - ${CYROID_DATA_DIR:-/data/cyroid}/template-storage:${CYROID_DATA_DIR:-/data/cyroid}/template-storage
+      - ${CYROID_DATA_DIR:-/data/cyroid}/vm-storage:${CYROID_DATA_DIR:-/data/cyroid}/vm-storage
+      - ${CYROID_DATA_DIR:-/data/cyroid}/shared:${CYROID_DATA_DIR:-/data/cyroid}/shared
     depends_on:
       db:
         condition: service_healthy

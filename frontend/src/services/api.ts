@@ -753,6 +753,32 @@ export interface InstanceDeploy {
   auto_deploy?: boolean;
 }
 
+// Blueprint Import/Export Types
+export interface BlueprintImportValidation {
+  valid: boolean;
+  blueprint_name: string;
+  errors: string[];
+  warnings: string[];
+  conflicts: string[];
+  missing_templates: string[];
+  included_templates: string[];
+}
+
+export interface BlueprintImportOptions {
+  template_conflict_strategy?: 'skip' | 'update' | 'error';
+  new_name?: string;
+}
+
+export interface BlueprintImportResult {
+  success: boolean;
+  blueprint_id?: string;
+  blueprint_name?: string;
+  templates_created: string[];
+  templates_skipped: string[];
+  errors: string[];
+  warnings: string[];
+}
+
 // ============ Blueprint API ============
 
 export const blueprintsApi = {
@@ -765,6 +791,44 @@ export const blueprintsApi = {
   deploy: (id: string, data: InstanceDeploy) =>
     api.post<Instance>(`/blueprints/${id}/deploy`, data),
   listInstances: (id: string) => api.get<Instance[]>(`/blueprints/${id}/instances`),
+
+  // Export/Import
+  export: async (id: string): Promise<Blob> => {
+    const response = await api.get(`/blueprints/${id}/export`, {
+      responseType: 'blob',
+    });
+    return response.data;
+  },
+  validateImport: async (file: File): Promise<BlueprintImportValidation> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const response = await api.post<BlueprintImportValidation>(
+      '/blueprints/import/validate',
+      formData,
+      { headers: { 'Content-Type': 'multipart/form-data' } }
+    );
+    return response.data;
+  },
+  import: async (
+    file: File,
+    options: BlueprintImportOptions = {}
+  ): Promise<BlueprintImportResult> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const params = new URLSearchParams();
+    if (options.template_conflict_strategy) {
+      params.append('template_conflict_strategy', options.template_conflict_strategy);
+    }
+    if (options.new_name) {
+      params.append('new_name', options.new_name);
+    }
+    const queryString = params.toString();
+    const url = queryString ? `/blueprints/import?${queryString}` : '/blueprints/import';
+    const response = await api.post<BlueprintImportResult>(url, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return response.data;
+  },
 };
 
 export const instancesApi = {
@@ -807,6 +871,7 @@ export const scenariosApi = {
 
 export interface CleanupRequest {
   clean_database?: boolean
+  delete_database_records?: boolean
   force?: boolean
 }
 
@@ -815,6 +880,7 @@ export interface CleanupResult {
   containers_removed: number
   networks_removed: number
   database_records_updated: number
+  database_records_deleted: number
   errors: string[]
   orphaned_resources_cleaned: number
 }
