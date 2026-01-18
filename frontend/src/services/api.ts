@@ -478,6 +478,50 @@ export interface DockerPullResponse {
   image_id?: string
 }
 
+// Docker image build types
+export interface BuildableImage {
+  name: string
+  path: string
+  has_dockerfile: boolean
+  has_readme: boolean
+  description?: string
+}
+
+export interface BuildableImagesResponse {
+  images: BuildableImage[]
+  images_dir: string
+  exists: boolean
+}
+
+export interface DockerBuildRequest {
+  image_name: string
+  tag?: string
+  no_cache?: boolean
+}
+
+export interface DockerBuildResponse {
+  status: string
+  image_name: string
+  tag: string
+  build_key: string
+  message: string
+}
+
+export interface DockerBuildStatus {
+  status: 'building' | 'completed' | 'failed' | 'cancelled' | 'not_found' | 'already_building'
+  image_name?: string
+  tag?: string
+  full_tag?: string
+  progress_percent?: number
+  current_step?: number
+  total_steps?: number
+  current_step_name?: string
+  error?: string
+  image_id?: string
+  logs?: string[]
+  message?: string
+}
+
 export const cacheApi = {
   // Docker images
   listImages: () => api.get<CachedImage[]>('/cache/images'),
@@ -494,6 +538,18 @@ export const cacheApi = {
     api.post(`/cache/images/pull/${encodeURIComponent(imageKey)}/cancel`),
   getActivePulls: () =>
     api.get<{ pulls: DockerPullStatus[] }>('/cache/images/pulls/active'),
+
+  // Docker image build with progress tracking
+  listBuildableImages: () =>
+    api.get<BuildableImagesResponse>('/cache/images/buildable'),
+  buildImage: (request: DockerBuildRequest) =>
+    api.post<DockerBuildResponse>('/cache/images/build', request),
+  getBuildStatus: (buildKey: string) =>
+    api.get<DockerBuildStatus>(`/cache/images/build/${encodeURIComponent(buildKey)}/status`),
+  cancelBuild: (buildKey: string) =>
+    api.post(`/cache/images/build/${encodeURIComponent(buildKey)}/cancel`),
+  getActiveBuilds: () =>
+    api.get<{ builds: DockerBuildStatus[] }>('/cache/images/builds/active'),
 
   // Windows versions (auto-downloaded by dockur/windows)
   getWindowsVersions: () => api.get<WindowsVersionsResponse>('/cache/windows-versions'),

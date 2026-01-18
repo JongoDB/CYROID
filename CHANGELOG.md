@@ -5,6 +5,19 @@ All notable changes to CYROID will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.1] - 2026-01-17
+
+### Added
+
+- **Docker Image Build UI**: Build custom Docker images directly from the Image Cache page with real-time progress tracking.
+  - New "Build Images" tab in Image Cache
+  - Lists all available Dockerfiles from `images/` directory
+  - Background build with progress percentage, step tracking, and live logs
+  - Build persists across page navigation (polling-based like pull tracking)
+  - Cancel build functionality
+  - No-cache rebuild option for fresh builds
+  - New API endpoints: `/cache/images/buildable`, `/cache/images/build`, `/cache/images/build/{key}/status`
+
 ## [0.7.0] - 2026-01-17
 
 ### Added

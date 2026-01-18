@@ -1,6 +1,6 @@
 // frontend/src/pages/ImageCache.tsx
 import { useState, useEffect, useRef } from 'react'
-import { cacheApi, DockerPullStatus } from '../services/api'
+import { cacheApi, DockerPullStatus, DockerBuildStatus, BuildableImage } from '../services/api'
 import { useAuthStore } from '../stores/authStore'
 import type {
   CachedImage,
@@ -35,12 +35,13 @@ import {
   Check,
   X,
   Terminal,
+  Hammer,
 } from 'lucide-react'
 import clsx from 'clsx'
 import { ConfirmDialog } from '../components/common/ConfirmDialog'
 import { toast } from '../stores/toastStore'
 
-type TabType = 'overview' | 'docker' | 'isos' | 'linux-isos' | 'custom-isos' | 'snapshots'
+type TabType = 'overview' | 'docker' | 'build' | 'isos' | 'linux-isos' | 'custom-isos' | 'snapshots'
 
 export default function ImageCache() {
   const { user } = useAuthStore()
@@ -83,6 +84,9 @@ export default function ImageCache() {
   const [customISODownloadStatus, setCustomISODownloadStatus] = useState<Record<string, CustomISOStatusResponse>>({})
   // Pull state for tracking Docker image pulls
   const [dockerPullStatus, setDockerPullStatus] = useState<Record<string, DockerPullStatus>>({})
+  // Build state for tracking Docker image builds
+  const [buildableImages, setBuildableImages] = useState<BuildableImage[]>([])
+  const [dockerBuildStatus, setDockerBuildStatus] = useState<Record<string, DockerBuildStatus>>({})
 
   // Delete confirmation state
   const [deleteConfirm, setDeleteConfirm] = useState<{
@@ -96,7 +100,7 @@ export default function ImageCache() {
     setLoading(true)
     setError(null)
     try {
-      const [statsRes, imagesRes, snapshotsRes, recommendedRes, windowsRes, linuxRes, customISOsRes] = await Promise.all([
+      const [statsRes, imagesRes, snapshotsRes, recommendedRes, windowsRes, linuxRes, customISOsRes, buildableRes] = await Promise.all([
         cacheApi.getStats(),
         cacheApi.listImages(),
         cacheApi.getAllSnapshots(),
@@ -104,6 +108,7 @@ export default function ImageCache() {
         cacheApi.getWindowsVersions(),
         cacheApi.getLinuxVersions(),
         cacheApi.listCustomISOs(),
+        cacheApi.listBuildableImages(),
       ])
       setStats(statsRes.data)
       setImages(imagesRes.data)
@@ -112,6 +117,7 @@ export default function ImageCache() {
       setWindowsVersions(windowsRes.data)
       setLinuxVersions(linuxRes.data)
       setCustomISOs(customISOsRes.data)
+      setBuildableImages(buildableRes.data.images || [])
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to load cache data')
     } finally {
@@ -409,8 +415,135 @@ export default function ImageCache() {
     }
   }
 
+  // ============ Docker Image Build Functions ============
+
+  const startDockerBuildPolling = (buildKey: string, imageName: string) => {
+    // Clear any existing polling for this build
+    if (pollingIntervalsRef.current[`build-${buildKey}`]) {
+      clearInterval(pollingIntervalsRef.current[`build-${buildKey}`])
+    }
+
+    const pollInterval = setInterval(async () => {
+      try {
+        const statusRes = await cacheApi.getBuildStatus(buildKey)
+
+        setDockerBuildStatus(prev => ({
+          ...prev,
+          [buildKey]: statusRes.data
+        }))
+
+        // Stop polling if build is complete, failed, or cancelled
+        if (['completed', 'failed', 'cancelled'].includes(statusRes.data.status)) {
+          clearInterval(pollInterval)
+          delete pollingIntervalsRef.current[`build-${buildKey}`]
+
+          if (statusRes.data.status === 'completed') {
+            toast.success(`Built ${imageName} successfully`)
+            await loadData()
+          } else if (statusRes.data.status === 'failed' && statusRes.data.error) {
+            toast.error(`Build failed: ${statusRes.data.error}`)
+          }
+
+          // Clear build status after a delay
+          setTimeout(() => {
+            setDockerBuildStatus(prev => {
+              const newStatus = { ...prev }
+              delete newStatus[buildKey]
+              return newStatus
+            })
+          }, 10000) // Keep visible for 10s after completion
+        }
+      } catch {
+        clearInterval(pollInterval)
+        delete pollingIntervalsRef.current[`build-${buildKey}`]
+      }
+    }, 2000) // Poll every 2 seconds for builds (they take longer)
+
+    pollingIntervalsRef.current[`build-${buildKey}`] = pollInterval
+  }
+
+  const handleBuildImage = async (imageName: string, noCache = false) => {
+    const buildKey = `${imageName}_latest`
+    setActionLoading(`build-${buildKey}`)
+    setError(null)
+
+    try {
+      const res = await cacheApi.buildImage({
+        image_name: imageName,
+        tag: 'latest',
+        no_cache: noCache,
+      })
+
+      if (res.data.status === 'already_building') {
+        toast.info(`${imageName} is already being built`)
+        setActionLoading(null)
+        return
+      }
+
+      // Start polling for build status
+      setDockerBuildStatus(prev => ({
+        ...prev,
+        [buildKey]: {
+          status: 'building',
+          image_name: imageName,
+          tag: 'latest',
+          full_tag: `cyroid/${imageName}:latest`,
+          progress_percent: 0,
+          current_step: 0,
+          total_steps: 0,
+          current_step_name: 'Starting build...',
+        }
+      }))
+      startDockerBuildPolling(buildKey, imageName)
+      toast.success(`Started building cyroid/${imageName}:latest`)
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || 'Failed to start build')
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
+  const handleCancelDockerBuild = async (buildKey: string) => {
+    setActionLoading(`cancel-build-${buildKey}`)
+    setError(null)
+    try {
+      await cacheApi.cancelBuild(buildKey)
+      toast.success(`Cancelled build`)
+      setDockerBuildStatus(prev => {
+        const newStatus = { ...prev }
+        delete newStatus[buildKey]
+        return newStatus
+      })
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || 'Failed to cancel build')
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
+  // Check for active builds on mount
+  const checkActiveBuilds = async () => {
+    try {
+      const res = await cacheApi.getActiveBuilds()
+      if (res.data.builds && res.data.builds.length > 0) {
+        for (const build of res.data.builds) {
+          if (build.build_key && build.status === 'building') {
+            setDockerBuildStatus(prev => ({
+              ...prev,
+              [build.build_key!]: build
+            }))
+            startDockerBuildPolling(build.build_key, build.image_name || '')
+          }
+        }
+      }
+    } catch {
+      // Ignore errors checking for active builds
+    }
+  }
+
   useEffect(() => {
     loadData()
+    checkActiveBuilds()
   }, [])
 
   // Check for active downloads after data is loaded
@@ -782,6 +915,7 @@ export default function ImageCache() {
   const tabs = [
     { id: 'overview' as const, name: 'Overview', icon: HardDrive },
     { id: 'docker' as const, name: 'Docker Images', icon: Server },
+    { id: 'build' as const, name: 'Build Images', icon: Hammer },
     { id: 'isos' as const, name: 'Windows ISOs', icon: Monitor },
     { id: 'linux-isos' as const, name: 'Linux ISOs', icon: Terminal },
     { id: 'custom-isos' as const, name: 'Custom ISOs', icon: Download },
@@ -1073,6 +1207,208 @@ export default function ImageCache() {
               <ImageTable images={categorizedImages.other} onRemove={handleRemoveImage} actionLoading={actionLoading} isAdmin={isAdmin} />
             </div>
           )}
+        </div>
+      )}
+
+      {/* Build Images Tab */}
+      {activeTab === 'build' && (
+        <div className="space-y-6">
+          <div className="flex justify-between items-center">
+            <div>
+              <h3 className="text-lg font-medium text-gray-900">Build Custom Images</h3>
+              <p className="text-sm text-gray-500">
+                Build Docker images from Dockerfiles in the images/ directory
+              </p>
+            </div>
+            <button
+              onClick={loadData}
+              className="inline-flex items-center px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+            >
+              <RefreshCw className="h-4 w-4 mr-1" />
+              Refresh
+            </button>
+          </div>
+
+          {/* Active Builds */}
+          {Object.keys(dockerBuildStatus).length > 0 && (
+            <div className="bg-white shadow rounded-lg overflow-hidden">
+              <div className="px-6 py-4 border-b border-gray-200 bg-yellow-50">
+                <h4 className="text-sm font-medium text-yellow-800 flex items-center">
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Active Builds ({Object.keys(dockerBuildStatus).length})
+                </h4>
+              </div>
+              <div className="divide-y divide-gray-200">
+                {Object.entries(dockerBuildStatus).map(([buildKey, status]) => (
+                  <div key={buildKey} className="px-6 py-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex-1">
+                        <div className="flex items-center">
+                          <span className="font-medium text-gray-900">{status.full_tag}</span>
+                          <span className={clsx(
+                            'ml-2 px-2 py-0.5 text-xs rounded-full',
+                            status.status === 'building' && 'bg-yellow-100 text-yellow-800',
+                            status.status === 'completed' && 'bg-green-100 text-green-800',
+                            status.status === 'failed' && 'bg-red-100 text-red-800',
+                            status.status === 'cancelled' && 'bg-gray-100 text-gray-800'
+                          )}>
+                            {status.status}
+                          </span>
+                        </div>
+                        <div className="mt-1 text-sm text-gray-500">
+                          {status.current_step_name}
+                        </div>
+                        {status.status === 'building' && (
+                          <div className="mt-2">
+                            <div className="flex items-center text-xs text-gray-500 mb-1">
+                              <span>Step {status.current_step || 0}/{status.total_steps || '?'}</span>
+                              <span className="mx-2">-</span>
+                              <span>{status.progress_percent || 0}%</span>
+                            </div>
+                            <div className="w-full bg-gray-200 rounded-full h-2">
+                              <div
+                                className="bg-indigo-600 h-2 rounded-full transition-all duration-300"
+                                style={{ width: `${status.progress_percent || 0}%` }}
+                              />
+                            </div>
+                          </div>
+                        )}
+                        {status.error && (
+                          <div className="mt-2 text-sm text-red-600">
+                            {status.error}
+                          </div>
+                        )}
+                        {status.logs && status.logs.length > 0 && (
+                          <details className="mt-2">
+                            <summary className="text-xs text-gray-500 cursor-pointer hover:text-gray-700">
+                              Show build logs ({status.logs.length} lines)
+                            </summary>
+                            <pre className="mt-2 p-2 bg-gray-50 rounded text-xs font-mono overflow-x-auto max-h-40">
+                              {status.logs.join('\n')}
+                            </pre>
+                          </details>
+                        )}
+                      </div>
+                      {status.status === 'building' && (
+                        <button
+                          onClick={() => handleCancelDockerBuild(buildKey)}
+                          disabled={actionLoading === `cancel-build-${buildKey}`}
+                          className="ml-4 p-2 text-gray-400 hover:text-red-600"
+                          title="Cancel build"
+                        >
+                          {actionLoading === `cancel-build-${buildKey}` ? (
+                            <Loader2 className="h-5 w-5 animate-spin" />
+                          ) : (
+                            <X className="h-5 w-5" />
+                          )}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Available Images to Build */}
+          <div className="bg-white shadow rounded-lg overflow-hidden">
+            <div className="px-6 py-4 border-b border-gray-200">
+              <h4 className="text-sm font-medium text-gray-900">
+                Available Images ({buildableImages.length})
+              </h4>
+              <p className="text-xs text-gray-500 mt-1">
+                Build these images locally for use in ranges
+              </p>
+            </div>
+            {buildableImages.length > 0 ? (
+              <div className="divide-y divide-gray-200">
+                {buildableImages.map((image) => {
+                  const buildKey = `${image.name}_latest`
+                  const isBuilding = dockerBuildStatus[buildKey]?.status === 'building'
+                  const isCached = images.some(img => img.tags?.some(t => t.includes(`cyroid/${image.name}`)))
+
+                  return (
+                    <div key={image.name} className="px-6 py-4">
+                      <div className="flex items-center justify-between">
+                        <div className="flex-1">
+                          <div className="flex items-center">
+                            <Hammer className="h-5 w-5 text-gray-400 mr-3" />
+                            <div>
+                              <span className="font-medium text-gray-900">cyroid/{image.name}</span>
+                              {isCached && (
+                                <span className="ml-2 px-2 py-0.5 text-xs bg-green-100 text-green-800 rounded-full">
+                                  Cached
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          {image.description && (
+                            <p className="mt-1 text-sm text-gray-500 ml-8">{image.description}</p>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {isCached && (
+                            <button
+                              onClick={() => handleBuildImage(image.name, true)}
+                              disabled={isBuilding || actionLoading === `build-${buildKey}`}
+                              className="inline-flex items-center px-3 py-1.5 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
+                              title="Rebuild without cache"
+                            >
+                              <RefreshCw className="h-4 w-4 mr-1" />
+                              Rebuild
+                            </button>
+                          )}
+                          <button
+                            onClick={() => handleBuildImage(image.name, false)}
+                            disabled={isBuilding || actionLoading === `build-${buildKey}`}
+                            className="inline-flex items-center px-3 py-1.5 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50"
+                          >
+                            {actionLoading === `build-${buildKey}` || isBuilding ? (
+                              <>
+                                <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                                Building...
+                              </>
+                            ) : (
+                              <>
+                                <Hammer className="h-4 w-4 mr-1" />
+                                {isCached ? 'Build' : 'Build'}
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            ) : (
+              <div className="px-6 py-12 text-center text-gray-500">
+                <Hammer className="h-12 w-12 text-gray-300 mx-auto mb-4" />
+                <p className="text-lg font-medium text-gray-900">No buildable images found</p>
+                <p className="text-sm mt-1">
+                  Add Dockerfiles to the <code className="bg-gray-100 px-1 rounded">images/</code> directory
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* Build Instructions */}
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+            <div className="flex">
+              <Info className="h-5 w-5 text-blue-400 flex-shrink-0" />
+              <div className="ml-3">
+                <h4 className="text-sm font-medium text-blue-800">About Image Building</h4>
+                <div className="mt-1 text-sm text-blue-700">
+                  <ul className="list-disc list-inside space-y-1">
+                    <li>Images are built from Dockerfiles in the <code className="bg-blue-100 px-1 rounded">images/</code> directory</li>
+                    <li>Built images are tagged as <code className="bg-blue-100 px-1 rounded">cyroid/[name]:latest</code></li>
+                    <li>Use "Rebuild" to force a fresh build without Docker cache</li>
+                    <li>Build progress can be monitored - you can navigate away and return</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 

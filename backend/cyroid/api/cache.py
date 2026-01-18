@@ -19,6 +19,9 @@ router = APIRouter(prefix="/cache", tags=["Image Cache"])
 # Track active Docker image pulls for progress reporting
 _active_docker_pulls: Dict[str, Dict[str, Any]] = {}
 
+# Track active Docker image builds for progress reporting
+_active_docker_builds: Dict[str, Dict[str, Any]] = {}
+
 # Supported compressed archive extensions for ISO downloads/uploads
 SUPPORTED_ARCHIVE_EXTENSIONS = (
     '.zip', '.7z', '.rar',  # Common archives
@@ -462,6 +465,320 @@ def get_active_docker_pulls(current_user: CurrentUser):
             }
             for key, info in _active_docker_pulls.items()
             if info.get("status") == "pulling"
+        ]
+    }
+
+
+# ============ Docker Image Build Endpoints ============
+
+# Path to the images directory containing Dockerfiles
+IMAGES_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), "images")
+
+
+class DockerBuildRequest(BaseModel):
+    """Request to build a Docker image."""
+    image_name: str  # Directory name in images/ (e.g., "kali-attack", "samba-dc")
+    tag: str = "latest"  # Tag for the built image
+    no_cache: bool = False  # Whether to build without cache
+
+
+class BuildableImage(BaseModel):
+    """Information about a buildable image."""
+    name: str
+    path: str
+    has_dockerfile: bool
+    has_readme: bool
+    description: Optional[str] = None
+
+
+def _get_image_description(image_path: str) -> Optional[str]:
+    """Extract description from README.md if available."""
+    readme_path = os.path.join(image_path, "README.md")
+    if os.path.exists(readme_path):
+        try:
+            with open(readme_path, 'r') as f:
+                # Read first few lines to extract description
+                lines = f.readlines()[:10]
+                for i, line in enumerate(lines):
+                    # Skip title line
+                    if line.startswith("# "):
+                        continue
+                    # Return first non-empty, non-header line
+                    line = line.strip()
+                    if line and not line.startswith("#"):
+                        return line[:200]  # Limit description length
+        except Exception:
+            pass
+    return None
+
+
+@router.get("/images/buildable")
+def list_buildable_images(current_user: CurrentUser):
+    """
+    List available images that can be built from the images/ directory.
+    Each image directory should contain a Dockerfile.
+    """
+    buildable = []
+
+    if not os.path.exists(IMAGES_DIR):
+        return {"images": [], "images_dir": IMAGES_DIR, "exists": False}
+
+    for name in sorted(os.listdir(IMAGES_DIR)):
+        image_path = os.path.join(IMAGES_DIR, name)
+        if not os.path.isdir(image_path):
+            continue
+
+        dockerfile_path = os.path.join(image_path, "Dockerfile")
+        readme_path = os.path.join(image_path, "README.md")
+
+        has_dockerfile = os.path.exists(dockerfile_path)
+        has_readme = os.path.exists(readme_path)
+
+        if has_dockerfile:
+            buildable.append(BuildableImage(
+                name=name,
+                path=image_path,
+                has_dockerfile=has_dockerfile,
+                has_readme=has_readme,
+                description=_get_image_description(image_path),
+            ))
+
+    return {
+        "images": buildable,
+        "images_dir": IMAGES_DIR,
+        "exists": True,
+    }
+
+
+def _build_docker_image_async(image_name: str, tag: str, no_cache: bool):
+    """Background task to build a Docker image with progress tracking."""
+    build_key = f"{image_name}_{tag}"
+    image_path = os.path.join(IMAGES_DIR, image_name)
+    full_tag = f"cyroid/{image_name}:{tag}"
+
+    _active_docker_builds[build_key] = {
+        "status": "building",
+        "image_name": image_name,
+        "tag": tag,
+        "full_tag": full_tag,
+        "progress_percent": 0,
+        "current_step": 0,
+        "total_steps": 0,
+        "current_step_name": "Starting build...",
+        "logs": [],
+        "cancelled": False,
+    }
+
+    try:
+        docker = get_docker_service()
+        client = docker.client
+
+        # Build the image with streaming output
+        logger.info(f"Building Docker image {full_tag} from {image_path}")
+
+        # Use low-level API to get streaming output
+        build_output = client.api.build(
+            path=image_path,
+            tag=full_tag,
+            rm=True,  # Remove intermediate containers
+            nocache=no_cache,
+            decode=True,  # Decode JSON responses
+        )
+
+        step_pattern = r"Step (\d+)/(\d+)"
+        import re
+
+        for chunk in build_output:
+            # Check for cancellation
+            if _active_docker_builds[build_key].get("cancelled"):
+                _active_docker_builds[build_key].update({
+                    "status": "cancelled",
+                    "current_step_name": "Build cancelled by user",
+                })
+                return
+
+            if "stream" in chunk:
+                stream_line = chunk["stream"].strip()
+                if stream_line:
+                    # Add to logs (keep last 100 lines)
+                    logs = _active_docker_builds[build_key].get("logs", [])
+                    logs.append(stream_line)
+                    if len(logs) > 100:
+                        logs = logs[-100:]
+                    _active_docker_builds[build_key]["logs"] = logs
+
+                    # Parse step progress
+                    match = re.match(step_pattern, stream_line)
+                    if match:
+                        current_step = int(match.group(1))
+                        total_steps = int(match.group(2))
+                        progress = int((current_step / total_steps) * 100)
+
+                        _active_docker_builds[build_key].update({
+                            "current_step": current_step,
+                            "total_steps": total_steps,
+                            "progress_percent": min(progress, 99),
+                            "current_step_name": stream_line,
+                        })
+
+            elif "error" in chunk:
+                error_msg = chunk.get("error", "Unknown build error")
+                _active_docker_builds[build_key].update({
+                    "status": "failed",
+                    "error": error_msg,
+                    "current_step_name": f"Error: {error_msg}",
+                })
+                logger.error(f"Docker build failed: {error_msg}")
+                return
+
+            elif "aux" in chunk:
+                # Build complete - aux contains the image ID
+                image_id = chunk.get("aux", {}).get("ID", "")
+                _active_docker_builds[build_key].update({
+                    "status": "completed",
+                    "progress_percent": 100,
+                    "image_id": image_id,
+                    "current_step_name": "Build complete!",
+                })
+                logger.info(f"Docker build completed: {full_tag} ({image_id})")
+                return
+
+        # If we get here without aux, check if image exists
+        try:
+            built_image = client.images.get(full_tag)
+            _active_docker_builds[build_key].update({
+                "status": "completed",
+                "progress_percent": 100,
+                "image_id": built_image.id,
+                "current_step_name": "Build complete!",
+            })
+        except Exception:
+            _active_docker_builds[build_key].update({
+                "status": "completed",
+                "progress_percent": 100,
+                "current_step_name": "Build complete!",
+            })
+
+    except Exception as e:
+        logger.error(f"Failed to build Docker image {image_name}: {e}")
+        _active_docker_builds[build_key].update({
+            "status": "failed",
+            "error": str(e),
+            "current_step_name": f"Error: {str(e)}",
+        })
+
+
+@router.post("/images/build")
+def start_docker_build(
+    request: DockerBuildRequest,
+    background_tasks: BackgroundTasks,
+    current_user: AdminUser
+):
+    """
+    Start an async Docker image build with progress tracking.
+    Returns immediately and allows polling for status.
+    """
+    image_name = request.image_name
+    tag = request.tag
+    build_key = f"{image_name}_{tag}"
+
+    # Validate image exists
+    image_path = os.path.join(IMAGES_DIR, image_name)
+    dockerfile_path = os.path.join(image_path, "Dockerfile")
+
+    if not os.path.exists(dockerfile_path):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No Dockerfile found at {image_path}"
+        )
+
+    # Check if already building
+    if build_key in _active_docker_builds and _active_docker_builds[build_key].get("status") == "building":
+        return {
+            "status": "already_building",
+            "image_name": image_name,
+            "tag": tag,
+            "message": "Image is already being built",
+        }
+
+    # Start background build
+    background_tasks.add_task(_build_docker_image_async, image_name, tag, request.no_cache)
+
+    return {
+        "status": "building",
+        "image_name": image_name,
+        "tag": tag,
+        "build_key": build_key,
+        "message": f"Started building cyroid/{image_name}:{tag}",
+    }
+
+
+@router.get("/images/build/{build_key}/status")
+def get_docker_build_status(build_key: str, current_user: CurrentUser):
+    """Get status of a Docker image build in progress."""
+    if build_key in _active_docker_builds:
+        build_info = _active_docker_builds[build_key]
+        return {
+            "status": build_info.get("status", "unknown"),
+            "image_name": build_info.get("image_name"),
+            "tag": build_info.get("tag"),
+            "full_tag": build_info.get("full_tag"),
+            "progress_percent": build_info.get("progress_percent", 0),
+            "current_step": build_info.get("current_step", 0),
+            "total_steps": build_info.get("total_steps", 0),
+            "current_step_name": build_info.get("current_step_name", ""),
+            "error": build_info.get("error"),
+            "image_id": build_info.get("image_id"),
+            "logs": build_info.get("logs", [])[-20:],  # Last 20 log lines
+        }
+
+    return {
+        "status": "not_found",
+        "message": f"No build found for {build_key}",
+    }
+
+
+@router.post("/images/build/{build_key}/cancel")
+def cancel_docker_build(build_key: str, current_user: AdminUser):
+    """Cancel an active Docker image build."""
+    if build_key not in _active_docker_builds:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No active build found for {build_key}"
+        )
+
+    if _active_docker_builds[build_key].get("status") != "building":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Build is not in progress"
+        )
+
+    _active_docker_builds[build_key]["cancelled"] = True
+    return {
+        "status": "cancelling",
+        "build_key": build_key,
+        "message": "Cancellation requested",
+    }
+
+
+@router.get("/images/builds/active")
+def get_active_docker_builds(current_user: CurrentUser):
+    """Get all active Docker image builds."""
+    return {
+        "builds": [
+            {
+                "build_key": key,
+                "image_name": info.get("image_name"),
+                "tag": info.get("tag"),
+                "full_tag": info.get("full_tag"),
+                "status": info.get("status"),
+                "progress_percent": info.get("progress_percent", 0),
+                "current_step": info.get("current_step", 0),
+                "total_steps": info.get("total_steps", 0),
+                "current_step_name": info.get("current_step_name", ""),
+            }
+            for key, info in _active_docker_builds.items()
+            if info.get("status") == "building"
         ]
     }
 
