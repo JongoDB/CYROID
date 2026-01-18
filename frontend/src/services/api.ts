@@ -513,6 +513,7 @@ export interface DockerBuildResponse {
 
 export interface DockerBuildStatus {
   status: 'building' | 'completed' | 'failed' | 'cancelled' | 'not_found' | 'already_building'
+  build_key?: string
   image_name?: string
   tag?: string
   full_tag?: string

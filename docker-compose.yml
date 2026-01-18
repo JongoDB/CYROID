@@ -69,6 +69,8 @@ services:
       - ./data/seed-templates:/data/seed-templates:ro
       # Training scenarios (read from filesystem, writable for uploads)
       - ./data/scenarios:/data/scenarios
+      # Buildable Docker images with Dockerfiles
+      - ./images:/images:ro
     expose:
       - "8000"
     depends_on:
