@@ -5,7 +5,7 @@ import { rangesApi, networksApi, vmsApi, templatesApi, NetworkCreate, VMCreate }
 import type { Range, Network, VM, VMTemplate, RealtimeEvent } from '../types'
 import {
   ArrowLeft, Plus, Loader2, X, Play, Square, RotateCw,
-  Network as NetworkIcon, Server, Trash2, Rocket, Activity, Monitor, Shield, Download, Pencil, Globe, Router, Wifi, Radio, Wrench, BookOpen
+  Network as NetworkIcon, Server, Trash2, Rocket, Activity, Monitor, Shield, Download, Pencil, Globe, Router, Wifi, Radio, Wrench, BookOpen, LayoutTemplate
 } from 'lucide-react'
 import clsx from 'clsx'
 import { VncConsole } from '../components/console/VncConsole'
@@ -18,6 +18,7 @@ import { useRealtimeRange } from '../hooks/useRealtimeRange'
 import { toast } from '../stores/toastStore'
 import { DiagnosticsTab } from '../components/diagnostics'
 import { ConfirmDialog } from '../components/common/ConfirmDialog'
+import { SaveBlueprintModal } from '../components/blueprints'
 
 const statusColors: Record<string, string> = {
   draft: 'bg-gray-100 text-gray-800',
@@ -116,6 +117,9 @@ export default function RangeDetail() {
 
   // Export dialog state
   const [showExportDialog, setShowExportDialog] = useState(false)
+
+  // Save Blueprint modal state
+  const [showSaveBlueprintModal, setShowSaveBlueprintModal] = useState(false)
 
   // Edit range modal state
   const [showEditRangeModal, setShowEditRangeModal] = useState(false)
@@ -221,6 +225,11 @@ export default function RangeDetail() {
   const selectedTemplate = useMemo(() => {
     return templates.find(t => t.id === vmForm.template_id) || null
   }, [templates, vmForm.template_id])
+
+  // Extract subnet prefix from first network for blueprint suggestion
+  const suggestedPrefix = networks?.[0]?.subnet
+    ? networks[0].subnet.split('.').slice(0, 2).join('.')
+    : '10.100';
 
   // Determine if selected template requires emulation on ARM host
   const templateRequiresEmulation = useMemo(() => {
@@ -713,6 +722,14 @@ export default function RangeDetail() {
             >
               <Download className="h-4 w-4 mr-1" />
               Export
+            </button>
+            {/* Save as Blueprint button */}
+            <button
+              onClick={() => setShowSaveBlueprintModal(true)}
+              className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+            >
+              <LayoutTemplate className="h-4 w-4 mr-2" />
+              Save as Blueprint
             </button>
           </div>
         </div>
@@ -1869,6 +1886,17 @@ export default function RangeDetail() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Save Blueprint Modal */}
+      {showSaveBlueprintModal && range && (
+        <SaveBlueprintModal
+          rangeId={range.id}
+          rangeName={range.name}
+          suggestedPrefix={suggestedPrefix}
+          onClose={() => setShowSaveBlueprintModal(false)}
+          onSuccess={() => {}}
+        />
       )}
 
       {/* Delete Confirmation Dialog */}
