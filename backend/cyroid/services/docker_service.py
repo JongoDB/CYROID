@@ -1779,7 +1779,100 @@ local-hostname: {name}
             "containers": removed_containers,
             "networks": removed_networks
         }
-    
+
+    def cleanup_all_cyroid_resources(self) -> Dict[str, Any]:
+        """
+        Nuclear option: Remove ALL CYROID-managed Docker resources.
+
+        This cleans up:
+        - All containers with cyroid.* labels
+        - All networks with cyroid.* labels (except cyroid-management)
+        - Disconnects Traefik from networks before removal
+        - Tears down iptables isolation rules
+
+        Returns:
+            Dict with counts of removed resources and any errors
+        """
+        results = {
+            "containers_removed": 0,
+            "networks_removed": 0,
+            "errors": []
+        }
+
+        # Step 1: Remove all CYROID VM/range containers (not infrastructure)
+        logger.info("Cleanup: Removing all CYROID range containers...")
+        try:
+            all_containers = self.client.containers.list(all=True)
+            for container in all_containers:
+                labels = container.labels or {}
+                # Skip CYROID infrastructure containers (api, worker, db, etc.)
+                container_name = container.name or ""
+                if any(infra in container_name for infra in [
+                    "cyroid-api", "cyroid-worker", "cyroid-db", "cyroid-redis",
+                    "cyroid-traefik", "cyroid-frontend", "cyroid-minio"
+                ]):
+                    continue
+
+                # Remove containers with cyroid labels
+                if labels.get("cyroid.range_id") or labels.get("cyroid.vm_id"):
+                    try:
+                        logger.info(f"Cleanup: Removing container {container.name}")
+                        container.remove(force=True)
+                        results["containers_removed"] += 1
+                    except Exception as e:
+                        error_msg = f"Failed to remove container {container.name}: {e}"
+                        logger.error(error_msg)
+                        results["errors"].append(error_msg)
+        except Exception as e:
+            error_msg = f"Failed to list containers: {e}"
+            logger.error(error_msg)
+            results["errors"].append(error_msg)
+
+        # Step 2: Remove all CYROID networks (except management network)
+        logger.info("Cleanup: Removing all CYROID networks...")
+        try:
+            all_networks = self.client.networks.list()
+            for network in all_networks:
+                network_name = network.name or ""
+
+                # Skip non-CYROID networks and infrastructure networks
+                if not network_name.startswith("cyroid-"):
+                    continue
+                if network_name in ["cyroid-management", "cyroid_default"]:
+                    continue
+
+                try:
+                    # Disconnect traefik first
+                    self.disconnect_traefik_from_network(network.id)
+
+                    # Teardown iptables isolation if applicable
+                    try:
+                        ipam_config = network.attrs.get("IPAM", {}).get("Config", [])
+                        if ipam_config:
+                            subnet = ipam_config[0].get("Subnet")
+                            if subnet:
+                                self.teardown_network_isolation(network.id, subnet)
+                    except Exception as e:
+                        logger.warning(f"Failed to teardown isolation for {network_name}: {e}")
+
+                    # Remove the network
+                    logger.info(f"Cleanup: Removing network {network_name}")
+                    network.remove()
+                    results["networks_removed"] += 1
+                except Exception as e:
+                    error_msg = f"Failed to remove network {network_name}: {e}"
+                    logger.error(error_msg)
+                    results["errors"].append(error_msg)
+        except Exception as e:
+            error_msg = f"Failed to list networks: {e}"
+            logger.error(error_msg)
+            results["errors"].append(error_msg)
+
+        logger.info(f"Cleanup complete: {results['containers_removed']} containers, "
+                   f"{results['networks_removed']} networks removed, "
+                   f"{len(results['errors'])} errors")
+        return results
+
     def get_system_info(self) -> Dict[str, Any]:
         """Get Docker system information."""
         info = self.client.info()
