@@ -84,7 +84,7 @@ export default function Blueprints() {
     <div>
       <div className="sm:flex sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Blueprints</h1>
+          <h1 className="text-2xl font-bold text-gray-900">Range Blueprints</h1>
           <p className="mt-2 text-sm text-gray-700">
             Reusable range configurations for deploying multiple isolated instances
           </p>

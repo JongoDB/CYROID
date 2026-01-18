@@ -13,6 +13,7 @@ import ExecutionConsole from './pages/ExecutionConsole'
 import StandaloneConsole from './pages/StandaloneConsole'
 import Blueprints from './pages/Blueprints'
 import BlueprintDetail from './pages/BlueprintDetail'
+import TrainingScenarios from './pages/TrainingScenarios'
 import StudentLab from './pages/StudentLab'
 import ImageCache from './pages/ImageCache'
 import UserManagement from './pages/UserManagement'
@@ -67,6 +68,7 @@ function App() {
                 <Route path="/ranges/:id" element={<RangeDetail />} />
                 <Route path="/blueprints" element={<Blueprints />} />
                 <Route path="/blueprints/:id" element={<BlueprintDetail />} />
+                <Route path="/scenarios" element={<TrainingScenarios />} />
                 <Route path="/execution/:rangeId" element={<ExecutionConsole />} />
                 <Route path="/cache" element={<ImageCache />} />
                 <Route path="/users" element={<UserManagement />} />
