@@ -160,7 +160,7 @@ export const usersApi = {
 }
 
 // Templates API
-import type { VMTemplate, Range, Network, VM, EventLog, EventLogList, VMStatsResponse, VMLogsResponse, ResourceTagsResponse, Walkthrough, WalkthroughProgress } from '../types'
+import type { VMTemplate, Range, Network, VM, EventLog, EventLogList, VMStatsResponse, VMLogsResponse, ResourceTagsResponse, Walkthrough, WalkthroughProgress, DeploymentStatusResponse } from '../types'
 
 export interface VMTemplateCreate {
   name: string
@@ -213,6 +213,8 @@ export const rangesApi = {
   start: (id: string) => api.post<Range>(`/ranges/${id}/start`),
   stop: (id: string) => api.post<Range>(`/ranges/${id}/stop`),
   teardown: (id: string) => api.post<Range>(`/ranges/${id}/teardown`),
+  getDeploymentStatus: (rangeId: string) =>
+    api.get<DeploymentStatusResponse>(`/ranges/${rangeId}/deployment-status`),
 
   // Comprehensive Export/Import (v2.0)
   exportFull: async (id: string, options: ExportRequest) => {
