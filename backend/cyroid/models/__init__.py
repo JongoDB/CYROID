@@ -14,6 +14,7 @@ from cyroid.models.msel import MSEL
 from cyroid.models.inject import Inject, InjectStatus
 from cyroid.models.router import RangeRouter, RouterStatus
 from cyroid.models.walkthrough_progress import WalkthroughProgress
+from cyroid.models.blueprint import RangeBlueprint, RangeInstance
 
 __all__ = [
     "Base",
@@ -31,4 +32,5 @@ __all__ = [
     "Inject", "InjectStatus",
     "RangeRouter", "RouterStatus",
     "WalkthroughProgress",
+    "RangeBlueprint", "RangeInstance",
 ]
