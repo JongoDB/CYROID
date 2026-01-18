@@ -5,6 +5,21 @@ All notable changes to CYROID will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-01-17
+
+### Added
+
+- **Guided Range Builder Wizard** ([#19](../../issues/19)): New wizard-style interface for creating complete cyber training environments with minimal manual configuration.
+  - 4 scenario presets: AD Enterprise Lab, Segmented Network (DMZ), Incident Response Lab, Penetration Testing Target
+  - 5-step wizard flow: Scenario Selection → Zone Configuration → System Selection → Configuration Options → Review & Deploy
+  - Auto-assigned subnets and IP addresses for each zone and system
+  - AD configuration options: domain name, admin password, user count
+  - Vulnerability level selection (cosmetic in v1)
+  - Sequential deployment with progress indicator
+  - "Guided Builder" button on Ranges page header
+  - Empty state CTA prioritizes guided builder for first-time users
+  - Template name-to-ID mapping for flexible preset definitions
+
 ## [0.4.11] - 2026-01-17
 
 ### Added
