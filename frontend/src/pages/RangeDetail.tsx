@@ -22,6 +22,8 @@ import { ActivityTab } from '../components/range/ActivityTab'
 import { ConfirmDialog } from '../components/common/ConfirmDialog'
 import { SaveBlueprintModal } from '../components/blueprints'
 import { CreateSnapshotModal } from '../components/range/CreateSnapshotModal'
+import { ScenarioPickerModal, VMMappingModal } from '../components/scenarios'
+import type { Scenario } from '../types'
 
 const statusColors: Record<string, string> = {
   draft: 'bg-gray-100 text-gray-800',
@@ -148,6 +150,10 @@ export default function RangeDetail() {
 
   // Snapshot modal state
   const [snapshotVm, setSnapshotVm] = useState<VM | null>(null)
+
+  // Scenario modal state
+  const [showScenarioPicker, setShowScenarioPicker] = useState(false)
+  const [selectedScenario, setSelectedScenario] = useState<Scenario | null>(null)
 
   // Architecture detection for emulation warning
   const isArmHost = useIsArmHost()
@@ -320,6 +326,23 @@ export default function RangeDetail() {
     } catch (err: any) {
       alert(err.response?.data?.detail || 'Failed to stop range')
     }
+  }
+
+  // Scenario handlers
+  const handleScenarioSelect = (scenario: Scenario) => {
+    setSelectedScenario(scenario)
+    setShowScenarioPicker(false)
+  }
+
+  const handleApplyScenario = async (roleMapping: Record<string, string>) => {
+    if (!id || !selectedScenario) return
+    await rangesApi.applyScenario(id, {
+      scenario_id: selectedScenario.id,
+      role_mapping: roleMapping,
+    })
+    setSelectedScenario(null)
+    toast.success('Scenario applied successfully')
+    fetchData()
   }
 
   const handleCreateNetwork = async (e: React.FormEvent) => {
@@ -733,6 +756,13 @@ export default function RangeDetail() {
                   <BookOpen className="w-4 h-4" />
                   Open Lab
                 </a>
+                <button
+                  onClick={() => setShowScenarioPicker(true)}
+                  className="inline-flex items-center px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+                >
+                  <Play className="h-4 w-4 mr-1" />
+                  Add Scenario
+                </button>
                 <button
                   onClick={handleStop}
                   className="inline-flex items-center px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
@@ -1978,6 +2008,28 @@ export default function RangeDetail() {
           // Optionally refresh data if needed
         }}
       />
+
+      {/* Scenario Picker Modal */}
+      {showScenarioPicker && (
+        <ScenarioPickerModal
+          onSelect={handleScenarioSelect}
+          onClose={() => setShowScenarioPicker(false)}
+        />
+      )}
+
+      {/* VM Mapping Modal for selected scenario */}
+      {selectedScenario && (
+        <VMMappingModal
+          scenario={selectedScenario}
+          vms={vms}
+          onApply={handleApplyScenario}
+          onBack={() => {
+            setSelectedScenario(null)
+            setShowScenarioPicker(true)
+          }}
+          onClose={() => setSelectedScenario(null)}
+        />
+      )}
     </div>
   )
 }
