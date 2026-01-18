@@ -50,7 +50,7 @@ export default function ScenarioPickerModal({ onSelect, onClose }: ScenarioPicke
     const fetchScenarios = async () => {
       try {
         const response = await scenariosApi.list(categoryFilter || undefined)
-        setScenarios(response.data)
+        setScenarios(response.data.scenarios)
       } catch (err) {
         console.error('Failed to fetch scenarios:', err)
       } finally {

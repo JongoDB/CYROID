@@ -100,7 +100,7 @@ export default function VMMappingModal({
                       <option value="">Select a VM...</option>
                       {vms.map((vm) => {
                         const assignedTo = getVMAssignment(vm.id)
-                        const isAssignedElsewhere = assignedTo && assignedTo !== role
+                        const isAssignedElsewhere = Boolean(assignedTo && assignedTo !== role)
                         return (
                           <option
                             key={vm.id}
@@ -108,7 +108,7 @@ export default function VMMappingModal({
                             disabled={isAssignedElsewhere}
                           >
                             {vm.hostname}
-                            {isAssignedElsewhere && ` (→ ${formatRoleName(assignedTo)})`}
+                            {isAssignedElsewhere && ` (→ ${formatRoleName(assignedTo!)})`}
                           </option>
                         )
                       })}

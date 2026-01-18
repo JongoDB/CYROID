@@ -35,7 +35,7 @@ async def lifespan(app: FastAPI):
     # Startup
     from cyroid.services.event_broadcaster import get_connection_manager, get_broadcaster
     from cyroid.services.template_seeder import seed_all_templates
-    from cyroid.services.scenario_seeder import seed_all_scenarios
+    from cyroid.services.scenario_filesystem import get_scenarios_dir
     from cyroid.database import get_session_local
 
     # Seed built-in templates
@@ -50,17 +50,9 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Template seeding skipped: {e}")
 
-    # Seed built-in scenarios
-    logger.info("Checking seed scenarios...")
-    try:
-        SessionLocal = get_session_local()
-        db = SessionLocal()
-        seeded = seed_all_scenarios(db)
-        if seeded:
-            logger.info(f"Seeded {len(seeded)} scenarios")
-        db.close()
-    except Exception as e:
-        logger.warning(f"Scenario seeding skipped: {e}")
+    # Log scenarios directory (no seeding - filesystem-based)
+    scenarios_dir = get_scenarios_dir()
+    logger.info(f"Scenarios directory: {scenarios_dir} (exists: {scenarios_dir.exists()})")
 
     logger.info("Starting real-time event services...")
     connection_manager = get_connection_manager()

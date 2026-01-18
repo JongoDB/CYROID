@@ -160,7 +160,7 @@ export const usersApi = {
 }
 
 // Templates API
-import type { VMTemplate, Range, Network, VM, EventLog, EventLogList, VMStatsResponse, VMLogsResponse, ResourceTagsResponse, Walkthrough, WalkthroughProgress, DeploymentStatusResponse, Scenario, ScenarioDetail, ApplyScenarioRequest, ApplyScenarioResponse } from '../types'
+import type { VMTemplate, Range, Network, VM, EventLog, EventLogList, VMStatsResponse, VMLogsResponse, ResourceTagsResponse, Walkthrough, WalkthroughProgress, DeploymentStatusResponse, ScenarioDetail, ScenariosListResponse, ScenarioUpload, ApplyScenarioRequest, ApplyScenarioResponse } from '../types'
 
 export interface VMTemplateCreate {
   name: string
@@ -774,16 +774,32 @@ export const instancesApi = {
   delete: (id: string) => api.delete(`/instances/${id}`),
 };
 
-// Scenarios API
+// Scenarios API (filesystem-based)
 export const scenariosApi = {
   list: (category?: string, difficulty?: string) => {
     const params = new URLSearchParams()
     if (category) params.append('category', category)
     if (difficulty) params.append('difficulty', difficulty)
     const query = params.toString()
-    return api.get<Scenario[]>(`/scenarios${query ? `?${query}` : ''}`)
+    return api.get<ScenariosListResponse>(`/scenarios${query ? `?${query}` : ''}`)
   },
   get: (id: string) => api.get<ScenarioDetail>(`/scenarios/${id}`),
+  create: (data: ScenarioUpload, scenarioId?: string) => {
+    const params = scenarioId ? `?scenario_id=${scenarioId}` : ''
+    return api.post<ScenarioDetail>(`/scenarios${params}`, data)
+  },
+  update: (id: string, data: ScenarioUpload) =>
+    api.put<ScenarioDetail>(`/scenarios/${id}`, data),
+  delete: (id: string) => api.delete(`/scenarios/${id}`),
+  upload: (file: File, overwrite: boolean = false) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('overwrite', String(overwrite))
+    return api.post<ScenarioDetail>('/scenarios/upload', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  },
+  refresh: () => api.post<{ message: string; total: number; scenarios: string[] }>('/scenarios/refresh'),
 }
 
 export default api

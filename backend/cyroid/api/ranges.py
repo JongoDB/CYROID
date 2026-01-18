@@ -19,8 +19,8 @@ from cyroid.models.resource_tag import ResourceTag
 from cyroid.models.user import User
 from cyroid.models.router import RangeRouter, RouterStatus
 from cyroid.models.event_log import EventType
-from cyroid.models.scenario import Scenario
 from cyroid.models.msel import MSEL
+from cyroid.services.scenario_filesystem import get_scenario
 from cyroid.models.inject import Inject, InjectStatus
 from cyroid.services.event_service import EventService
 from cyroid.schemas.range import (
@@ -1183,8 +1183,8 @@ def apply_scenario(
     if not range_obj:
         raise HTTPException(status_code=404, detail="Range not found")
 
-    # Get scenario
-    scenario = db.query(Scenario).filter(Scenario.id == request.scenario_id).first()
+    # Get scenario from filesystem
+    scenario = get_scenario(str(request.scenario_id))
     if not scenario:
         raise HTTPException(status_code=404, detail="Scenario not found")
 

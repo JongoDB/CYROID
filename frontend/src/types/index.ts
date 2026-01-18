@@ -731,7 +731,7 @@ export interface WalkthroughProgress {
   updated_at: string
 }
 
-// Training Scenarios
+// Training Scenarios (filesystem-based)
 export interface ScenarioEvent {
   sequence: number
   delay_minutes: number
@@ -753,13 +753,26 @@ export interface Scenario {
   duration_minutes: number
   event_count: number
   required_roles: string[]
-  is_seed: boolean
-  seed_id?: string
-  created_at: string
-  updated_at: string
+  modified_at: string
 }
 
 export interface ScenarioDetail extends Scenario {
+  events: ScenarioEvent[]
+}
+
+export interface ScenariosListResponse {
+  scenarios: Scenario[]
+  scenarios_dir: string
+  total: number
+}
+
+export interface ScenarioUpload {
+  name: string
+  description: string
+  category: 'red-team' | 'blue-team' | 'insider-threat'
+  difficulty: 'beginner' | 'intermediate' | 'advanced'
+  duration_minutes: number
+  required_roles: string[]
   events: ScenarioEvent[]
 }
 

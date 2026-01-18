@@ -67,8 +67,8 @@ services:
       - /data/cyroid/shared:/data/cyroid/shared
       # Seed templates for built-in CYROID templates
       - ./data/seed-templates:/data/seed-templates:ro
-      # Seed scenarios for built-in training scenarios
-      - ./data/seed-scenarios:/data/seed-scenarios:ro
+      # Training scenarios (read from filesystem, writable for uploads)
+      - ./data/scenarios:/data/scenarios
     expose:
       - "8000"
     depends_on:

@@ -1,9 +1,11 @@
 // frontend/src/pages/TrainingScenarios.tsx
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { scenariosApi } from '../services/api'
 import type { Scenario } from '../types'
-import { Loader2, Target, Shield, UserX, Clock, Zap, AlertTriangle } from 'lucide-react'
+import { Loader2, Target, Shield, UserX, Clock, Zap, AlertTriangle, Upload, RefreshCw, Trash2, FolderOpen } from 'lucide-react'
 import clsx from 'clsx'
+import { toast } from '../stores/toastStore'
+import { ConfirmDialog } from '../components/common/ConfirmDialog'
 
 const categoryConfig = {
   'red-team': {
@@ -34,16 +36,27 @@ const difficultyConfig = {
 
 export default function TrainingScenarios() {
   const [scenarios, setScenarios] = useState<Scenario[]>([])
+  const [scenariosDir, setScenariosDir] = useState<string>('')
   const [loading, setLoading] = useState(true)
+  const [uploading, setUploading] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
   const [categoryFilter, setCategoryFilter] = useState<string>('')
   const [searchQuery, setSearchQuery] = useState('')
+  const [deleteConfirm, setDeleteConfirm] = useState<{ open: boolean; id: string; name: string }>({
+    open: false,
+    id: '',
+    name: '',
+  })
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const fetchScenarios = async () => {
     try {
       const response = await scenariosApi.list(categoryFilter || undefined)
-      setScenarios(response.data)
+      setScenarios(response.data.scenarios)
+      setScenariosDir(response.data.scenarios_dir)
     } catch (err) {
       console.error('Failed to fetch scenarios:', err)
+      toast.error('Failed to load scenarios')
     } finally {
       setLoading(false)
     }
@@ -52,6 +65,50 @@ export default function TrainingScenarios() {
   useEffect(() => {
     fetchScenarios()
   }, [categoryFilter])
+
+  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    setUploading(true)
+    try {
+      const response = await scenariosApi.upload(file, false)
+      toast.success(`Uploaded scenario: ${response.data.name}`)
+      fetchScenarios()
+    } catch (err: any) {
+      const detail = err.response?.data?.detail || 'Failed to upload scenario'
+      toast.error(detail)
+    } finally {
+      setUploading(false)
+      if (fileInputRef.current) {
+        fileInputRef.current.value = ''
+      }
+    }
+  }
+
+  const handleRefresh = async () => {
+    setRefreshing(true)
+    try {
+      const response = await scenariosApi.refresh()
+      toast.success(`Refreshed: ${response.data.total} scenarios found`)
+      fetchScenarios()
+    } catch (err) {
+      toast.error('Failed to refresh scenarios')
+    } finally {
+      setRefreshing(false)
+    }
+  }
+
+  const handleDelete = async (id: string) => {
+    try {
+      await scenariosApi.delete(id)
+      toast.success('Scenario deleted')
+      fetchScenarios()
+    } catch (err) {
+      toast.error('Failed to delete scenario')
+    }
+    setDeleteConfirm({ open: false, id: '', name: '' })
+  }
 
   const filteredScenarios = scenarios.filter((s) =>
     s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -74,6 +131,41 @@ export default function TrainingScenarios() {
           <p className="mt-2 text-sm text-gray-700">
             Pre-built cyber training scenarios ready to deploy to your ranges
           </p>
+          {scenariosDir && (
+            <p className="mt-1 text-xs text-gray-500 flex items-center">
+              <FolderOpen className="h-3 w-3 mr-1" />
+              {scenariosDir}
+            </p>
+          )}
+        </div>
+        <div className="mt-4 sm:mt-0 flex gap-2">
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handleUpload}
+            accept=".yaml,.yml"
+            className="hidden"
+          />
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading}
+            className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
+          >
+            {uploading ? (
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+            ) : (
+              <Upload className="h-4 w-4 mr-2" />
+            )}
+            Upload YAML
+          </button>
+          <button
+            onClick={handleRefresh}
+            disabled={refreshing}
+            className="inline-flex items-center px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
+            title="Refresh from filesystem"
+          >
+            <RefreshCw className={clsx("h-4 w-4", refreshing && "animate-spin")} />
+          </button>
         </div>
       </div>
 
@@ -105,14 +197,14 @@ export default function TrainingScenarios() {
           <p className="mt-1 text-sm text-gray-500">
             {searchQuery || categoryFilter
               ? 'Try adjusting your filters.'
-              : 'Training scenarios will appear here once seeded.'}
+              : 'Upload a YAML file or add scenarios to the scenarios directory.'}
           </p>
         </div>
       ) : (
         <div className="mt-8 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
           {filteredScenarios.map((scenario) => {
-            const catConfig = categoryConfig[scenario.category]
-            const diffConfig = difficultyConfig[scenario.difficulty]
+            const catConfig = categoryConfig[scenario.category] || categoryConfig['red-team']
+            const diffConfig = difficultyConfig[scenario.difficulty] || difficultyConfig.intermediate
             const CategoryIcon = catConfig.icon
 
             return (
@@ -133,6 +225,13 @@ export default function TrainingScenarios() {
                         </span>
                       </div>
                     </div>
+                    <button
+                      onClick={() => setDeleteConfirm({ open: true, id: scenario.id, name: scenario.name })}
+                      className="text-gray-400 hover:text-red-500 p-1"
+                      title="Delete scenario"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
                   </div>
 
                   <p className="mt-3 text-sm text-gray-500 line-clamp-3">
@@ -175,6 +274,16 @@ export default function TrainingScenarios() {
           })}
         </div>
       )}
+
+      <ConfirmDialog
+        isOpen={deleteConfirm.open}
+        onCancel={() => setDeleteConfirm({ open: false, id: '', name: '' })}
+        onConfirm={() => handleDelete(deleteConfirm.id)}
+        title="Delete Scenario"
+        message={`Are you sure you want to delete "${deleteConfirm.name}"? This will remove the YAML file from the filesystem.`}
+        confirmLabel="Delete"
+        variant="danger"
+      />
     </div>
   )
 }

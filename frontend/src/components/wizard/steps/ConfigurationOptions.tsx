@@ -16,7 +16,7 @@ export function ConfigurationOptions() {
     (z) => z.enabled && z.systems.some((s) => s.enabled && s.role === 'domain-controller')
   );
 
-  const handleConfigChange = (key: string, value: string | number) => {
+  const handleConfigChange = (key: string, value: string | number | boolean) => {
     dispatch({ type: 'UPDATE_CONFIG', config: { [key]: value } });
   };
 

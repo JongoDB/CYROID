@@ -15,7 +15,6 @@ from cyroid.models.inject import Inject, InjectStatus
 from cyroid.models.router import RangeRouter, RouterStatus
 from cyroid.models.walkthrough_progress import WalkthroughProgress
 from cyroid.models.blueprint import RangeBlueprint, RangeInstance
-from cyroid.models.scenario import Scenario
 
 __all__ = [
     "Base",
@@ -34,5 +33,4 @@ __all__ = [
     "RangeRouter", "RouterStatus",
     "WalkthroughProgress",
     "RangeBlueprint", "RangeInstance",
-    "Scenario",
 ]
