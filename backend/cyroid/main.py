@@ -23,6 +23,7 @@ from cyroid.api.cache import router as cache_router
 from cyroid.api.system import router as system_router
 from cyroid.api.blueprints import router as blueprints_router
 from cyroid.api.instances import router as instances_router
+from cyroid.api.scenarios import router as scenarios_router
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -128,6 +129,7 @@ app = FastAPI(
         {"name": "snapshots", "description": "VM snapshot management"},
         {"name": "events", "description": "Event logging and monitoring"},
         {"name": "msel", "description": "Master Scenario Events List"},
+        {"name": "scenarios", "description": "Training scenarios for cyber exercises"},
         {"name": "walkthrough", "description": "Lab walkthrough and student progress"},
         {"name": "system", "description": "System configuration and status"},
     ],
@@ -159,6 +161,7 @@ app.include_router(cache_router, prefix="/api/v1")
 app.include_router(system_router, prefix="/api/v1")
 app.include_router(blueprints_router, prefix="/api/v1")
 app.include_router(instances_router, prefix="/api/v1")
+app.include_router(scenarios_router, prefix="/api/v1")
 
 
 @app.get("/health")
