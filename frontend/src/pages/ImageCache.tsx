@@ -36,12 +36,14 @@ import {
   X,
   Terminal,
   Hammer,
+  FolderEdit,
 } from 'lucide-react'
 import clsx from 'clsx'
 import { ConfirmDialog } from '../components/common/ConfirmDialog'
 import { toast } from '../stores/toastStore'
+import { FileBrowser } from '../components/files/FileBrowser'
 
-type TabType = 'overview' | 'docker' | 'build' | 'isos' | 'linux-isos' | 'custom-isos' | 'snapshots'
+type TabType = 'overview' | 'docker' | 'build' | 'files' | 'isos' | 'linux-isos' | 'custom-isos' | 'snapshots'
 
 export default function ImageCache() {
   const { user } = useAuthStore()
@@ -916,6 +918,7 @@ export default function ImageCache() {
     { id: 'overview' as const, name: 'Overview', icon: HardDrive },
     { id: 'docker' as const, name: 'Docker Images', icon: Server },
     { id: 'build' as const, name: 'Build Images', icon: Hammer },
+    { id: 'files' as const, name: 'Image Files', icon: FolderEdit },
     { id: 'isos' as const, name: 'Windows ISOs', icon: Monitor },
     { id: 'linux-isos' as const, name: 'Linux ISOs', icon: Terminal },
     { id: 'custom-isos' as const, name: 'Custom ISOs', icon: Download },
@@ -1409,6 +1412,21 @@ export default function ImageCache() {
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Image Files Tab */}
+      {activeTab === 'files' && (
+        <div className="space-y-4">
+          <div className="flex justify-between items-center">
+            <div>
+              <h3 className="text-lg font-medium text-gray-900">Image Project Files</h3>
+              <p className="text-sm text-gray-500">
+                Browse and edit Dockerfiles, scripts, and configuration files for custom images
+              </p>
+            </div>
+          </div>
+          <FileBrowser basePath="images" title="" />
         </div>
       )}
 

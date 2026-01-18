@@ -12,7 +12,6 @@ import {
   Menu,
   X,
   HardDrive,
-  Users,
   Shield,
   Key,
   LayoutTemplate,

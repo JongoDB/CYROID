@@ -25,6 +25,7 @@ from cyroid.api.blueprints import router as blueprints_router
 from cyroid.api.instances import router as instances_router
 from cyroid.api.scenarios import router as scenarios_router
 from cyroid.api.admin import router as admin_router
+from cyroid.api.files import router as files_router
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -156,6 +157,7 @@ app.include_router(blueprints_router, prefix="/api/v1")
 app.include_router(instances_router, prefix="/api/v1")
 app.include_router(scenarios_router, prefix="/api/v1")
 app.include_router(admin_router, prefix="/api/v1")
+app.include_router(files_router, prefix="/api/v1")
 
 
 @app.get("/health")

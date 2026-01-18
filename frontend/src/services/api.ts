@@ -846,4 +846,52 @@ export const adminApi = {
     api.get<DockerStatusResponse>('/admin/docker-status'),
 }
 
+// ============ Files API ============
+
+export interface FileInfo {
+  name: string
+  path: string
+  is_dir: boolean
+  size?: number
+  modified?: string
+  is_text: boolean
+  locked_by?: string
+}
+
+export interface FileListResponse {
+  path: string
+  files: FileInfo[]
+  parent?: string
+}
+
+export interface FileContentResponse {
+  path: string
+  content: string
+  size: number
+  modified: string
+  locked_by?: string
+  lock_token?: string
+}
+
+export const filesApi = {
+  listFiles: (path: string) =>
+    api.get<FileListResponse>('/files', { params: { path } }),
+  readFile: (path: string) =>
+    api.get<FileContentResponse>('/files/content', { params: { path } }),
+  createFile: (path: string, content: string) =>
+    api.post<FileContentResponse>('/files', { path, content }),
+  updateFile: (path: string, content: string, lockToken?: string) =>
+    api.put('/files/content', { path, content, lock_token: lockToken }),
+  renameFile: (oldPath: string, newPath: string) =>
+    api.put('/files/rename', { old_path: oldPath, new_path: newPath }),
+  deleteFile: (path: string) =>
+    api.delete('/files', { params: { path } }),
+  acquireLock: (path: string) =>
+    api.post('/files/lock', null, { params: { path } }),
+  releaseLock: (path: string) =>
+    api.delete('/files/lock', { params: { path } }),
+  heartbeatLock: (path: string, lockToken: string) =>
+    api.post('/files/lock/heartbeat', null, { params: { path, lock_token: lockToken } }),
+}
+
 export default api

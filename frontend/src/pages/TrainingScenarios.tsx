@@ -2,10 +2,13 @@
 import { useEffect, useState, useRef } from 'react'
 import { scenariosApi } from '../services/api'
 import type { Scenario } from '../types'
-import { Loader2, Target, Shield, UserX, Clock, Zap, AlertTriangle, Upload, RefreshCw, Trash2, FolderOpen } from 'lucide-react'
+import { Loader2, Target, Shield, UserX, Clock, Zap, AlertTriangle, Upload, RefreshCw, Trash2, FolderOpen, FolderEdit, List } from 'lucide-react'
 import clsx from 'clsx'
 import { toast } from '../stores/toastStore'
 import { ConfirmDialog } from '../components/common/ConfirmDialog'
+import { FileBrowser } from '../components/files/FileBrowser'
+
+type TabType = 'scenarios' | 'files'
 
 const categoryConfig = {
   'red-team': {
@@ -35,6 +38,7 @@ const difficultyConfig = {
 }
 
 export default function TrainingScenarios() {
+  const [activeTab, setActiveTab] = useState<TabType>('scenarios')
   const [scenarios, setScenarios] = useState<Scenario[]>([])
   const [scenariosDir, setScenariosDir] = useState<string>('')
   const [loading, setLoading] = useState(true)
@@ -48,6 +52,11 @@ export default function TrainingScenarios() {
     name: '',
   })
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const tabs = [
+    { id: 'scenarios' as const, name: 'Scenarios', icon: List },
+    { id: 'files' as const, name: 'Scenario Files', icon: FolderEdit },
+  ]
 
   const fetchScenarios = async () => {
     try {
@@ -138,38 +147,64 @@ export default function TrainingScenarios() {
             </p>
           )}
         </div>
-        <div className="mt-4 sm:mt-0 flex gap-2">
-          <input
-            type="file"
-            ref={fileInputRef}
-            onChange={handleUpload}
-            accept=".yaml,.yml"
-            className="hidden"
-          />
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            disabled={uploading}
-            className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
-          >
-            {uploading ? (
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-            ) : (
-              <Upload className="h-4 w-4 mr-2" />
-            )}
-            Upload YAML
-          </button>
-          <button
-            onClick={handleRefresh}
-            disabled={refreshing}
-            className="inline-flex items-center px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
-            title="Refresh from filesystem"
-          >
-            <RefreshCw className={clsx("h-4 w-4", refreshing && "animate-spin")} />
-          </button>
-        </div>
+        {activeTab === 'scenarios' && (
+          <div className="mt-4 sm:mt-0 flex gap-2">
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handleUpload}
+              accept=".yaml,.yml"
+              className="hidden"
+            />
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading}
+              className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
+            >
+              {uploading ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Upload className="h-4 w-4 mr-2" />
+              )}
+              Upload YAML
+            </button>
+            <button
+              onClick={handleRefresh}
+              disabled={refreshing}
+              className="inline-flex items-center px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
+              title="Refresh from filesystem"
+            >
+              <RefreshCw className={clsx("h-4 w-4", refreshing && "animate-spin")} />
+            </button>
+          </div>
+        )}
       </div>
 
-      {/* Filters */}
+      {/* Tabs */}
+      <div className="mt-6 border-b border-gray-200">
+        <nav className="-mb-px flex space-x-8">
+          {tabs.map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={clsx(
+                'flex items-center py-4 px-1 border-b-2 font-medium text-sm',
+                activeTab === tab.id
+                  ? 'border-primary-500 text-primary-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              )}
+            >
+              <tab.icon className="h-5 w-5 mr-2" />
+              {tab.name}
+            </button>
+          ))}
+        </nav>
+      </div>
+
+      {/* Scenarios Tab */}
+      {activeTab === 'scenarios' && (
+        <>
+          {/* Filters */}
       <div className="mt-6 flex flex-col sm:flex-row gap-4">
         <input
           type="text"
@@ -272,6 +307,20 @@ export default function TrainingScenarios() {
               </div>
             )
           })}
+        </div>
+      )}
+        </>
+      )}
+
+      {/* Scenario Files Tab */}
+      {activeTab === 'files' && (
+        <div className="mt-6">
+          <div className="mb-4">
+            <p className="text-sm text-gray-500">
+              Browse and edit scenario YAML files directly. Changes will be reflected after refreshing the scenarios list.
+            </p>
+          </div>
+          <FileBrowser basePath="scenarios" title="" />
         </div>
       )}
 
