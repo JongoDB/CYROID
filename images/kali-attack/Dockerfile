@@ -20,11 +20,11 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV HOME=/home/kasm-default-profile
 
 # Update repos and install core penetration testing tools
+# Note: Some packages may not exist on all architectures, using || true for optional ones
 RUN apt-get update && apt-get install -y --no-install-recommends \
     # ============ Network Reconnaissance & Scanning ============
     nmap \
     masscan \
-    rustscan \
     enum4linux \
     enum4linux-ng \
     ldap-utils \
@@ -38,9 +38,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # ============ Exploitation Frameworks ============
     metasploit-framework \
     exploitdb \
-    searchsploit \
     # ============ Active Directory Tools ============
-    crackmapexec \
     evil-winrm \
     bloodhound \
     impacket-scripts \
@@ -62,13 +60,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # ============ Web Application Testing ============
     nikto \
     gobuster \
-    feroxbuster \
     ffuf \
     sqlmap \
     wfuzz \
     whatweb \
     # ============ Reverse Engineering ============
-    ghidra \
     radare2 \
     # ============ Wireless (if USB passthrough available) ============
     aircrack-ng \
@@ -82,11 +78,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tree \
     python3-pip \
     python3-venv \
-    golang-go \
     # ============ Shell & Scripting ============
     zsh \
     fzf \
     ripgrep \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install optional packages that may not be available on all architectures
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    rustscan \
+    feroxbuster \
+    ghidra \
+    golang-go \
+    || true \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
