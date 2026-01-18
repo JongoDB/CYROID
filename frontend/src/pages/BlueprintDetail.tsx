@@ -18,6 +18,7 @@ import {
   Copy,
   Trash2,
   ExternalLink,
+  Download,
 } from 'lucide-react';
 import clsx from 'clsx';
 import { toast } from '../stores/toastStore';
@@ -43,6 +44,7 @@ export default function BlueprintDetail() {
     instance: Instance | null;
     isLoading: boolean;
   }>({ instance: null, isLoading: false });
+  const [exporting, setExporting] = useState(false);
 
   const fetchData = async () => {
     if (!id) return;
@@ -101,6 +103,28 @@ export default function BlueprintDetail() {
     }
   };
 
+  const handleExport = async () => {
+    if (!id || !blueprint) return;
+    setExporting(true);
+    try {
+      const blob = await blueprintsApi.export(id);
+      // Create download link
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `blueprint-${blueprint.name.replace(/[^a-zA-Z0-9-_]/g, '_')}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      toast.success('Blueprint exported successfully');
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || 'Failed to export blueprint');
+    } finally {
+      setExporting(false);
+    }
+  };
+
   if (loading || !blueprint) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -132,13 +156,27 @@ export default function BlueprintDetail() {
               </p>
             </div>
           </div>
-          <button
-            onClick={() => setShowDeployModal(true)}
-            className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700"
-          >
-            <Rocket className="h-4 w-4 mr-2" />
-            Deploy Instance
-          </button>
+          <div className="flex space-x-3">
+            <button
+              onClick={handleExport}
+              disabled={exporting}
+              className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
+            >
+              {exporting ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Download className="h-4 w-4 mr-2" />
+              )}
+              Export
+            </button>
+            <button
+              onClick={() => setShowDeployModal(true)}
+              className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700"
+            >
+              <Rocket className="h-4 w-4 mr-2" />
+              Deploy Instance
+            </button>
+          </div>
         </div>
       </div>
 
