@@ -31,7 +31,6 @@ interface NavItem {
   name: string
   href: string
   icon: typeof LayoutDashboard
-  adminOnly?: boolean
 }
 
 const navigation: NavItem[] = [
@@ -42,7 +41,6 @@ const navigation: NavItem[] = [
   { name: 'Training Scenarios', href: '/scenarios', icon: Target },
   { name: 'Ranges', href: '/ranges', icon: Network },
   { name: 'Artifacts', href: '/artifacts', icon: FileBox },
-  { name: 'Admin', href: '/admin', icon: Settings, adminOnly: true },
 ]
 
 export default function Layout({ children }: LayoutProps) {
@@ -59,9 +57,8 @@ export default function Layout({ children }: LayoutProps) {
       .catch(() => {}) // Silently fail if version endpoint unavailable
   }, [])
 
-  // Filter navigation based on user roles (ABAC: check roles array)
+  // Check if user is admin (ABAC: check roles array)
   const isAdmin = user?.roles?.includes('admin') ?? false
-  const filteredNavigation = navigation.filter(item => !item.adminOnly || isAdmin)
 
   const handleLogout = () => {
     logout()
@@ -93,7 +90,7 @@ export default function Layout({ children }: LayoutProps) {
           </button>
         </div>
         <nav className="mt-4 px-2 space-y-1">
-          {filteredNavigation.map((item) => (
+          {navigation.map((item) => (
             <Link
               key={item.name}
               to={item.href}
@@ -110,6 +107,41 @@ export default function Layout({ children }: LayoutProps) {
             </Link>
           ))}
         </nav>
+        {/* Mobile user section */}
+        <div className="absolute bottom-0 left-0 right-0 px-2 pb-4 bg-gray-900">
+          <div className="px-3 py-2 text-sm text-gray-400 border-t border-gray-700 pt-4">
+            <div>Signed in as <span className="font-medium text-white">{user?.username}</span></div>
+          </div>
+          {isAdmin && (
+            <Link
+              to="/admin"
+              onClick={() => setSidebarOpen(false)}
+              className={clsx(
+                "flex items-center w-full px-3 py-2 text-sm font-medium rounded-md",
+                location.pathname === '/admin'
+                  ? "bg-gray-800 text-white"
+                  : "text-gray-300 hover:bg-gray-700 hover:text-white"
+              )}
+            >
+              <Settings className="mr-3 h-5 w-5" />
+              Admin Settings
+            </Link>
+          )}
+          <button
+            onClick={() => { setShowPasswordModal(true); setSidebarOpen(false); }}
+            className="flex items-center w-full px-3 py-2 text-sm font-medium text-gray-300 rounded-md hover:bg-gray-700 hover:text-white"
+          >
+            <Key className="mr-3 h-5 w-5" />
+            Change Password
+          </button>
+          <button
+            onClick={handleLogout}
+            className="flex items-center w-full px-3 py-2 text-sm font-medium text-gray-300 rounded-md hover:bg-gray-700 hover:text-white"
+          >
+            <LogOut className="mr-3 h-5 w-5" />
+            Sign out
+          </button>
+        </div>
       </div>
 
       {/* Desktop sidebar */}
@@ -119,7 +151,7 @@ export default function Layout({ children }: LayoutProps) {
             <span className="text-xl font-bold text-white">CYROID</span>
           </div>
           <nav className="mt-4 flex-1 px-2 space-y-1">
-            {filteredNavigation.map((item) => (
+            {navigation.map((item) => (
               <Link
                 key={item.name}
                 to={item.href}
@@ -155,6 +187,20 @@ export default function Layout({ children }: LayoutProps) {
                 </div>
               )}
             </div>
+            {isAdmin && (
+              <Link
+                to="/admin"
+                className={clsx(
+                  "flex items-center w-full px-3 py-2 text-sm font-medium rounded-md",
+                  location.pathname === '/admin'
+                    ? "bg-gray-800 text-white"
+                    : "text-gray-300 hover:bg-gray-700 hover:text-white"
+                )}
+              >
+                <Settings className="mr-3 h-5 w-5" />
+                Admin Settings
+              </Link>
+            )}
             <button
               onClick={() => setShowPasswordModal(true)}
               className="flex items-center w-full px-3 py-2 text-sm font-medium text-gray-300 rounded-md hover:bg-gray-700 hover:text-white"
