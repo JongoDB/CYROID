@@ -70,7 +70,7 @@ services:
       # Training scenarios (read from filesystem, writable for uploads)
       - ./data/scenarios:/data/scenarios
       # Buildable Docker images with Dockerfiles
-      - ./images:/images:ro
+      - ./data/images:/data/images
     expose:
       - "8000"
     depends_on:
@@ -159,7 +159,7 @@ services:
       - "traefik.http.routers.frontend-secure.service=frontend"
 
   traefik:
-    image: traefik:v3.3
+    image: traefik:v2.11
     command:
       - "--api.insecure=true"
       - "--providers.docker=true"

@@ -19,9 +19,14 @@ router = APIRouter(prefix="/files", tags=["files"])
 
 def get_allowed_bases() -> dict[str, Path]:
     """Get allowed base directories for file operations."""
-    # In Docker: /images (mounted from ./images)
-    # Locally: ./images
-    images_path = Path("/images") if os.path.exists("/images") else Path("images")
+    # In Docker: /data/images (mounted from ./data/images)
+    # Locally: ./data/images or ./images
+    if os.path.exists("/data/images"):
+        images_path = Path("/data/images")
+    elif os.path.exists("data/images"):
+        images_path = Path("data/images")
+    else:
+        images_path = Path("images")
     return {
         "images": images_path,
         "scenarios": get_scenarios_dir(),

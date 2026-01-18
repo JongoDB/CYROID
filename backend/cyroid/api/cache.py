@@ -472,7 +472,16 @@ def get_active_docker_pulls(current_user: CurrentUser):
 # ============ Docker Image Build Endpoints ============
 
 # Path to the images directory containing Dockerfiles
-IMAGES_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), "images")
+# In Docker: /data/images, locally: ./data/images or ./images
+def _get_images_dir() -> str:
+    if os.path.exists("/data/images"):
+        return "/data/images"
+    elif os.path.exists("data/images"):
+        return os.path.abspath("data/images")
+    else:
+        return os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), "images")
+
+IMAGES_DIR = _get_images_dir()
 
 
 class DockerBuildRequest(BaseModel):
