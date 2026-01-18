@@ -46,9 +46,15 @@ export function DeploymentProgress({
         const response = await rangesApi.getDeploymentStatus(rangeId)
         setStatus(response.data)
 
-        // Check if deployment completed
-        if (response.data.status === 'deployed') {
+        // Check if deployment completed (backend returns 'running' when done)
+        if (response.data.status === 'running') {
           onDeploymentComplete?.()
+        } else if (response.data.status === 'error') {
+          // Find error details from failed resources
+          const failedVm = response.data.vms.find(v => v.status === 'failed')
+          const failedNet = response.data.networks.find(n => n.status === 'failed')
+          const errorDetail = failedVm?.statusDetail || failedNet?.statusDetail || response.data.router?.statusDetail
+          setError(errorDetail || 'Deployment failed')
         }
       } catch (err) {
         console.error('Failed to load deployment status:', err)

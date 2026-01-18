@@ -411,11 +411,13 @@ def deploy_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
                     user_id=current_user.id,
                     extra_data=json.dumps({"subnet": network.subnet, "gateway": network.gateway})
                 )
+                # internal=False: VyOS router handles isolation via firewall rules,
+                # not Docker's internal network flag (which blocks all external traffic)
                 docker_network_id = docker.create_network(
                     name=f"cyroid-{network.name}-{str(network.id)[:8]}",
                     subnet=network.subnet,
                     gateway=network.gateway,
-                    internal=network.is_isolated,
+                    internal=False,
                     labels={
                         "cyroid.range_id": str(range_id),
                         "cyroid.network_id": str(network.id),

@@ -155,17 +155,19 @@ def create_vm(vm_data: VMCreate, db: DBSession, current_user: CurrentUser):
     # Verify range exists
     range_obj = db.query(Range).filter(Range.id == vm_data.range_id).first()
     if not range_obj:
+        logger.warning(f"VM creation failed: Range not found (id={vm_data.range_id})")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Range not found",
+            detail=f"Range not found: {vm_data.range_id}",
         )
 
     # Verify network exists and belongs to the range
     network = db.query(Network).filter(Network.id == vm_data.network_id).first()
     if not network:
+        logger.warning(f"VM creation failed: Network not found (id={vm_data.network_id})")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Network not found",
+            detail=f"Network not found: {vm_data.network_id}",
         )
     if network.range_id != vm_data.range_id:
         raise HTTPException(
@@ -176,9 +178,10 @@ def create_vm(vm_data: VMCreate, db: DBSession, current_user: CurrentUser):
     # Verify template exists
     template = db.query(VMTemplate).filter(VMTemplate.id == vm_data.template_id).first()
     if not template:
+        logger.warning(f"VM creation failed: Template not found (id={vm_data.template_id})")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Template not found",
+            detail=f"Template not found: {vm_data.template_id}",
         )
 
     # Check for duplicate hostname in the range

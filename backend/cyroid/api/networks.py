@@ -145,12 +145,14 @@ def provision_network(network_id: UUID, db: DBSession, current_user: CurrentUser
     try:
         docker = get_docker_service()
 
-        # Create Docker network - internal if isolated
+        # Create Docker network
+        # internal=False: VyOS router handles isolation via firewall rules,
+        # not Docker's internal network flag (which blocks all external traffic)
         docker_network_id = docker.create_network(
             name=f"cyroid-{network.name}-{str(network.id)[:8]}",
             subnet=network.subnet,
             gateway=network.gateway,
-            internal=network.is_isolated,
+            internal=False,
             labels={
                 "cyroid.range_id": str(network.range_id),
                 "cyroid.network_id": str(network.id),
