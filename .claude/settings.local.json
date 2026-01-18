@@ -156,7 +156,11 @@
       "Bash(Builder\" to \"Range Wizard\" for clearer naming convention:\n- Rename GuidedBuilderWizard.tsx to RangeWizard.tsx\n- Update component export name to RangeWizard\n- Update modal title from \"Guided Range Builder\" to \"Range Wizard\"\n- Update button labels in Ranges.tsx\n- Update state variables and imports\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
       "Bash(while read tag)",
       "Bash(do echo \"═══════════════════════════════════════════════════════════════\")",
-      "Bash(docker-compose down:*)"
+      "Bash(docker-compose down:*)",
+      "Bash(docker-compose stop:*)",
+      "Bash(docker-compose rm:*)",
+      "Bash(docker-compose run:*)",
+      "mcp__plugin_playwright_playwright__browser_select_option"
     ]
   },
   "enableAllProjectMcpServers": true,
