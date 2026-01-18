@@ -34,11 +34,12 @@ async def lifespan(app: FastAPI):
     # Startup
     from cyroid.services.event_broadcaster import get_connection_manager, get_broadcaster
     from cyroid.services.template_seeder import seed_all_templates
-    from cyroid.database import SessionLocal
+    from cyroid.database import get_session_local
 
     # Seed built-in templates
     logger.info("Checking seed templates...")
     try:
+        SessionLocal = get_session_local()
         db = SessionLocal()
         seeded = seed_all_templates(db)
         if seeded:
