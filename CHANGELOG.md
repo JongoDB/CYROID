@@ -5,6 +5,18 @@ All notable changes to CYROID will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.2] - 2026-01-17
+
+### Added
+
+- **Granular Deployment Status** ([#24](../../issues/24)): Per-resource deployment tracking showing individual status for every network and VM during deployment.
+  - New `/deployment-status` API endpoint returns structured status for each resource
+  - Refactored DeploymentProgress component with per-resource rows
+  - StatusIcon, ResourceRow, ResourceSection components for granular display
+  - Router, networks, and VMs shown individually with status icons and durations
+  - Added `network_id` field to EventLog for network-specific event tracking
+  - Progress bar with elapsed time and resource counts
+
 ## [0.6.1] - 2026-01-17
 
 ### Fixed
