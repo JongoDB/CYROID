@@ -179,6 +179,7 @@ export interface EventLog {
   id: string
   range_id: string
   vm_id: string | null
+  network_id: string | null
   event_type: EventType
   message: string
   extra_data: string | null
@@ -188,6 +189,42 @@ export interface EventLog {
 export interface EventLogList {
   events: EventLog[]
   total: number
+}
+
+// Deployment Status Types
+export interface ResourceStatus {
+  id?: string
+  name: string
+  status: 'pending' | 'creating' | 'starting' | 'running' | 'created' | 'stopped' | 'failed'
+  statusDetail?: string
+  durationMs?: number
+}
+
+export interface NetworkStatus extends ResourceStatus {
+  subnet: string
+}
+
+export interface VMStatus extends ResourceStatus {
+  hostname: string
+  ip?: string
+}
+
+export interface DeploymentSummary {
+  total: number
+  completed: number
+  inProgress: number
+  failed: number
+  pending: number
+}
+
+export interface DeploymentStatusResponse {
+  status: string
+  elapsedSeconds: number
+  startedAt?: string
+  summary: DeploymentSummary
+  router?: ResourceStatus
+  networks: NetworkStatus[]
+  vms: VMStatus[]
 }
 
 export interface VMStats {
