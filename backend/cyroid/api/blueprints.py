@@ -1,0 +1,238 @@
+# backend/cyroid/api/blueprints.py
+from typing import List
+from uuid import UUID
+from fastapi import APIRouter, HTTPException, status
+from sqlalchemy.orm import Session
+
+from cyroid.api.deps import DBSession, CurrentUser
+from cyroid.models import Range, RangeBlueprint, RangeInstance
+from cyroid.schemas.blueprint import (
+    BlueprintCreate, BlueprintUpdate, BlueprintResponse, BlueprintDetailResponse,
+    InstanceDeploy, InstanceResponse, BlueprintConfig
+)
+from cyroid.services.blueprint_service import (
+    extract_config_from_range, extract_subnet_prefix, create_range_from_blueprint
+)
+from cyroid.services.docker_service import DockerService
+
+router = APIRouter(prefix="/blueprints", tags=["blueprints"])
+
+
+@router.post("", response_model=BlueprintDetailResponse, status_code=status.HTTP_201_CREATED)
+def create_blueprint(data: BlueprintCreate, db: DBSession, current_user: CurrentUser):
+    """Create a new blueprint from an existing range."""
+    # Verify range exists
+    range_obj = db.query(Range).filter(Range.id == data.range_id).first()
+    if not range_obj:
+        raise HTTPException(status_code=404, detail="Range not found")
+
+    # Extract config from range
+    config = extract_config_from_range(db, data.range_id)
+
+    # Create blueprint
+    blueprint = RangeBlueprint(
+        name=data.name,
+        description=data.description,
+        config=config.model_dump(),
+        base_subnet_prefix=data.base_subnet_prefix,
+        created_by=current_user.id,
+        version=1,
+        next_offset=0,
+    )
+    db.add(blueprint)
+    db.commit()
+    db.refresh(blueprint)
+
+    return _blueprint_to_detail_response(blueprint, config, current_user.username)
+
+
+@router.get("", response_model=List[BlueprintResponse])
+def list_blueprints(db: DBSession, current_user: CurrentUser):
+    """List all blueprints."""
+    blueprints = db.query(RangeBlueprint).all()
+    return [_blueprint_to_response(b, db) for b in blueprints]
+
+
+@router.get("/{blueprint_id}", response_model=BlueprintDetailResponse)
+def get_blueprint(blueprint_id: UUID, db: DBSession, current_user: CurrentUser):
+    """Get blueprint details."""
+    blueprint = db.query(RangeBlueprint).filter(RangeBlueprint.id == blueprint_id).first()
+    if not blueprint:
+        raise HTTPException(status_code=404, detail="Blueprint not found")
+
+    config = BlueprintConfig.model_validate(blueprint.config)
+
+    # Get creator username
+    from cyroid.models import User
+    creator = db.query(User).filter(User.id == blueprint.created_by).first()
+    username = creator.username if creator else None
+
+    return _blueprint_to_detail_response(blueprint, config, username)
+
+
+@router.put("/{blueprint_id}", response_model=BlueprintDetailResponse)
+def update_blueprint(
+    blueprint_id: UUID, data: BlueprintUpdate, db: DBSession, current_user: CurrentUser
+):
+    """Update blueprint metadata. Increments version if config changes."""
+    blueprint = db.query(RangeBlueprint).filter(RangeBlueprint.id == blueprint_id).first()
+    if not blueprint:
+        raise HTTPException(status_code=404, detail="Blueprint not found")
+
+    if data.name is not None:
+        blueprint.name = data.name
+    if data.description is not None:
+        blueprint.description = data.description
+
+    db.commit()
+    db.refresh(blueprint)
+
+    config = BlueprintConfig.model_validate(blueprint.config)
+    return _blueprint_to_detail_response(blueprint, config, current_user.username)
+
+
+@router.delete("/{blueprint_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_blueprint(blueprint_id: UUID, db: DBSession, current_user: CurrentUser):
+    """Delete a blueprint. Fails if instances exist."""
+    blueprint = db.query(RangeBlueprint).filter(RangeBlueprint.id == blueprint_id).first()
+    if not blueprint:
+        raise HTTPException(status_code=404, detail="Blueprint not found")
+
+    # Check for instances
+    instance_count = db.query(RangeInstance).filter(
+        RangeInstance.blueprint_id == blueprint_id
+    ).count()
+    if instance_count > 0:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot delete blueprint with {instance_count} active instances"
+        )
+
+    db.delete(blueprint)
+    db.commit()
+
+
+@router.post("/{blueprint_id}/deploy", response_model=InstanceResponse, status_code=status.HTTP_201_CREATED)
+def deploy_instance(
+    blueprint_id: UUID, data: InstanceDeploy, db: DBSession, current_user: CurrentUser
+):
+    """Deploy a new instance from a blueprint."""
+    blueprint = db.query(RangeBlueprint).filter(RangeBlueprint.id == blueprint_id).first()
+    if not blueprint:
+        raise HTTPException(status_code=404, detail="Blueprint not found")
+
+    config = BlueprintConfig.model_validate(blueprint.config)
+
+    # Get next offset and increment
+    offset = blueprint.next_offset
+    blueprint.next_offset += 1
+
+    # Create range from blueprint with offset
+    range_obj = create_range_from_blueprint(
+        db=db,
+        config=config,
+        range_name=data.name,
+        base_prefix=blueprint.base_subnet_prefix,
+        offset=offset,
+        created_by=current_user.id,
+    )
+
+    # Create instance record
+    instance = RangeInstance(
+        name=data.name,
+        blueprint_id=blueprint.id,
+        blueprint_version=blueprint.version,
+        subnet_offset=offset,
+        instructor_id=current_user.id,
+        range_id=range_obj.id,
+    )
+    db.add(instance)
+    db.commit()
+    db.refresh(instance)
+
+    # Auto-deploy if requested
+    if data.auto_deploy:
+        try:
+            docker_service = DockerService()
+            docker_service.deploy_range(db, range_obj.id)
+        except Exception as e:
+            # Don't fail the whole operation, just log
+            print(f"Auto-deploy failed: {e}")
+
+    return _instance_to_response(instance, db)
+
+
+@router.get("/{blueprint_id}/instances", response_model=List[InstanceResponse])
+def list_instances(blueprint_id: UUID, db: DBSession, current_user: CurrentUser):
+    """List all instances of a blueprint."""
+    blueprint = db.query(RangeBlueprint).filter(RangeBlueprint.id == blueprint_id).first()
+    if not blueprint:
+        raise HTTPException(status_code=404, detail="Blueprint not found")
+
+    instances = db.query(RangeInstance).filter(
+        RangeInstance.blueprint_id == blueprint_id
+    ).all()
+
+    return [_instance_to_response(i, db) for i in instances]
+
+
+# ============ Helper Functions ============
+
+def _blueprint_to_response(blueprint: RangeBlueprint, db: Session) -> BlueprintResponse:
+    config = blueprint.config
+    return BlueprintResponse(
+        id=blueprint.id,
+        name=blueprint.name,
+        description=blueprint.description,
+        version=blueprint.version,
+        base_subnet_prefix=blueprint.base_subnet_prefix,
+        next_offset=blueprint.next_offset,
+        created_by=blueprint.created_by,
+        created_at=blueprint.created_at,
+        updated_at=blueprint.updated_at,
+        network_count=len(config.get("networks", [])),
+        vm_count=len(config.get("vms", [])),
+        instance_count=len(blueprint.instances),
+    )
+
+
+def _blueprint_to_detail_response(
+    blueprint: RangeBlueprint, config: BlueprintConfig, username: str = None
+) -> BlueprintDetailResponse:
+    return BlueprintDetailResponse(
+        id=blueprint.id,
+        name=blueprint.name,
+        description=blueprint.description,
+        version=blueprint.version,
+        base_subnet_prefix=blueprint.base_subnet_prefix,
+        next_offset=blueprint.next_offset,
+        created_by=blueprint.created_by,
+        created_at=blueprint.created_at,
+        updated_at=blueprint.updated_at,
+        network_count=len(config.networks),
+        vm_count=len(config.vms),
+        instance_count=len(blueprint.instances) if hasattr(blueprint, 'instances') else 0,
+        config=config,
+        created_by_username=username,
+    )
+
+
+def _instance_to_response(instance: RangeInstance, db: Session) -> InstanceResponse:
+    from cyroid.models import User
+
+    range_obj = instance.range
+    instructor = db.query(User).filter(User.id == instance.instructor_id).first()
+
+    return InstanceResponse(
+        id=instance.id,
+        name=instance.name,
+        blueprint_id=instance.blueprint_id,
+        blueprint_version=instance.blueprint_version,
+        subnet_offset=instance.subnet_offset,
+        instructor_id=instance.instructor_id,
+        range_id=instance.range_id,
+        created_at=instance.created_at,
+        range_name=range_obj.name if range_obj else None,
+        range_status=range_obj.status.value if range_obj else None,
+        instructor_username=instructor.username if instructor else None,
+    )

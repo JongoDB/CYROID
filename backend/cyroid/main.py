@@ -21,6 +21,7 @@ from cyroid.api.msel import router as msel_router
 from cyroid.api.walkthrough import router as walkthrough_router
 from cyroid.api.cache import router as cache_router
 from cyroid.api.system import router as system_router
+from cyroid.api.blueprints import router as blueprints_router
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -128,6 +129,7 @@ app.include_router(msel_router, prefix="/api/v1")
 app.include_router(walkthrough_router, prefix="/api/v1")
 app.include_router(cache_router, prefix="/api/v1")
 app.include_router(system_router, prefix="/api/v1")
+app.include_router(blueprints_router, prefix="/api/v1")
 
 
 @app.get("/health")
