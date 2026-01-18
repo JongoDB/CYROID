@@ -2,7 +2,7 @@
 from datetime import datetime
 from typing import Optional
 from uuid import UUID
-from pydantic import BaseModel, Field, computed_field
+from pydantic import BaseModel, Field, computed_field, field_serializer
 
 from cyroid.models.vm import VMStatus
 
@@ -131,3 +131,8 @@ class VMResponse(VMBase):
 
     class Config:
         from_attributes = True
+
+    @field_serializer('status')
+    def serialize_status(self, status: VMStatus) -> str:
+        """Return lowercase status for frontend compatibility."""
+        return status.value.lower()

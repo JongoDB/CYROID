@@ -1734,26 +1734,46 @@ local-hostname: {name}
     def cleanup_range(self, range_id: str) -> Dict[str, int]:
         """
         Remove all containers and networks for a range.
-        
+
         Returns:
             Dict with counts of removed containers and networks
         """
         labels = {"cyroid.range_id": range_id}
-        
+
         # Stop and remove containers
         containers = self.list_containers(labels=labels)
         removed_containers = 0
         for container in containers:
             if self.remove_container(container["id"]):
                 removed_containers += 1
-        
-        # Remove networks
+
+        # Remove networks - disconnect traefik first to avoid "network has active endpoints" error
         networks = self.list_networks(labels=labels)
         removed_networks = 0
         for network in networks:
-            if self.delete_network(network["id"]):
-                removed_networks += 1
-        
+            network_id = network["id"]
+            # Disconnect traefik before removing network
+            self.disconnect_traefik_from_network(network_id)
+            # Also teardown iptables isolation rules if any
+            try:
+                network_info = self.get_network(network_id)
+                if network_info:
+                    # Get subnet from network config for isolation cleanup
+                    docker_net = self.client.networks.get(network_id)
+                    ipam_config = docker_net.attrs.get("IPAM", {}).get("Config", [])
+                    if ipam_config:
+                        subnet = ipam_config[0].get("Subnet")
+                        if subnet:
+                            self.teardown_network_isolation(network_id, subnet)
+            except Exception as e:
+                logger.warning(f"Failed to cleanup isolation for network {network_id}: {e}")
+
+            try:
+                if self.delete_network(network_id):
+                    removed_networks += 1
+            except Exception as e:
+                logger.error(f"Failed to delete network {network_id}: {e}")
+
         logger.info(f"Cleaned up range {range_id}: {removed_containers} containers, {removed_networks} networks")
         return {
             "containers": removed_containers,

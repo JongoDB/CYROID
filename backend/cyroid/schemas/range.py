@@ -2,7 +2,7 @@
 from datetime import datetime
 from typing import Optional, List, TYPE_CHECKING
 from uuid import UUID
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_serializer
 
 from cyroid.models.range import RangeStatus
 from cyroid.models.router import RouterStatus
@@ -24,6 +24,11 @@ class RouterResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+    @field_serializer('status')
+    def serialize_status(self, status: RouterStatus) -> str:
+        """Return lowercase status for frontend compatibility."""
+        return status.value.lower()
 
 
 class RangeBase(BaseModel):
@@ -55,6 +60,11 @@ class RangeResponse(RangeBase):
 
     class Config:
         from_attributes = True
+
+    @field_serializer('status')
+    def serialize_status(self, status: RangeStatus) -> str:
+        """Return lowercase status for frontend compatibility."""
+        return status.value.lower()
 
     @classmethod
     def from_orm_with_counts(cls, range_obj):

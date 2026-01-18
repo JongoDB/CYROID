@@ -93,7 +93,7 @@ export function VMGrid({ vms, onRefresh, onOpenConsole }: Props) {
                   <EmulationWarning compact className="shrink-0" />
                 )}
               </div>
-              <span className={clsx('w-3 h-3 rounded-full shrink-0', statusColors[vm.status])} />
+              <span className={clsx('w-3 h-3 rounded-full shrink-0', statusColors[vm.status.toLowerCase() as VM['status']])} />
             </div>
 
             <div className="text-xs text-gray-500 mb-3 space-y-1">
