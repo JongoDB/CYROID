@@ -24,6 +24,9 @@ from cyroid.schemas.range import (
     RangeCreate, RangeUpdate, RangeResponse, RangeDetailResponse,
     RangeTemplateExport, RangeTemplateImport, NetworkTemplateData, VMTemplateData
 )
+from cyroid.schemas.deployment_status import (
+    DeploymentStatusResponse, DeploymentSummary, ResourceStatus, NetworkStatus, VMStatus
+)
 from sqlalchemy.orm import joinedload
 from cyroid.schemas.user import ResourceTagCreate, ResourceTagsResponse
 
@@ -42,6 +45,123 @@ def get_vyos_service():
     """Lazy import for VyOS service."""
     from cyroid.services.vyos_service import VyOSService
     return VyOSService()
+
+
+def compute_deployment_status(range_obj, events: list) -> DeploymentStatusResponse:
+    """Compute per-resource deployment status from events."""
+    from datetime import timezone
+    from cyroid.models.event_log import EventLog
+
+    # Find deployment start time
+    started_at = None
+    for event in events:
+        if event.event_type == EventType.DEPLOYMENT_STARTED:
+            started_at = event.created_at
+            break
+
+    # Track timestamps for duration calculation
+    resource_start_times = {}
+
+    # Initialize router status
+    router_status = ResourceStatus(name="gateway", status="pending")
+
+    # Initialize network statuses
+    network_statuses = {}
+    for n in range_obj.networks:
+        network_statuses[n.id] = NetworkStatus(
+            id=str(n.id), name=n.name, subnet=n.subnet, status="pending"
+        )
+
+    # Initialize VM statuses
+    vm_statuses = {}
+    for v in range_obj.vms:
+        vm_statuses[v.id] = VMStatus(
+            id=str(v.id), name=v.hostname, hostname=v.hostname,
+            ip=v.ip_address, status="pending"
+        )
+
+    # Process events chronologically
+    for event in events:
+        event_type = event.event_type
+
+        # Router events
+        if event_type == EventType.ROUTER_CREATING:
+            router_status.status = "creating"
+            router_status.status_detail = "Creating VyOS router..."
+            resource_start_times["router"] = event.created_at
+        elif event_type == EventType.ROUTER_CREATED:
+            router_status.status = "running"
+            router_status.status_detail = "Running"
+            if "router" in resource_start_times:
+                delta = event.created_at - resource_start_times["router"]
+                router_status.duration_ms = int(delta.total_seconds() * 1000)
+
+        # Network events
+        elif event_type == EventType.NETWORK_CREATING:
+            if event.network_id and event.network_id in network_statuses:
+                network_statuses[event.network_id].status = "creating"
+                network_statuses[event.network_id].status_detail = "Creating Docker network..."
+                resource_start_times[f"network_{event.network_id}"] = event.created_at
+        elif event_type == EventType.NETWORK_CREATED:
+            if event.network_id and event.network_id in network_statuses:
+                network_statuses[event.network_id].status = "created"
+                network_statuses[event.network_id].status_detail = "Created"
+                key = f"network_{event.network_id}"
+                if key in resource_start_times:
+                    delta = event.created_at - resource_start_times[key]
+                    network_statuses[event.network_id].duration_ms = int(delta.total_seconds() * 1000)
+
+        # VM events
+        elif event_type == EventType.VM_CREATING:
+            if event.vm_id and event.vm_id in vm_statuses:
+                vm_statuses[event.vm_id].status = "creating"
+                vm_statuses[event.vm_id].status_detail = "Creating container..."
+                resource_start_times[f"vm_{event.vm_id}"] = event.created_at
+        elif event_type == EventType.VM_STARTED:
+            if event.vm_id and event.vm_id in vm_statuses:
+                vm_statuses[event.vm_id].status = "running"
+                vm_statuses[event.vm_id].status_detail = "Running"
+                key = f"vm_{event.vm_id}"
+                if key in resource_start_times:
+                    delta = event.created_at - resource_start_times[key]
+                    vm_statuses[event.vm_id].duration_ms = int(delta.total_seconds() * 1000)
+        elif event_type == EventType.VM_ERROR:
+            if event.vm_id and event.vm_id in vm_statuses:
+                vm_statuses[event.vm_id].status = "failed"
+                vm_statuses[event.vm_id].status_detail = event.message
+
+        # Deployment failure
+        elif event_type == EventType.DEPLOYMENT_FAILED:
+            if router_status.status == "creating":
+                router_status.status = "failed"
+                router_status.status_detail = event.message
+
+    # Build summary
+    all_resources = [router_status] + list(network_statuses.values()) + list(vm_statuses.values())
+    summary = DeploymentSummary(
+        total=len(all_resources),
+        completed=sum(1 for r in all_resources if r.status in ["running", "created"]),
+        in_progress=sum(1 for r in all_resources if r.status in ["creating", "starting"]),
+        failed=sum(1 for r in all_resources if r.status == "failed"),
+        pending=sum(1 for r in all_resources if r.status == "pending")
+    )
+
+    # Calculate elapsed time
+    elapsed_seconds = 0
+    if started_at:
+        from datetime import datetime
+        now = datetime.now(timezone.utc) if started_at.tzinfo else datetime.utcnow()
+        elapsed_seconds = int((now - started_at).total_seconds())
+
+    return DeploymentStatusResponse(
+        status=range_obj.status.value if hasattr(range_obj.status, 'value') else range_obj.status,
+        elapsed_seconds=elapsed_seconds,
+        started_at=started_at.isoformat() if started_at else None,
+        summary=summary,
+        router=router_status,
+        networks=list(network_statuses.values()),
+        vms=list(vm_statuses.values())
+    )
 
 
 @router.get("", response_model=List[RangeResponse])
@@ -146,6 +266,33 @@ def delete_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
 
     db.delete(range_obj)
     db.commit()
+
+
+@router.get("/{range_id}/deployment-status", response_model=DeploymentStatusResponse)
+def get_deployment_status(
+    range_id: UUID,
+    db: DBSession,
+    current_user: CurrentUser
+):
+    """Get detailed per-resource deployment status."""
+    from datetime import datetime, timedelta
+    from cyroid.models.event_log import EventLog
+
+    range_obj = db.query(Range).options(
+        joinedload(Range.networks),
+        joinedload(Range.vms)
+    ).filter(Range.id == range_id).first()
+
+    if not range_obj:
+        raise HTTPException(status_code=404, detail="Range not found")
+
+    # Get deployment events from last hour
+    events = db.query(EventLog).filter(
+        EventLog.range_id == range_id,
+        EventLog.created_at > datetime.utcnow() - timedelta(hours=1)
+    ).order_by(EventLog.created_at).all()
+
+    return compute_deployment_status(range_obj, events)
 
 
 @router.post("/{range_id}/deploy", response_model=RangeResponse)
