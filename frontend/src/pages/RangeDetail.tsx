@@ -741,8 +741,6 @@ export default function RangeDetail() {
           <DeploymentProgress
             rangeId={range.id}
             rangeStatus={range.status}
-            totalNetworks={networks.length}
-            totalVMs={vms.length}
             onDeploymentComplete={() => fetchData()}
           />
         </div>
