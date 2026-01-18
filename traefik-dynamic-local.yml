@@ -1,0 +1,71 @@
+# Traefik dynamic configuration for local macOS development
+# Static routes since Docker provider doesn't work with Docker Desktop
+
+http:
+  routers:
+    # Frontend - catch all on port 80
+    frontend:
+      rule: "PathPrefix(`/`)"
+      entryPoints:
+        - web
+      service: frontend
+      priority: 1
+
+    # API routes
+    api:
+      rule: "PathPrefix(`/api`) || PathPrefix(`/health`) || PathPrefix(`/docs`) || PathPrefix(`/openapi.json`) || PathPrefix(`/ws`)"
+      entryPoints:
+        - web
+      service: api
+      priority: 10
+
+    # Frontend HTTPS
+    frontend-secure:
+      rule: "PathPrefix(`/`)"
+      entryPoints:
+        - websecure
+      service: frontend
+      priority: 1
+      tls: {}
+
+    # API HTTPS
+    api-secure:
+      rule: "PathPrefix(`/api`) || PathPrefix(`/health`) || PathPrefix(`/docs`) || PathPrefix(`/openapi.json`) || PathPrefix(`/ws`)"
+      entryPoints:
+        - websecure
+      service: api
+      priority: 10
+      tls: {}
+
+  services:
+    frontend:
+      loadBalancer:
+        servers:
+          - url: "http://frontend:5173"
+
+    api:
+      loadBalancer:
+        servers:
+          - url: "http://api:8000"
+
+  serversTransports:
+    insecure-transport:
+      insecureSkipVerify: true
+
+tls:
+  stores:
+    default:
+      defaultCertificate:
+        certFile: /etc/traefik/certs/cert.pem
+        keyFile: /etc/traefik/certs/key.pem
+
+  certificates:
+    - certFile: /etc/traefik/certs/cert.pem
+      keyFile: /etc/traefik/certs/key.pem
+      stores:
+        - default
+
+  options:
+    default:
+      minVersion: VersionTLS12
+      sniStrict: false

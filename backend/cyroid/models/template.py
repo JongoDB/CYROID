@@ -11,7 +11,8 @@ from cyroid.models.base import Base, TimestampMixin, UUIDMixin
 class OSType(str, Enum):
     WINDOWS = "windows"
     LINUX = "linux"
-    CUSTOM = "custom"  # For custom ISOs (OPNsense, pfSense, etc.)
+    NETWORK = "network"  # For network devices (VyOS, OPNsense, pfSense, etc.)
+    CUSTOM = "custom"  # For custom ISOs
 
 
 class VMType(str, Enum):

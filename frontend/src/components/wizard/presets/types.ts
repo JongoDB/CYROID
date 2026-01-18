@@ -45,6 +45,10 @@ export interface ConfigState {
   adminPassword: string;
   userCount: number;
   vulnerabilityLevel: 'none' | 'some' | 'many';
+  // Edge router configuration
+  dhcpEnabled: boolean;
+  dnsServers: string;
+  dnsSearchDomain: string;
 }
 
 export interface WizardState {
@@ -61,4 +65,8 @@ export const DEFAULT_CONFIG: ConfigState = {
   adminPassword: '',
   userCount: 10,
   vulnerabilityLevel: 'none',
+  // Edge router defaults
+  dhcpEnabled: true,
+  dnsServers: '8.8.8.8, 8.8.4.4',
+  dnsSearchDomain: '',
 };

@@ -5,6 +5,21 @@ All notable changes to CYROID will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.1] - 2026-01-18
+
+### Added
+
+- **VyOS Router Template**: New seed template allowing engineers to deploy additional VyOS routers within ranges for internal network segmentation under the edge router.
+- **Edge Router Configuration in Range Wizard**: New configuration options for the edge router including:
+  - DHCP server toggle for non-isolated networks
+  - Custom DNS servers configuration
+  - DNS search domain setting
+- **Network OS Type**: Added `network` OS type for network device templates (VyOS, OPNsense, pfSense, etc.)
+
+### Fixed
+
+- **Training Scenarios Seeding**: Fixed scenario seeding that failed on first boot due to volume mount timing. Scenarios now seed correctly on container restart.
+
 ## [0.8.0] - 2026-01-18
 
 ### Added

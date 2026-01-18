@@ -1,6 +1,6 @@
 // frontend/src/components/wizard/steps/ConfigurationOptions.tsx
 import { useState } from 'react';
-import { Eye, EyeOff, RefreshCw } from 'lucide-react';
+import { Eye, EyeOff, RefreshCw, Router } from 'lucide-react';
 import { useWizard } from '../WizardContext';
 
 function generatePassword(length: number = 16): string {
@@ -142,6 +142,72 @@ export function ConfigurationOptions() {
                 {level === 'many' && 'Vulnerable'}
               </button>
             ))}
+          </div>
+        </div>
+
+        {/* Edge Router Configuration */}
+        <div className="border-t pt-6">
+          <div className="flex items-center gap-2 mb-4">
+            <Router className="h-5 w-5 text-gray-500" />
+            <h3 className="text-sm font-medium text-gray-900">Edge Router Settings</h3>
+          </div>
+          <p className="text-xs text-gray-500 mb-4">
+            Configure the VyOS edge router that handles routing between networks
+          </p>
+
+          {/* DHCP Toggle */}
+          <div className="mb-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <label className="text-sm font-medium text-gray-700">DHCP Server</label>
+                <p className="text-xs text-gray-500">
+                  Automatically assign IPs to VMs on non-isolated networks
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => handleConfigChange('dhcpEnabled', !state.config.dhcpEnabled)}
+                className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 ${
+                  state.config.dhcpEnabled ? 'bg-primary-600' : 'bg-gray-200'
+                }`}
+              >
+                <span
+                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                    state.config.dhcpEnabled ? 'translate-x-5' : 'translate-x-0'
+                  }`}
+                />
+              </button>
+            </div>
+          </div>
+
+          {/* DNS Servers */}
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-gray-700">DNS Servers</label>
+            <input
+              type="text"
+              value={state.config.dnsServers}
+              onChange={(e) => handleConfigChange('dnsServers', e.target.value)}
+              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+              placeholder="8.8.8.8, 8.8.4.4"
+            />
+            <p className="mt-1 text-xs text-gray-500">
+              Comma-separated list of DNS servers for DHCP clients
+            </p>
+          </div>
+
+          {/* DNS Search Domain */}
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-gray-700">DNS Search Domain</label>
+            <input
+              type="text"
+              value={state.config.dnsSearchDomain}
+              onChange={(e) => handleConfigChange('dnsSearchDomain', e.target.value)}
+              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+              placeholder="lab.local (optional)"
+            />
+            <p className="mt-1 text-xs text-gray-500">
+              Domain suffix for unqualified hostnames (e.g., lab.local)
+            </p>
           </div>
         </div>
       </div>

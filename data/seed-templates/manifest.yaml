@@ -10,6 +10,13 @@ templates:
     category: offensive
     arch: both
 
+  # ============ Network Infrastructure ============
+  - seed_id: vyos-router
+    file: vyos-router.yaml
+    category: network
+    arch: both
+    description: "VyOS router for internal network segments"
+
   # ============ Infrastructure / Domain Controllers ============
   - seed_id: samba-dc
     file: samba-dc.yaml
