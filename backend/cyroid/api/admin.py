@@ -34,6 +34,7 @@ class CleanupResult(BaseModel):
     containers_removed: int
     networks_removed: int
     database_records_updated: int
+    database_records_deleted: int
     errors: List[str]
     orphaned_resources_cleaned: int
 
@@ -41,6 +42,7 @@ class CleanupResult(BaseModel):
 class CleanupRequest(BaseModel):
     """Options for cleanup operation."""
     clean_database: bool = True  # Also reset database records
+    delete_database_records: bool = False  # Delete all ranges/VMs/networks from DB
     force: bool = False  # Force cleanup even if ranges appear active
 
 
@@ -74,6 +76,7 @@ def cleanup_all_resources(
         containers_removed=0,
         networks_removed=0,
         database_records_updated=0,
+        database_records_deleted=0,
         errors=[],
         orphaned_resources_cleaned=0,
     )
@@ -90,8 +93,21 @@ def cleanup_all_resources(
             result.networks_removed += cleanup_result.get("networks", 0)
             result.ranges_cleaned += 1
 
-            # Update database if requested
-            if options.clean_database:
+            # Update or delete database records
+            if options.delete_database_records:
+                # Delete everything - VMs, networks, router, then range
+                for vm in range_obj.vms:
+                    db.delete(vm)
+                    result.database_records_deleted += 1
+                for network in range_obj.networks:
+                    db.delete(network)
+                    result.database_records_deleted += 1
+                if range_obj.router:
+                    db.delete(range_obj.router)
+                    result.database_records_deleted += 1
+                db.delete(range_obj)
+                result.database_records_deleted += 1
+            elif options.clean_database:
                 # Reset range status
                 range_obj.status = RangeStatus.DRAFT
                 range_obj.error_message = None
@@ -136,7 +152,7 @@ def cleanup_all_resources(
         result.errors.append(error_msg)
 
     # Commit database changes
-    if options.clean_database:
+    if options.clean_database or options.delete_database_records:
         try:
             db.commit()
         except Exception as e:

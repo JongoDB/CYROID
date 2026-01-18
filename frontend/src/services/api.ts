@@ -871,6 +871,7 @@ export const scenariosApi = {
 
 export interface CleanupRequest {
   clean_database?: boolean
+  delete_database_records?: boolean
   force?: boolean
 }
 
@@ -879,6 +880,7 @@ export interface CleanupResult {
   containers_removed: number
   networks_removed: number
   database_records_updated: number
+  database_records_deleted: number
   errors: string[]
   orphaned_resources_cleaned: number
 }

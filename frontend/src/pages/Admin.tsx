@@ -37,7 +37,7 @@ export default function Admin() {
   const [cleanupLoading, setCleanupLoading] = useState(false)
   const [cleanupResult, setCleanupResult] = useState<CleanupResult | null>(null)
   const [showCleanupConfirm, setShowCleanupConfirm] = useState(false)
-  const [cleanupOptions, setCleanupOptions] = useState({ clean_database: true, force: false })
+  const [cleanupOptions, setCleanupOptions] = useState({ clean_database: true, delete_database_records: false, force: false })
 
   // Users tab state
   const [users, setUsers] = useState<User[]>([])
@@ -486,6 +486,10 @@ export default function Admin() {
                         <span className="ml-2 font-medium">{cleanupResult.database_records_updated}</span>
                       </div>
                       <div>
+                        <span className="text-gray-500">DB records deleted:</span>
+                        <span className="ml-2 font-medium">{cleanupResult.database_records_deleted}</span>
+                      </div>
+                      <div>
                         <span className="text-gray-500">Orphaned resources:</span>
                         <span className="ml-2 font-medium">{cleanupResult.orphaned_resources_cleaned}</span>
                       </div>
@@ -504,15 +508,25 @@ export default function Admin() {
                 )}
 
                 <div className="space-y-4">
-                  <div className="flex items-center gap-4">
+                  <div className="flex flex-col gap-3">
                     <label className="flex items-center gap-2">
                       <input
                         type="checkbox"
                         checked={cleanupOptions.clean_database}
-                        onChange={(e) => setCleanupOptions({ ...cleanupOptions, clean_database: e.target.checked })}
-                        className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                        onChange={(e) => setCleanupOptions({ ...cleanupOptions, clean_database: e.target.checked, delete_database_records: false })}
+                        disabled={cleanupOptions.delete_database_records}
+                        className="rounded border-gray-300 text-primary-600 focus:ring-primary-500 disabled:opacity-50"
                       />
-                      <span className="text-sm text-gray-700">Reset database records</span>
+                      <span className="text-sm text-gray-700">Reset database records (resets ranges to draft state)</span>
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={cleanupOptions.delete_database_records}
+                        onChange={(e) => setCleanupOptions({ ...cleanupOptions, delete_database_records: e.target.checked, clean_database: !e.target.checked })}
+                        className="rounded border-gray-300 text-red-600 focus:ring-red-500"
+                      />
+                      <span className="text-sm text-red-700 font-medium">Delete ALL ranges from database (permanent)</span>
                     </label>
                   </div>
 
@@ -562,7 +576,9 @@ export default function Admin() {
                       <ul className="mt-2 text-sm text-red-700 list-disc list-inside">
                         <li>Stop and remove all VM containers</li>
                         <li>Remove all range networks</li>
-                        {cleanupOptions.clean_database && (
+                        {cleanupOptions.delete_database_records ? (
+                          <li className="font-bold">DELETE all ranges, VMs, and networks from database (PERMANENT)</li>
+                        ) : cleanupOptions.clean_database && (
                           <li>Reset all database records to draft state</li>
                         )}
                       </ul>
