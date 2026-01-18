@@ -730,3 +730,46 @@ export interface WalkthroughProgress {
   current_step: string | null
   updated_at: string
 }
+
+// Training Scenarios
+export interface ScenarioEvent {
+  sequence: number
+  delay_minutes: number
+  title: string
+  description?: string
+  target_role: string
+  actions: Array<{
+    type: string
+    [key: string]: any
+  }>
+}
+
+export interface Scenario {
+  id: string
+  name: string
+  description: string
+  category: 'red-team' | 'blue-team' | 'insider-threat'
+  difficulty: 'beginner' | 'intermediate' | 'advanced'
+  duration_minutes: number
+  event_count: number
+  required_roles: string[]
+  is_seed: boolean
+  seed_id?: string
+  created_at: string
+  updated_at: string
+}
+
+export interface ScenarioDetail extends Scenario {
+  events: ScenarioEvent[]
+}
+
+export interface ApplyScenarioRequest {
+  scenario_id: string
+  role_mapping: Record<string, string>  // role -> VM ID
+}
+
+export interface ApplyScenarioResponse {
+  msel_id: string
+  inject_count: number
+  status: string
+}

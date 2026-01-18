@@ -160,7 +160,7 @@ export const usersApi = {
 }
 
 // Templates API
-import type { VMTemplate, Range, Network, VM, EventLog, EventLogList, VMStatsResponse, VMLogsResponse, ResourceTagsResponse, Walkthrough, WalkthroughProgress, DeploymentStatusResponse } from '../types'
+import type { VMTemplate, Range, Network, VM, EventLog, EventLogList, VMStatsResponse, VMLogsResponse, ResourceTagsResponse, Walkthrough, WalkthroughProgress, DeploymentStatusResponse, Scenario, ScenarioDetail, ApplyScenarioRequest, ApplyScenarioResponse } from '../types'
 
 export interface VMTemplateCreate {
   name: string
@@ -215,6 +215,10 @@ export const rangesApi = {
   teardown: (id: string) => api.post<Range>(`/ranges/${id}/teardown`),
   getDeploymentStatus: (rangeId: string) =>
     api.get<DeploymentStatusResponse>(`/ranges/${rangeId}/deployment-status`),
+
+  // Apply training scenario
+  applyScenario: (rangeId: string, data: ApplyScenarioRequest) =>
+    api.post<ApplyScenarioResponse>(`/ranges/${rangeId}/scenario`, data),
 
   // Comprehensive Export/Import (v2.0)
   exportFull: async (id: string, options: ExportRequest) => {
@@ -769,5 +773,17 @@ export const instancesApi = {
   clone: (id: string) => api.post<Instance>(`/instances/${id}/clone`),
   delete: (id: string) => api.delete(`/instances/${id}`),
 };
+
+// Scenarios API
+export const scenariosApi = {
+  list: (category?: string, difficulty?: string) => {
+    const params = new URLSearchParams()
+    if (category) params.append('category', category)
+    if (difficulty) params.append('difficulty', difficulty)
+    const query = params.toString()
+    return api.get<Scenario[]>(`/scenarios${query ? `?${query}` : ''}`)
+  },
+  get: (id: string) => api.get<ScenarioDetail>(`/scenarios/${id}`),
+}
 
 export default api
