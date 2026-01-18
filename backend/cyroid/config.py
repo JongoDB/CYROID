@@ -1,12 +1,37 @@
 # backend/cyroid/config.py
 import os
+import subprocess
 from pydantic_settings import BaseSettings
 from functools import lru_cache
 
 
+def _get_version_from_git() -> str:
+    """Get version from git tag, env var, or fallback to 'dev'."""
+    # First check environment variable (for Docker builds)
+    if version := os.environ.get("APP_VERSION"):
+        return version
+
+    # Try to get from git tag
+    try:
+        result = subprocess.run(
+            ["git", "describe", "--tags", "--abbrev=0"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            tag = result.stdout.strip()
+            # Strip 'v' prefix if present (v0.9.0 -> 0.9.0)
+            return tag.lstrip("v")
+    except (subprocess.SubprocessError, FileNotFoundError):
+        pass
+
+    return "dev"
+
+
 class Settings(BaseSettings):
-    # Application version
-    app_version: str = "0.8.5"
+    # Application version (from git tag, APP_VERSION env, or "dev")
+    app_version: str = _get_version_from_git()
     git_commit: str = os.environ.get("GIT_COMMIT", "dev")
     build_date: str = os.environ.get("BUILD_DATE", "")
 
