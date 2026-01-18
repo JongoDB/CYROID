@@ -1,0 +1,77 @@
+seed_id: insider-threat
+name: Insider Threat
+description: |
+  Simulates a malicious insider scenario where an employee with legitimate
+  access exfiltrates sensitive data. Covers after-hours access, unauthorized
+  data access, data staging, and exfiltration attempts.
+category: insider-threat
+difficulty: beginner
+duration_minutes: 45
+required_roles:
+  - workstation
+  - file-server
+
+events:
+  - sequence: 1
+    delay_minutes: 0
+    title: "Initial Access - After-hours login"
+    description: "Employee logs in outside normal business hours"
+    target_role: workstation
+    actions:
+      - type: create_file
+        path: "C:\\Users\\Public\\login_timestamp.txt"
+        content: "Login at 11:45 PM - Outside business hours"
+
+  - sequence: 2
+    delay_minutes: 10
+    title: "Collection - Browse sensitive shares"
+    description: "Employee accesses restricted file shares"
+    target_role: file-server
+    actions:
+      - type: execute_command
+        command: "dir \\\\file-server\\Confidential"
+
+  - sequence: 3
+    delay_minutes: 20
+    title: "Collection - Copy sensitive files"
+    description: "Employee copies sensitive files to staging folder"
+    target_role: workstation
+    actions:
+      - type: create_file
+        path: "C:\\Users\\Public\\staging\\customer_data.xlsx"
+        content: "Simulated sensitive customer data"
+      - type: create_file
+        path: "C:\\Users\\Public\\staging\\financial_report.pdf"
+        content: "Simulated financial report"
+
+  - sequence: 4
+    delay_minutes: 30
+    title: "Collection - Create archive"
+    description: "Employee creates archive of staged files"
+    target_role: workstation
+    actions:
+      - type: create_file
+        path: "C:\\Users\\Public\\backup.zip"
+        content: "Simulated data archive"
+
+  - sequence: 5
+    delay_minutes: 35
+    title: "Exfiltration - Email to personal address"
+    description: "Employee attempts to email archive to personal account"
+    target_role: workstation
+    actions:
+      - type: create_file
+        path: "C:\\Users\\Public\\outbound_email.eml"
+        content: |
+          To: personal@gmail.com
+          Subject: Backup files
+          Attachment: backup.zip
+
+  - sequence: 6
+    delay_minutes: 40
+    title: "Defense Evasion - Delete staging folder"
+    description: "Employee deletes staging folder to cover tracks"
+    target_role: workstation
+    actions:
+      - type: execute_command
+        command: "rmdir /s /q C:\\Users\\Public\\staging"
