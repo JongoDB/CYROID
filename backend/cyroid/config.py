@@ -5,13 +5,22 @@ from pydantic_settings import BaseSettings
 from functools import lru_cache
 
 
-def _get_version_from_git() -> str:
-    """Get version from git tag, env var, or fallback to 'dev'."""
+def _get_version() -> str:
+    """Get version from VERSION file, env var, git tag, or fallback to 'dev'."""
     # First check environment variable (for Docker builds)
     if version := os.environ.get("APP_VERSION"):
         return version
 
-    # Try to get from git tag
+    # Try VERSION file (works in Docker with volume mounts)
+    version_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), "VERSION")
+    try:
+        with open(version_file) as f:
+            if version := f.read().strip():
+                return version
+    except (FileNotFoundError, IOError):
+        pass
+
+    # Try git tag (works in local dev without Docker)
     try:
         result = subprocess.run(
             ["git", "describe", "--tags", "--abbrev=0"],
@@ -30,8 +39,8 @@ def _get_version_from_git() -> str:
 
 
 class Settings(BaseSettings):
-    # Application version (from git tag, APP_VERSION env, or "dev")
-    app_version: str = _get_version_from_git()
+    # Application version (from VERSION file, APP_VERSION env, git tag, or "dev")
+    app_version: str = _get_version()
     git_commit: str = os.environ.get("GIT_COMMIT", "dev")
     build_date: str = os.environ.get("BUILD_DATE", "")
 
