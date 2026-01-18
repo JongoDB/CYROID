@@ -15,12 +15,14 @@ class EventLogBase(BaseModel):
 class EventLogCreate(EventLogBase):
     range_id: UUID
     vm_id: Optional[UUID] = None
+    network_id: Optional[UUID] = None
 
 
 class EventLogResponse(EventLogBase):
     id: UUID
     range_id: UUID
     vm_id: Optional[UUID]
+    network_id: Optional[UUID]
     created_at: datetime
 
     class Config:
