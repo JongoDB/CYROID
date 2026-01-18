@@ -89,8 +89,12 @@ class VMTemplate(Base, UUIDMixin, TimestampMixin):
     iso_url_arm64: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     native_arch: Mapped[str] = mapped_column(String(20), default='x86_64')  # 'x86_64', 'arm64', or 'both'
 
+    # Built-in template identification
+    is_seed: Mapped[bool] = mapped_column(default=False)  # True for templates shipped with CYROID
+    seed_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, unique=True)  # e.g., "kali-attack"
+
     # Ownership
-    created_by: Mapped[UUID] = mapped_column(ForeignKey("users.id"))
+    created_by: Mapped[Optional[UUID]] = mapped_column(ForeignKey("users.id"), nullable=True)  # Nullable for seed templates
     created_by_user = relationship("User", back_populates="templates")
 
     # Relationships

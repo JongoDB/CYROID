@@ -33,6 +33,19 @@ async def lifespan(app: FastAPI):
     """Application lifespan events for startup and shutdown."""
     # Startup
     from cyroid.services.event_broadcaster import get_connection_manager, get_broadcaster
+    from cyroid.services.template_seeder import seed_all_templates
+    from cyroid.database import SessionLocal
+
+    # Seed built-in templates
+    logger.info("Checking seed templates...")
+    try:
+        db = SessionLocal()
+        seeded = seed_all_templates(db)
+        if seeded:
+            logger.info(f"Seeded {len(seeded)} templates")
+        db.close()
+    except Exception as e:
+        logger.warning(f"Template seeding skipped: {e}")
 
     logger.info("Starting real-time event services...")
     connection_manager = get_connection_manager()

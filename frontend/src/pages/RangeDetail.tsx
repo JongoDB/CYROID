@@ -4,7 +4,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom'
 import { rangesApi, networksApi, vmsApi, templatesApi, NetworkCreate, VMCreate } from '../services/api'
 import type { Range, Network, VM, VMTemplate, RealtimeEvent } from '../types'
 import {
-  ArrowLeft, Plus, Loader2, X, Play, Square, RotateCw,
+  ArrowLeft, Plus, Loader2, X, Play, Square, RotateCw, Camera,
   Network as NetworkIcon, Server, Trash2, Rocket, Activity, Monitor, Shield, Download, Pencil, Globe, Router, Wifi, Radio, Wrench, BookOpen, LayoutTemplate
 } from 'lucide-react'
 import clsx from 'clsx'
@@ -21,6 +21,7 @@ import { DiagnosticsTab } from '../components/diagnostics'
 import { ActivityTab } from '../components/range/ActivityTab'
 import { ConfirmDialog } from '../components/common/ConfirmDialog'
 import { SaveBlueprintModal } from '../components/blueprints'
+import { CreateSnapshotModal } from '../components/range/CreateSnapshotModal'
 
 const statusColors: Record<string, string> = {
   draft: 'bg-gray-100 text-gray-800',
@@ -144,6 +145,9 @@ export default function RangeDetail() {
     item: Network | VM | null
     isLoading: boolean
   }>({ type: null, item: null, isLoading: false })
+
+  // Snapshot modal state
+  const [snapshotVm, setSnapshotVm] = useState<VM | null>(null)
 
   // Architecture detection for emulation warning
   const isArmHost = useIsArmHost()
@@ -1015,6 +1019,13 @@ export default function RangeDetail() {
                             title="Restart"
                           >
                             <RotateCw className="h-4 w-4" />
+                          </button>
+                          <button
+                            onClick={() => setSnapshotVm(vm)}
+                            className="p-1.5 text-gray-400 hover:text-purple-600"
+                            title="Create Snapshot"
+                          >
+                            <Camera className="h-4 w-4" />
                           </button>
                         </>
                       )}
@@ -1954,6 +1965,18 @@ export default function RangeDetail() {
         onConfirm={deleteConfirm.type === 'network' ? confirmDeleteNetwork : confirmDeleteVm}
         onCancel={() => setDeleteConfirm({ type: null, item: null, isLoading: false })}
         isLoading={deleteConfirm.isLoading}
+      />
+
+      {/* Create Snapshot Modal */}
+      <CreateSnapshotModal
+        vmId={snapshotVm?.id || ''}
+        hostname={snapshotVm?.hostname || ''}
+        isOpen={snapshotVm !== null}
+        onClose={() => setSnapshotVm(null)}
+        onSuccess={() => {
+          setSnapshotVm(null)
+          // Optionally refresh data if needed
+        }}
       />
     </div>
   )

@@ -592,6 +592,32 @@ export const walkthroughApi = {
     api.put<WalkthroughProgress>(`/ranges/${rangeId}/walkthrough/progress`, data),
 }
 
+// Snapshots API (for creating snapshots from VMs)
+import type { Snapshot } from '../types'
+
+export interface SnapshotCreate {
+  vm_id: string
+  name: string
+  description?: string
+}
+
+export const snapshotsApi = {
+  create: (data: SnapshotCreate) =>
+    api.post<Snapshot>('/snapshots', data),
+
+  list: (vmId?: string) =>
+    api.get<Snapshot[]>('/snapshots', { params: vmId ? { vm_id: vmId } : {} }),
+
+  get: (id: string) =>
+    api.get<Snapshot>(`/snapshots/${id}`),
+
+  restore: (id: string) =>
+    api.post<Snapshot>(`/snapshots/${id}/restore`),
+
+  delete: (id: string) =>
+    api.delete(`/snapshots/${id}`),
+}
+
 // ============ Blueprint Types ============
 
 export interface NetworkConfig {

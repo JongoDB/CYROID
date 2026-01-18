@@ -5,6 +5,42 @@ All notable changes to CYROID will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-01-17
+
+### Added
+
+- **CYROID Kali Attack Box** ([#28](../../issues/28)): Custom Docker image with comprehensive offensive security toolkit.
+  - Based on `kasmweb/core-kali-rolling` with KasmVNC desktop access
+  - Includes: Metasploit, Impacket suite, BloodHound, CrackMapExec, Evil-WinRM
+  - Password tools: Hashcat, John, Hydra, Responder
+  - Tunneling: Chisel, Ligolo-ng, Proxychains
+  - Web testing: Feroxbuster, FFuf, SQLMap, Nikto
+  - Wordlists: Rockyou, SecLists
+  - PEAS scripts for privilege escalation
+  - Multi-architecture support (x86_64 and ARM64)
+
+- **Samba AD Domain Controller** ([#29](../../issues/29)): Docker image for Active Directory functionality on ARM64.
+  - Full AD DC using Samba with LDAP, Kerberos, DNS
+  - Works on Apple Silicon and other ARM64 hosts
+  - Environment variable configuration for realm, domain, admin password
+  - Optional test user creation
+
+- **Built-in Template Repository**: Pre-configured templates that ship with CYROID.
+  - Templates: Kali Attack Box, Samba DC, Windows Server 2022 DC, Ubuntu Desktop, Ubuntu Server
+  - Auto-seeded on application startup
+  - New `is_seed` and `seed_id` fields for template identification
+
+- **VM Snapshot UI** ([#28](../../issues/28)): Create snapshots directly from running VMs.
+  - New Camera icon button on VM action bar (visible when VM is running)
+  - CreateSnapshotModal component with name and description fields
+  - Auto-generated snapshot name with hostname and date
+  - Integrates with existing /snapshots API
+
+### Changed
+
+- Template model now supports nullable `created_by` for seed templates
+- Application startup seeds built-in templates if not already present
+
 ## [0.6.3] - 2026-01-17
 
 ### Added

@@ -1,0 +1,31 @@
+# CYROID Windows Server 2022 Domain Controller Template
+# Full Windows Server 2022 via dockur/windows
+
+seed_id: windows-dc-2022
+name: "Windows Server 2022 DC"
+description: |
+  Windows Server 2022 configured for Active Directory Domain Controller role.
+  After deployment: Install AD DS role via Server Manager, promote to DC,
+  then create a golden image snapshot for rapid redeployment.
+
+os_type: windows
+os_variant: "Windows Server 2022"
+vm_type: windows_vm
+base_image: dockurr/windows:latest
+
+default_cpu: 4
+default_ram_mb: 8192
+default_disk_gb: 80
+
+native_arch: x86_64
+
+tags:
+  - infrastructure
+  - active-directory
+  - domain-controller
+  - windows
+  - server
+
+config:
+  windows_version: "2022"
+  display_type: server

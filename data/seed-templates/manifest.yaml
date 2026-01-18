@@ -1,0 +1,46 @@
+# CYROID Seed Templates Manifest
+# These templates ship with CYROID and are automatically seeded on first boot
+
+version: 1
+
+templates:
+  # ============ Offensive Security ============
+  - seed_id: kali-attack
+    file: kali-attack.yaml
+    category: offensive
+    arch: both
+
+  # ============ Infrastructure / Domain Controllers ============
+  - seed_id: samba-dc
+    file: samba-dc.yaml
+    category: infrastructure
+    arch: both
+    description: "ARM-compatible AD DC using Samba"
+
+  - seed_id: windows-dc-2022
+    file: windows-dc-2022.yaml
+    category: infrastructure
+    arch: x86_64
+    description: "Windows Server 2022 Domain Controller"
+
+  # ============ Desktop Environments ============
+  - seed_id: ubuntu-desktop
+    file: ubuntu-desktop.yaml
+    category: desktop
+    arch: both
+
+  - seed_id: kali-desktop
+    file: kali-desktop.yaml
+    category: desktop
+    arch: both
+
+  # ============ Server Environments ============
+  - seed_id: ubuntu-server
+    file: ubuntu-server.yaml
+    category: server
+    arch: both
+
+  - seed_id: windows-server-2022
+    file: windows-server-2022.yaml
+    category: server
+    arch: x86_64

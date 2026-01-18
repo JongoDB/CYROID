@@ -1,0 +1,25 @@
+# CYROID Kali Desktop Template
+# Standard Kali rolling desktop (lighter than attack box)
+
+seed_id: kali-desktop
+name: "Kali Desktop"
+description: |
+  Standard Kali Linux rolling release desktop with VNC access.
+  Includes basic Kali tools (kali-tools-top10). For full pentesting toolkit,
+  use the "Kali Attack Box" template instead.
+
+os_type: linux
+os_variant: "Kali Linux (Desktop)"
+vm_type: container
+base_image: kasmweb/kali-rolling-desktop:1.15.0
+
+default_cpu: 2
+default_ram_mb: 4096
+default_disk_gb: 30
+
+native_arch: both
+
+tags:
+  - desktop
+  - kali
+  - security
