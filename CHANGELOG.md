@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Seed Templates Not Visible** - Fixed query in templates API that excluded seed templates from non-admin users. Seed templates (built-in CYROID templates) are now always visible to all users regardless of visibility tag settings.
 - **Seed Templates Not Mounted** - Added volume mount for `data/seed-templates` directory in docker-compose.yml so the API container can access seed template YAML files.
+- **Template Response Schema** - Allow null `created_by` in template response for seed templates. Added `is_seed` and `seed_id` fields to response schema.
 
 ## [0.7.2] - 2026-01-18
 
