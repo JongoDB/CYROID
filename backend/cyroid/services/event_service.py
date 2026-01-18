@@ -21,6 +21,7 @@ class EventService:
         event_type: EventType,
         message: str,
         vm_id: Optional[UUID] = None,
+        network_id: Optional[UUID] = None,
         extra_data: Optional[str] = None,
         broadcast: bool = True
     ) -> EventLog:
@@ -32,6 +33,7 @@ class EventService:
             event_type: Type of event
             message: Human-readable message
             vm_id: Optional VM this event relates to
+            network_id: Optional network this event relates to
             extra_data: Optional JSON string with additional data
             broadcast: Whether to broadcast to WebSocket clients (default True)
 
@@ -41,6 +43,7 @@ class EventService:
         event = EventLog(
             range_id=range_id,
             vm_id=vm_id,
+            network_id=network_id,
             event_type=event_type,
             message=message,
             extra_data=extra_data
@@ -82,6 +85,7 @@ class EventService:
                     message=event.message,
                     range_id=event.range_id,
                     vm_id=event.vm_id,
+                    network_id=event.network_id,
                     data=data
                 ))
             except RuntimeError:
@@ -91,6 +95,7 @@ class EventService:
                     message=event.message,
                     range_id=event.range_id,
                     vm_id=event.vm_id,
+                    network_id=event.network_id,
                     data=data
                 ))
 

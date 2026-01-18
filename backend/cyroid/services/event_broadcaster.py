@@ -31,6 +31,7 @@ class RealtimeEvent(BaseModel):
     event_type: str
     range_id: Optional[str] = None
     vm_id: Optional[str] = None
+    network_id: Optional[str] = None
     message: str
     data: Optional[Dict[str, Any]] = None
     timestamp: str
@@ -82,6 +83,7 @@ class EventBroadcaster:
         message: str,
         range_id: Optional[UUID] = None,
         vm_id: Optional[UUID] = None,
+        network_id: Optional[UUID] = None,
         data: Optional[Dict[str, Any]] = None
     ) -> None:
         """
@@ -92,6 +94,7 @@ class EventBroadcaster:
             message: Human-readable message
             range_id: Associated range ID
             vm_id: Associated VM ID
+            network_id: Associated network ID
             data: Additional event data
         """
         if self._redis is None:
@@ -101,6 +104,7 @@ class EventBroadcaster:
             event_type=event_type,
             range_id=str(range_id) if range_id else None,
             vm_id=str(vm_id) if vm_id else None,
+            network_id=str(network_id) if network_id else None,
             message=message,
             data=data,
             timestamp=datetime.utcnow().isoformat()
@@ -299,6 +303,7 @@ async def broadcast_event(
     message: str,
     range_id: Optional[UUID] = None,
     vm_id: Optional[UUID] = None,
+    network_id: Optional[UUID] = None,
     data: Optional[Dict[str, Any]] = None
 ) -> None:
     """
@@ -312,5 +317,6 @@ async def broadcast_event(
         message=message,
         range_id=range_id,
         vm_id=vm_id,
+        network_id=network_id,
         data=data
     )
