@@ -178,7 +178,18 @@
       "Bash(gh pr comment:*)",
       "Bash(./scripts/tag-release.sh:*)",
       "Bash(gh issue comment:*)",
-      "Bash(gh issue edit:*)"
+      "Bash(gh issue edit:*)",
+      "Bash(docker-compose port:*)",
+      "mcp__plugin_playwright_playwright__browser_run_code",
+      "Bash(while read net)",
+      "Bash(do echo \"=== $net ===\" docker network inspect \"$net\" --format '{{range .IPAM.Config}}{{.Subnet}}{{end}}' done)",
+      "Bash(/Users/JonWFH/jondev/CYROID/scripts/init-networks.sh:*)",
+      "Bash(./scripts/init-networks.sh:*)",
+      "Bash(# Create a test password hash and update the user for testing docker exec cyroid-api-1 python -c \"\" from passlib.context import CryptContext pwd_context = CryptContext\\(schemes=[''bcrypt''], deprecated=''auto''\\) hashed = pwd_context.hash\\(''testadmin123''\\) print\\(hashed\\) \"\")",
+      "Bash(# Check DinD containers docker ps -a --filter \"\"name=cyroid-range\"\" --format \"\"table {{.Names}}\\\\t{{.Status}}\\\\t{{.Ports}}\"\" # Check ranges network docker network inspect cyroid-ranges)",
+      "Bash(# Update version\necho \"\"0.11.2\"\" > backend/VERSION\n\n# Stage the changes\ngit add backend/cyroid/api/ranges.py  backend/cyroid/services/dind_service.py  backend/cyroid/services/range_deployment_service.py  backend/cyroid/tasks/deployment.py  backend/VERSION\n\n# Commit\ngit commit -m \"\"$\\(cat <<''EOF''\nfix: wire up DinD-based range deployment\n\n- Update ranges.py deploy endpoint to use RangeDeploymentService\n  instead of legacy VyOS-based deployment\n- Fix dind_service.py wait logic - create DockerClient inside retry\n  loop since it connects on initialization\n- Fix range_deployment_service.py to use template.base_image instead\n  of non-existent template.image attribute\n- Update deployment.py task to use DinD deployment service\n\nRanges now deploy inside isolated DinD containers with their own\nDocker networks and VMs, providing proper network isolation between\nconcurrent range instances.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\"\")",
+      "Bash(PYTHONDONTWRITEBYTECODE=1 python3:*)",
+      "Bash(docker-compose:*)"
     ]
   },
   "enableAllProjectMcpServers": true,
