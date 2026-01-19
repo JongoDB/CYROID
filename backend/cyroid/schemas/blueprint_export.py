@@ -92,5 +92,6 @@ class BlueprintImportResult(BaseModel):
     blueprint_name: Optional[str] = None
     templates_created: List[str] = []
     templates_skipped: List[str] = []
+    images_built: List[str] = []
     errors: List[str] = []
     warnings: List[str] = []
