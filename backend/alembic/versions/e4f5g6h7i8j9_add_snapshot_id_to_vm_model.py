@@ -35,12 +35,24 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    from sqlalchemy import text
+
     # Remove snapshot_id foreign key and column
     op.drop_constraint('fk_vms_snapshot_id', 'vms', type_='foreignkey')
     op.drop_column('vms', 'snapshot_id')
 
-    # Make template_id not nullable again
-    # Note: This may fail if there are VMs with null template_id
+    # Check if any VMs have null template_id before making it non-nullable
+    conn = op.get_bind()
+    result = conn.execute(text("SELECT COUNT(*) FROM vms WHERE template_id IS NULL"))
+    count = result.scalar()
+
+    if count > 0:
+        raise ValueError(
+            f"Cannot downgrade: {count} VMs exist with null template_id. "
+            "Delete these VMs or assign templates before downgrading."
+        )
+
+    # Make template_id not nullable again (safe if check passed)
     op.alter_column('vms', 'template_id',
                existing_type=sa.UUID(),
                nullable=False)
