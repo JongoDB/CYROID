@@ -292,13 +292,8 @@ def delete_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
             logger.info(f"Deleting DinD container for range {range_id}")
 
             # Run async delete_range_container
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                loop.run_until_complete(dind.delete_range_container(str(range_id)))
-                logger.info(f"Successfully deleted DinD container for range {range_id}")
-            finally:
-                loop.close()
+            asyncio.run(dind.delete_range_container(str(range_id)))
+            logger.info(f"Successfully deleted DinD container for range {range_id}")
 
             # Clear the Docker client cache for this range
             docker.dind_service.close_range_client(str(range_id))
@@ -389,15 +384,8 @@ def deploy_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
         deployment_service = get_range_deployment_service()
 
         # Run async deployment synchronously
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            result = loop.run_until_complete(
-                deployment_service.deploy_range(db, range_id)
-            )
-            logger.info(f"DinD deployment completed for range {range_id}: {result}")
-        finally:
-            loop.close()
+        result = asyncio.run(deployment_service.deploy_range(db, range_id))
+        logger.info(f"DinD deployment completed for range {range_id}: {result}")
 
         # Refresh range object to get updated status
         db.refresh(range_obj)
@@ -475,23 +463,15 @@ def start_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
             logger.info(f"Starting DinD-based range {range_id}")
 
             # Step 0: Ensure the DinD container itself is running
-            # Use asyncio to run the async start_range_container method
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                dind_info = loop.run_until_complete(
-                    dind.start_range_container(str(range_id))
-                )
-                logger.info(f"DinD container started/confirmed running: {dind_info}")
+            dind_info = asyncio.run(dind.start_range_container(str(range_id)))
+            logger.info(f"DinD container started/confirmed running: {dind_info}")
 
-                # Update docker_url in case IP changed after restart
-                if dind_info.get("docker_url") and dind_info["docker_url"] != range_obj.dind_docker_url:
-                    range_obj.dind_docker_url = dind_info["docker_url"]
-                    range_obj.dind_mgmt_ip = dind_info.get("mgmt_ip")
-                    db.commit()
-                    logger.info(f"Updated DinD Docker URL to {dind_info['docker_url']}")
-            finally:
-                loop.close()
+            # Update docker_url in case IP changed after restart
+            if dind_info.get("docker_url") and dind_info["docker_url"] != range_obj.dind_docker_url:
+                range_obj.dind_docker_url = dind_info["docker_url"]
+                range_obj.dind_mgmt_ip = dind_info.get("mgmt_ip")
+                db.commit()
+                logger.info(f"Updated DinD Docker URL to {dind_info['docker_url']}")
 
             # Get Docker client for the inner Docker daemon
             range_client = docker.get_range_client_sync(
@@ -525,36 +505,12 @@ def start_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
                         logger.warning(f"Failed to start VM {vm.hostname}: {e}")
 
         else:
-            # Legacy non-DinD deployment (fallback)
-            # Range must have been deployed with DinD to start - otherwise redeploy is required
-            if not range_obj.dind_container_id:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Range has no DinD container. Please redeploy the range.",
-                )
-
-            logger.info(f"Starting legacy (non-DinD) range {range_id}")
-            vyos = get_vyos_service()
-
-            # Step 1: Start the router first (VMs need networking)
-            range_router = db.query(RangeRouter).filter(RangeRouter.range_id == range_id).first()
-            if range_router and range_router.container_id:
-                try:
-                    vyos.start_router(range_router.container_id)
-                    range_router.status = RouterStatus.RUNNING
-                    db.commit()
-                    logger.info(f"Started VyOS router for range {range_id}")
-                except Exception as e:
-                    logger.warning(f"Failed to start VyOS router: {e}")
-
-            # Step 2: Start all VM containers
-            vms = db.query(VM).filter(VM.range_id == range_id).all()
-            for vm in vms:
-                if vm.container_id:
-                    docker.start_container(vm.container_id)
-                    vm.status = VMStatus.RUNNING
-                    db.commit()
-                    logger.info(f"Started VM {vm.hostname}")
+            # Range must have both dind_container_id and dind_docker_url to start
+            # If either is missing, the range needs to be redeployed
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Range is missing DinD configuration. Please redeploy the range.",
+            )
 
         range_obj.status = RangeStatus.RUNNING
         # Set lifecycle timestamp
@@ -695,6 +651,8 @@ def stop_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
         )
         db.refresh(range_obj)
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to stop range {range_id}: {e}")
         raise HTTPException(
