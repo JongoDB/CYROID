@@ -8,6 +8,7 @@ instances using the same blueprint IPs.
 
 import asyncio
 import logging
+import re
 from typing import List, Optional
 
 import docker
@@ -414,9 +415,53 @@ class DinDService:
         short_id = str(range_id).replace("-", "")[:12]
         return f"cyroid-range-{short_id}"
 
+    def _validate_network_name(self, name: str) -> bool:
+        """
+        Validate network name is safe for iptables rules.
+
+        Prevents command injection by ensuring network names contain only
+        safe characters (alphanumeric, underscore, hyphen).
+
+        Args:
+            name: Network name to validate
+
+        Returns:
+            True if name is valid, False otherwise
+        """
+        return bool(re.match(r'^[a-zA-Z0-9_-]+$', name))
+
+    def _get_network_bridge_id(
+        self,
+        range_client: docker.DockerClient,
+        network_name: str,
+    ) -> Optional[str]:
+        """
+        Get the bridge interface ID for a network from Docker inside DinD.
+
+        Docker bridge interfaces are named br-{network_id[:12]}, where
+        network_id is the first 12 characters of the network's ID hash.
+
+        Args:
+            range_client: Docker client connected to DinD
+            network_name: Name of the network
+
+        Returns:
+            First 12 chars of network ID, or None if network not found
+        """
+        try:
+            network_obj = range_client.networks.get(network_name)
+            return network_obj.id[:12]
+        except NotFound:
+            logger.warning(f"Network '{network_name}' not found in DinD")
+            return None
+        except Exception as e:
+            logger.error(f"Error getting network ID for '{network_name}': {e}")
+            return None
+
     async def setup_network_isolation_in_dind(
         self,
         range_id: str,
+        docker_url: str,
         networks: List[str],
         allow_internet: Optional[List[str]] = None,
     ) -> None:
@@ -430,6 +475,7 @@ class DinDService:
 
         Args:
             range_id: Range identifier
+            docker_url: Docker daemon URL inside DinD (tcp://ip:port)
             networks: List of network names in this range
             allow_internet: Networks that should have internet access (via DinD NAT)
         """
@@ -446,8 +492,45 @@ class DinDService:
             logger.error(f"Error getting DinD container {container_name}: {e}")
             return
 
+        # Get range client to query network IDs from Docker inside DinD
+        try:
+            range_client = self.get_range_client(range_id, docker_url)
+        except Exception as e:
+            logger.error(f"Cannot connect to Docker daemon in DinD: {e}")
+            return
+
+        # Validate network names to prevent command injection
+        validated_networks = []
+        for network in networks:
+            if not self._validate_network_name(network):
+                logger.error(f"Invalid network name rejected: {network}")
+                continue
+            validated_networks.append(network)
+
+        validated_allow_internet = []
+        for network in allow_internet:
+            if not self._validate_network_name(network):
+                logger.error(f"Invalid network name rejected for internet access: {network}")
+                continue
+            validated_allow_internet.append(network)
+
+        # Build mapping of network names to bridge IDs
+        network_bridge_ids = {}
+        for network in set(validated_networks + validated_allow_internet):
+            bridge_id = self._get_network_bridge_id(range_client, network)
+            if bridge_id:
+                network_bridge_ids[network] = bridge_id
+            else:
+                logger.warning(f"Skipping network '{network}' - could not resolve bridge ID")
+
         # Build list of iptables rules to apply
         rules = []
+
+        # Flush existing FORWARD rules for idempotency (allows re-running safely)
+        rules.append("iptables -F FORWARD")
+
+        # Flush NAT POSTROUTING rules for idempotency
+        rules.append("iptables -t nat -F POSTROUTING")
 
         # Default: drop forwarding between networks
         rules.append("iptables -P FORWARD DROP")
@@ -458,25 +541,25 @@ class DinDService:
         )
 
         # Allow traffic within each network (same Docker bridge)
-        # Docker bridge names are based on network ID, but we use a simpler approach
-        # by allowing all traffic on the same interface
-        for network in networks:
-            # Allow loopback within each network
-            # Note: Docker internally handles same-network communication,
-            # but we add explicit rules for clarity
-            bridge_prefix = network[:12]  # Docker truncates to 12 chars
+        for network in validated_networks:
+            bridge_id = network_bridge_ids.get(network)
+            if not bridge_id:
+                continue
+            # Allow traffic on the same bridge interface
             rules.append(
-                f"iptables -A FORWARD -i br-{bridge_prefix} -o br-{bridge_prefix} -j ACCEPT"
+                f"iptables -A FORWARD -i br-{bridge_id} -o br-{bridge_id} -j ACCEPT"
             )
 
         # Allow internet access for specified networks
-        for network in allow_internet:
-            bridge_prefix = network[:12]
+        for network in validated_allow_internet:
+            bridge_id = network_bridge_ids.get(network)
+            if not bridge_id:
+                continue
             # Allow outbound traffic from this network to eth0 (external)
-            rules.append(f"iptables -A FORWARD -i br-{bridge_prefix} -o eth0 -j ACCEPT")
+            rules.append(f"iptables -A FORWARD -i br-{bridge_id} -o eth0 -j ACCEPT")
 
         # Set up NAT/MASQUERADE for internet-enabled networks (once, not per network)
-        if allow_internet:
+        if validated_allow_internet:
             # This allows return traffic from internet
             rules.append("iptables -A FORWARD -i eth0 -m state --state ESTABLISHED,RELATED -j ACCEPT")
             # MASQUERADE for outbound traffic (NAT)
@@ -498,7 +581,7 @@ class DinDService:
 
         logger.info(
             f"Applied network isolation rules for range {range_id} "
-            f"({len(networks)} networks, {len(allow_internet)} with internet)"
+            f"({len(validated_networks)} networks, {len(validated_allow_internet)} with internet)"
         )
 
     async def teardown_network_isolation_in_dind(

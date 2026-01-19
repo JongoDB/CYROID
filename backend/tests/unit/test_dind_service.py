@@ -7,9 +7,16 @@ from unittest.mock import MagicMock, patch, call
 class TestDinDIptables:
     """Tests for iptables isolation inside DinD containers."""
 
+    def _create_mock_network(self, network_id: str):
+        """Create a mock network object with the given ID."""
+        mock_network = MagicMock()
+        mock_network.id = network_id
+        return mock_network
+
     @pytest.mark.asyncio
+    @patch('cyroid.services.dind_service.docker.DockerClient')
     @patch('cyroid.services.dind_service.docker.from_env')
-    async def test_setup_network_isolation_in_dind(self, mock_docker):
+    async def test_setup_network_isolation_in_dind(self, mock_docker, mock_docker_client):
         """Should apply iptables rules inside DinD container."""
         from cyroid.services.dind_service import DinDService
 
@@ -22,10 +29,20 @@ class TestDinDIptables:
         mock_container.exec_run.return_value = (0, b'')
         mock_client.containers.get.return_value = mock_container
 
+        # Mock the range client (Docker client inside DinD)
+        mock_range_client = MagicMock()
+        mock_docker_client.return_value = mock_range_client
+
+        # Mock network lookups inside DinD
+        mock_range_client.networks.get.side_effect = lambda name: self._create_mock_network(
+            f"{name}abcdef123456"  # Fake network ID
+        )
+
         service = DinDService()
 
         await service.setup_network_isolation_in_dind(
             range_id='range-123-abc-456',
+            docker_url='tcp://172.30.1.5:2375',
             networks=['lan', 'dmz'],
             allow_internet=['lan'],  # Only LAN can reach internet
         )
@@ -44,9 +61,52 @@ class TestDinDIptables:
         # Should allow established connections
         assert 'ESTABLISHED' in commands_str
 
+        # Should flush FORWARD chain first (idempotency)
+        assert '-F FORWARD' in commands_str
+
     @pytest.mark.asyncio
+    @patch('cyroid.services.dind_service.docker.DockerClient')
     @patch('cyroid.services.dind_service.docker.from_env')
-    async def test_setup_network_isolation_allows_internet_for_specified_networks(self, mock_docker):
+    async def test_setup_network_isolation_uses_network_id_for_bridge_name(self, mock_docker, mock_docker_client):
+        """Should use network ID (not name) for bridge interface names."""
+        from cyroid.services.dind_service import DinDService
+
+        mock_client = MagicMock()
+        mock_docker.return_value = mock_client
+
+        mock_container = MagicMock()
+        mock_container.exec_run.return_value = (0, b'')
+        mock_client.containers.get.return_value = mock_container
+
+        mock_range_client = MagicMock()
+        mock_docker_client.return_value = mock_range_client
+
+        # Mock network with specific ID that differs from name
+        mock_network = MagicMock()
+        mock_network.id = "abc123def456789012345678"  # Full ID
+        mock_range_client.networks.get.return_value = mock_network
+
+        service = DinDService()
+
+        await service.setup_network_isolation_in_dind(
+            range_id='range-123-abc-456',
+            docker_url='tcp://172.30.1.5:2375',
+            networks=['mynetwork'],
+            allow_internet=[],
+        )
+
+        # Verify the bridge name uses network ID (first 12 chars), not network name
+        exec_calls = mock_container.exec_run.call_args_list
+        commands_str = ' '.join(str(c) for c in exec_calls)
+
+        # Should use br-abc123def456 (from network ID), NOT br-mynetwork
+        assert 'br-abc123def456' in commands_str
+        assert 'br-mynetwork' not in commands_str
+
+    @pytest.mark.asyncio
+    @patch('cyroid.services.dind_service.docker.DockerClient')
+    @patch('cyroid.services.dind_service.docker.from_env')
+    async def test_setup_network_isolation_allows_internet_for_specified_networks(self, mock_docker, mock_docker_client):
         """Should allow internet access only for specified networks."""
         from cyroid.services.dind_service import DinDService
 
@@ -57,10 +117,17 @@ class TestDinDIptables:
         mock_container.exec_run.return_value = (0, b'')
         mock_client.containers.get.return_value = mock_container
 
+        mock_range_client = MagicMock()
+        mock_docker_client.return_value = mock_range_client
+        mock_range_client.networks.get.side_effect = lambda name: self._create_mock_network(
+            f"{name}abcdef123456"
+        )
+
         service = DinDService()
 
         await service.setup_network_isolation_in_dind(
             range_id='range-123-abc-456',
+            docker_url='tcp://172.30.1.5:2375',
             networks=['lan', 'dmz', 'management'],
             allow_internet=['lan', 'management'],
         )
@@ -72,8 +139,9 @@ class TestDinDIptables:
         assert 'MASQUERADE' in commands_str or 'nat' in commands_str
 
     @pytest.mark.asyncio
+    @patch('cyroid.services.dind_service.docker.DockerClient')
     @patch('cyroid.services.dind_service.docker.from_env')
-    async def test_setup_network_isolation_no_internet(self, mock_docker):
+    async def test_setup_network_isolation_no_internet(self, mock_docker, mock_docker_client):
         """Should work with no internet access for any network."""
         from cyroid.services.dind_service import DinDService
 
@@ -84,18 +152,25 @@ class TestDinDIptables:
         mock_container.exec_run.return_value = (0, b'')
         mock_client.containers.get.return_value = mock_container
 
+        mock_range_client = MagicMock()
+        mock_docker_client.return_value = mock_range_client
+        mock_range_client.networks.get.side_effect = lambda name: self._create_mock_network(
+            f"{name}abcdef123456"
+        )
+
         service = DinDService()
 
         # Call with no internet access (air-gapped mode)
         await service.setup_network_isolation_in_dind(
             range_id='range-123-abc-456',
+            docker_url='tcp://172.30.1.5:2375',
             networks=['lan', 'dmz'],
             allow_internet=[],  # No internet for anyone
         )
 
         exec_calls = mock_container.exec_run.call_args_list
-        # Should still apply basic isolation rules
-        assert len(exec_calls) >= 2
+        # Should still apply basic isolation rules (flush + policy + established + per-network)
+        assert len(exec_calls) >= 4
 
     @pytest.mark.asyncio
     @patch('cyroid.services.dind_service.docker.from_env')
@@ -115,13 +190,15 @@ class TestDinDIptables:
         # Should not raise, just log and return
         await service.setup_network_isolation_in_dind(
             range_id='nonexistent-range',
+            docker_url='tcp://172.30.1.5:2375',
             networks=['lan'],
             allow_internet=[],
         )
 
     @pytest.mark.asyncio
+    @patch('cyroid.services.dind_service.docker.DockerClient')
     @patch('cyroid.services.dind_service.docker.from_env')
-    async def test_setup_network_isolation_logs_failed_rules(self, mock_docker):
+    async def test_setup_network_isolation_logs_failed_rules(self, mock_docker, mock_docker_client):
         """Should log warning when iptables rule fails but continue."""
         from cyroid.services.dind_service import DinDService
 
@@ -129,25 +206,118 @@ class TestDinDIptables:
         mock_docker.return_value = mock_client
 
         mock_container = MagicMock()
-        # First rule succeeds, second fails, third succeeds
+        # First few rules succeed, one fails, rest succeed
         mock_container.exec_run.side_effect = [
-            (0, b''),
-            (1, b'iptables: Bad rule'),
-            (0, b''),
+            (0, b''),  # flush FORWARD
+            (0, b''),  # flush NAT
+            (0, b''),  # policy DROP
+            (1, b'iptables: Bad rule'),  # one failure
+            (0, b''),  # continue
+            (0, b''),  # continue
         ]
         mock_client.containers.get.return_value = mock_container
+
+        mock_range_client = MagicMock()
+        mock_docker_client.return_value = mock_range_client
+        mock_range_client.networks.get.side_effect = lambda name: self._create_mock_network(
+            f"{name}abcdef123456"
+        )
 
         service = DinDService()
 
         # Should not raise even with failed rules
         await service.setup_network_isolation_in_dind(
             range_id='range-123-abc-456',
+            docker_url='tcp://172.30.1.5:2375',
             networks=['lan'],
             allow_internet=[],
         )
 
         # Should have attempted all rules despite failure
-        assert mock_container.exec_run.call_count >= 2
+        assert mock_container.exec_run.call_count >= 4
+
+    @pytest.mark.asyncio
+    @patch('cyroid.services.dind_service.docker.DockerClient')
+    @patch('cyroid.services.dind_service.docker.from_env')
+    async def test_setup_network_isolation_rejects_invalid_network_names(self, mock_docker, mock_docker_client):
+        """Should reject network names with invalid characters (command injection prevention)."""
+        from cyroid.services.dind_service import DinDService
+
+        mock_client = MagicMock()
+        mock_docker.return_value = mock_client
+
+        mock_container = MagicMock()
+        mock_container.exec_run.return_value = (0, b'')
+        mock_client.containers.get.return_value = mock_container
+
+        mock_range_client = MagicMock()
+        mock_docker_client.return_value = mock_range_client
+        mock_range_client.networks.get.side_effect = lambda name: self._create_mock_network(
+            f"{name}abcdef123456"
+        )
+
+        service = DinDService()
+
+        # Include a network name with shell metacharacters (potential injection)
+        await service.setup_network_isolation_in_dind(
+            range_id='range-123-abc-456',
+            docker_url='tcp://172.30.1.5:2375',
+            networks=['lan', 'dmz; rm -rf /', 'valid_net'],
+            allow_internet=['lan; cat /etc/passwd'],
+        )
+
+        # Invalid networks should be rejected - verify they're not in any iptables commands
+        exec_calls = mock_container.exec_run.call_args_list
+        commands_str = ' '.join(str(c) for c in exec_calls)
+
+        # Should NOT contain the malicious network names
+        assert 'rm -rf' not in commands_str
+        assert 'cat /etc/passwd' not in commands_str
+        assert '/etc/passwd' not in commands_str
+
+        # Valid networks should still be processed
+        assert 'lan' in commands_str or 'lanabcdef1234' in commands_str
+
+    @pytest.mark.asyncio
+    @patch('cyroid.services.dind_service.docker.DockerClient')
+    @patch('cyroid.services.dind_service.docker.from_env')
+    async def test_setup_network_isolation_is_idempotent(self, mock_docker, mock_docker_client):
+        """Should flush rules before applying (safe to call multiple times)."""
+        from cyroid.services.dind_service import DinDService
+
+        mock_client = MagicMock()
+        mock_docker.return_value = mock_client
+
+        mock_container = MagicMock()
+        mock_container.exec_run.return_value = (0, b'')
+        mock_client.containers.get.return_value = mock_container
+
+        mock_range_client = MagicMock()
+        mock_docker_client.return_value = mock_range_client
+        mock_range_client.networks.get.side_effect = lambda name: self._create_mock_network(
+            f"{name}abcdef123456"
+        )
+
+        service = DinDService()
+
+        await service.setup_network_isolation_in_dind(
+            range_id='range-123-abc-456',
+            docker_url='tcp://172.30.1.5:2375',
+            networks=['lan'],
+            allow_internet=[],
+        )
+
+        exec_calls = mock_container.exec_run.call_args_list
+        commands = [str(c) for c in exec_calls]
+
+        # First commands should be flush operations
+        assert any('-F FORWARD' in cmd for cmd in commands), "Should flush FORWARD chain"
+        assert any('-F POSTROUTING' in cmd for cmd in commands), "Should flush NAT POSTROUTING"
+
+        # Flush should come before the policy set
+        flush_idx = next(i for i, cmd in enumerate(commands) if '-F FORWARD' in cmd)
+        policy_idx = next(i for i, cmd in enumerate(commands) if '-P FORWARD DROP' in cmd)
+        assert flush_idx < policy_idx, "Flush should come before policy"
 
     @pytest.mark.asyncio
     @patch('cyroid.services.dind_service.docker.from_env')
@@ -187,6 +357,7 @@ class TestDinDContainerManagement:
         # Try to set up isolation - will fail but we can check the container name
         await service.setup_network_isolation_in_dind(
             range_id='abc12345-6789-def0-1234-567890abcdef',
+            docker_url='tcp://172.30.1.5:2375',
             networks=['lan'],
             allow_internet=[],
         )
