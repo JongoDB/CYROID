@@ -248,7 +248,7 @@ export default function ContentLibrary() {
             return (
               <div
                 key={item.id}
-                className="bg-white shadow rounded-lg overflow-hidden hover:shadow-md transition-shadow"
+                className="bg-white shadow rounded-lg hover:shadow-md transition-shadow"
               >
                 <div className="p-4">
                   <div className="flex items-start justify-between">
@@ -271,7 +271,7 @@ export default function ContentLibrary() {
                         <MoreVertical className="h-5 w-5 text-gray-400" />
                       </button>
                       {activeMenu === item.id && (
-                        <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg ring-1 ring-black ring-opacity-5 z-10">
+                        <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg ring-1 ring-black ring-opacity-5 z-50">
                           <div className="py-1">
                             <button
                               onClick={() => { navigate(`/content/${item.id}`); setActiveMenu(null); }}

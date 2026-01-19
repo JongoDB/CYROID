@@ -256,7 +256,7 @@ export default function TrainingEvents() {
             return (
               <div
                 key={event.id}
-                className="bg-white shadow rounded-lg overflow-hidden hover:shadow-md transition-shadow"
+                className="bg-white shadow rounded-lg hover:shadow-md transition-shadow"
               >
                 <div className="p-4 sm:p-6">
                   <div className="flex items-start justify-between">
@@ -324,7 +324,7 @@ export default function TrainingEvents() {
                             <MoreVertical className="h-5 w-5 text-gray-400" />
                           </button>
                           {activeMenu === event.id && (
-                            <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg ring-1 ring-black ring-opacity-5 z-10">
+                            <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg ring-1 ring-black ring-opacity-5 z-50">
                               <div className="py-1">
                                 <button
                                   onClick={() => { navigate(`/events/${event.id}`); setActiveMenu(null); }}
