@@ -1,4 +1,11 @@
 # backend/cyroid/services/blueprint_service.py
+"""
+Blueprint service for creating ranges from blueprint configurations.
+
+All ranges use DinD (Docker-in-Docker) isolation, so IP offset logic is not
+needed. Each range runs in its own isolated network namespace inside a DinD
+container, allowing multiple ranges to use identical IP spaces.
+"""
 import re
 from typing import Dict, Any, List
 from uuid import UUID
@@ -117,39 +124,49 @@ def create_range_from_blueprint(
     created_by: UUID,
 ) -> Range:
     """
-    Create a new Range from blueprint config with offset-adjusted subnets.
-    Returns the created Range object (not yet deployed).
+    Create a new Range from blueprint config with exact blueprint IPs.
+
+    All ranges use DinD isolation, so no IP translation is needed.
+    The offset parameter is kept for API compatibility but is ignored.
+
+    Args:
+        db: Database session
+        config: Blueprint configuration
+        range_name: Name for the new range
+        base_prefix: Base subnet prefix (kept for API compatibility)
+        offset: Subnet offset (ignored - DinD provides isolation)
+        created_by: User ID of creator
+
+    Returns:
+        Created Range object (not yet deployed)
     """
     from cyroid.models import Range, Network, VM, VMTemplate, MSEL, RangeRouter, RangeStatus
 
     # Create range
     range_obj = Range(
         name=range_name,
-        description=f"Instance from blueprint (offset {offset})",
+        description=f"Instance from blueprint (DinD isolated)",
         created_by=created_by,
         status=RangeStatus.DRAFT,
     )
     db.add(range_obj)
     db.flush()
 
-    # Create networks with offset
+    # Create networks with exact blueprint IPs
     network_lookup: Dict[str, UUID] = {}
     for net_config in config.networks:
-        adjusted_subnet = apply_subnet_offset(net_config.subnet, base_prefix, offset)
-        adjusted_gateway = apply_subnet_offset(net_config.gateway, base_prefix, offset)
-
         network = Network(
             range_id=range_obj.id,
             name=net_config.name,
-            subnet=adjusted_subnet,
-            gateway=adjusted_gateway,
+            subnet=net_config.subnet,
+            gateway=net_config.gateway,
             is_isolated=net_config.is_isolated,
         )
         db.add(network)
         db.flush()
         network_lookup[net_config.name] = network.id
 
-    # Create VMs with offset IPs
+    # Create VMs with exact blueprint IPs
     for vm_config in config.vms:
         # Find template by name
         template = db.query(VMTemplate).filter(VMTemplate.name == vm_config.template_name).first()
@@ -160,14 +177,12 @@ def create_range_from_blueprint(
         if not network_id:
             continue  # Skip VMs with missing networks
 
-        adjusted_ip = apply_subnet_offset(vm_config.ip_address, base_prefix, offset)
-
         vm = VM(
             range_id=range_obj.id,
             network_id=network_id,
             template_id=template.id,
             hostname=vm_config.hostname,
-            ip_address=adjusted_ip,
+            ip_address=vm_config.ip_address,
             cpu=vm_config.cpu,
             ram_mb=vm_config.ram_mb,
             disk_gb=vm_config.disk_gb,

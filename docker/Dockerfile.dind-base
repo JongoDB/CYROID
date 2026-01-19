@@ -1,0 +1,39 @@
+# Custom DinD image with optimizations for CYROID ranges
+# This extends the official docker:dind image with useful utilities
+# and optimized Docker daemon configuration.
+#
+# Build: docker build -t cyroid-dind:latest -f docker/Dockerfile.dind-base docker/
+# Use: Set DIND_IMAGE=cyroid-dind:latest in .env
+
+FROM docker:24-dind
+
+# Install useful utilities for debugging and management
+RUN apk add --no-cache \
+    curl \
+    jq \
+    bash \
+    iproute2 \
+    iputils \
+    net-tools \
+    tcpdump
+
+# Configure Docker daemon for range use
+# - Disable TLS for internal communication (ranges are isolated)
+# - Use overlay2 storage driver
+# - Configure logging to prevent disk space issues
+RUN mkdir -p /etc/docker
+COPY daemon.json /etc/docker/daemon.json
+
+# Pre-create common directories
+RUN mkdir -p /var/lib/docker
+
+# Health check - verify Docker daemon is responsive
+HEALTHCHECK --interval=5s --timeout=3s --start-period=15s \
+    CMD docker info > /dev/null 2>&1 || exit 1
+
+# Expose Docker daemon port (non-TLS)
+EXPOSE 2375
+
+# Labels for identification
+LABEL org.cyroid.component="dind-base"
+LABEL org.cyroid.description="CYROID Range DinD Base Image"

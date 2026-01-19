@@ -39,6 +39,20 @@ class Range(Base, UUIDMixin, TimestampMixin):
         DateTime(timezone=True), nullable=True
     )
 
+    # DinD (Docker-in-Docker) container tracking for network isolation
+    dind_container_id: Mapped[Optional[str]] = mapped_column(
+        String(64), nullable=True, index=True
+    )
+    dind_container_name: Mapped[Optional[str]] = mapped_column(
+        String(64), nullable=True, index=True
+    )
+    dind_mgmt_ip: Mapped[Optional[str]] = mapped_column(
+        String(45), nullable=True  # IPv4 or IPv6
+    )
+    dind_docker_url: Mapped[Optional[str]] = mapped_column(
+        String(128), nullable=True
+    )
+
     # Ownership
     created_by: Mapped[UUID] = mapped_column(ForeignKey("users.id"))
     created_by_user = relationship("User", back_populates="ranges")

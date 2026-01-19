@@ -80,6 +80,29 @@ class Settings(BaseSettings):
     management_network_subnet: str = "10.0.0.0/16"
     management_network_gateway: str = "10.0.0.1"
 
+    # === DinD (Docker-in-Docker) Configuration ===
+    # Each range runs in its own DinD container for network isolation
+    dind_image: str = "docker:24-dind"
+    dind_startup_timeout: int = 60  # Seconds to wait for inner Docker daemon
+    dind_docker_port: int = 2375  # Docker daemon port inside DinD
+
+    # === Network Configuration ===
+    # Management network for CYROID infrastructure services
+    cyroid_mgmt_network: str = "cyroid-mgmt"
+    cyroid_mgmt_subnet: str = "172.30.0.0/24"
+
+    # Network for range DinD containers (ranges connect here)
+    cyroid_ranges_network: str = "cyroid-ranges"
+    cyroid_ranges_subnet: str = "172.30.1.0/24"
+
+    # === Range Defaults ===
+    range_default_memory: str = "8g"  # Default memory limit for range DinD
+    range_default_cpu: float = 4.0  # Default CPU limit for range DinD
+
+    # === DinD Isolation ===
+    # All ranges deploy inside DinD containers for complete IP isolation
+    # This allows multiple ranges to use identical IP spaces without conflicts
+
     class Config:
         env_file = ".env"
 

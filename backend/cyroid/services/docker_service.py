@@ -12,25 +12,97 @@ Both qemus/qemu and dockur/windows provide:
 - Web-based VNC console on port 8006
 - Persistent storage and golden image support
 - Auto-download of OS images (24+ Linux distros, all Windows versions)
+
+DinD (Docker-in-Docker) Isolation:
+When DIND_ISOLATION_ENABLED=true, each range deploys inside its own DinD
+container, providing complete network namespace isolation. This eliminates
+IP conflicts between concurrent range instances using identical blueprint IPs.
 """
 import docker
 from docker.errors import APIError, NotFound, ImageNotFound
-from typing import Optional, Dict, List, Any
+from typing import Optional, Dict, List, Any, TYPE_CHECKING
 import logging
 import time
 import ipaddress
 
 from cyroid.utils.arch import IS_ARM, HOST_ARCH, requires_emulation
+from cyroid.config import get_settings
+
+if TYPE_CHECKING:
+    from cyroid.services.dind_service import DinDService
 
 logger = logging.getLogger(__name__)
 
 
 class DockerService:
-    """Service for managing Docker containers and networks."""
-    
-    def __init__(self):
+    """
+    Service for managing Docker containers and networks.
+
+    With DinD isolation enabled:
+    - Host operations: Uses local Docker daemon (for CYROID infrastructure)
+    - Range operations: Uses Docker daemon inside range's DinD container
+
+    Without DinD isolation (legacy mode):
+    - All operations use local Docker daemon directly
+    """
+
+    def __init__(self, dind_service: Optional["DinDService"] = None):
+        """
+        Initialize Docker service.
+
+        Args:
+            dind_service: Optional DinD service for range isolation.
+                         If None and DinD is enabled, will be created on demand.
+        """
         self.client = docker.from_env()
+        self._dind_service = dind_service
         self._verify_connection()
+
+    @property
+    def dind_service(self) -> "DinDService":
+        """Get DinD service, creating lazily if needed."""
+        if self._dind_service is None:
+            from cyroid.services.dind_service import get_dind_service
+            self._dind_service = get_dind_service()
+
+        return self._dind_service
+
+    async def get_range_client(self, range_id: str, docker_url: Optional[str] = None) -> docker.DockerClient:
+        """
+        Get Docker client for a range's DinD container.
+
+        Returns client connected to the range's inner Docker daemon.
+
+        Args:
+            range_id: Range identifier
+            docker_url: Optional Docker URL (if known). If not provided,
+                       will query DinD service for the URL.
+
+        Returns:
+            DockerClient for operating on the range
+        """
+        if docker_url:
+            return self.dind_service.get_range_client(str(range_id), docker_url)
+
+        # Get container info to find Docker URL
+        container_info = await self.dind_service.get_container_info(str(range_id))
+        if not container_info or not container_info.get("docker_url"):
+            raise ValueError(f"Range {range_id} has no active DinD container")
+
+        return self.dind_service.get_range_client(str(range_id), container_info["docker_url"])
+
+    def get_range_client_sync(self, range_id: str, docker_url: str) -> docker.DockerClient:
+        """
+        Synchronous version of get_range_client (for use when URL is known).
+
+        Args:
+            range_id: Range identifier
+            docker_url: Docker URL (tcp://ip:port)
+
+        Returns:
+            DockerClient for operating on the range
+        """
+        return self.dind_service.get_range_client(str(range_id), docker_url)
     
     def _verify_connection(self) -> None:
         """Verify connection to Docker daemon."""
@@ -2224,6 +2296,316 @@ local-hostname: {name}
             "total_docker": len(docker_snapshots),
             "template_dir": golden_images["template_dir"]
         }
+
+
+    # =========================================================================
+    # DinD Range Operations (operate inside range's DinD container)
+    # =========================================================================
+
+    async def create_range_network_dind(
+        self,
+        range_id: str,
+        docker_url: str,
+        name: str,
+        subnet: str,
+        gateway: Optional[str] = None,
+        internal: bool = True,
+        labels: Optional[Dict[str, str]] = None,
+    ) -> str:
+        """
+        Create Docker network inside a range's DinD container.
+
+        Uses EXACT subnet from blueprint - no IP translation needed.
+        This is the DinD-aware version of create_network().
+
+        Args:
+            range_id: Range identifier
+            docker_url: Docker URL for the range's DinD
+            name: Network name
+            subnet: CIDR notation (exact blueprint subnet)
+            gateway: Gateway IP (VyOS will use this)
+            internal: If True, no external connectivity
+            labels: Optional labels
+
+        Returns:
+            Network ID
+        """
+        range_client = self.get_range_client_sync(range_id, docker_url)
+
+        # Calculate bridge IP (.254) leaving .1 for VyOS
+        subnet_obj = ipaddress.ip_network(subnet, strict=False)
+        hosts = list(subnet_obj.hosts())
+        bridge_ip = str(hosts[-1]) if hosts else gateway
+
+        ipam_pool = docker.types.IPAMPool(
+            subnet=subnet,
+            gateway=bridge_ip
+        )
+        ipam_config = docker.types.IPAMConfig(pool_configs=[ipam_pool])
+
+        try:
+            network = range_client.networks.create(
+                name=name,
+                driver="bridge",
+                internal=internal,
+                ipam=ipam_config,
+                labels=labels or {},
+                attachable=True
+            )
+            logger.info(f"Created network '{name}' ({subnet}) in range {range_id} DinD")
+            return network.id
+        except APIError as e:
+            logger.error(f"Failed to create network {name} in DinD: {e}")
+            raise
+
+    async def delete_range_network_dind(
+        self,
+        range_id: str,
+        docker_url: str,
+        network_id: str
+    ) -> bool:
+        """Delete Docker network inside a range's DinD container."""
+        range_client = self.get_range_client_sync(range_id, docker_url)
+
+        try:
+            network = range_client.networks.get(network_id)
+            network.remove()
+            logger.info(f"Deleted network {network_id[:12]} from range {range_id} DinD")
+            return True
+        except NotFound:
+            logger.warning(f"Network {network_id} not found in DinD")
+            return False
+        except APIError as e:
+            logger.error(f"Failed to delete network in DinD: {e}")
+            raise
+
+    async def list_range_networks_dind(
+        self,
+        range_id: str,
+        docker_url: str
+    ) -> List[Dict[str, Any]]:
+        """List all networks in a range's DinD container."""
+        range_client = self.get_range_client_sync(range_id, docker_url)
+        networks = range_client.networks.list()
+
+        return [
+            {
+                "id": n.id,
+                "name": n.name,
+                "driver": n.attrs.get("Driver"),
+                "subnet": (
+                    n.attrs.get("IPAM", {})
+                    .get("Config", [{}])[0]
+                    .get("Subnet")
+                ),
+            }
+            for n in networks
+            if n.name not in ("bridge", "host", "none")
+        ]
+
+    async def create_range_container_dind(
+        self,
+        range_id: str,
+        docker_url: str,
+        name: str,
+        image: str,
+        network_name: str,
+        ip_address: str,
+        cpu_limit: int = 2,
+        memory_limit_mb: int = 2048,
+        volumes: Optional[Dict[str, Dict]] = None,
+        environment: Optional[Dict[str, str]] = None,
+        labels: Optional[Dict[str, str]] = None,
+        privileged: bool = False,
+        hostname: Optional[str] = None,
+        dns_servers: Optional[str] = None,
+        dns_search: Optional[str] = None,
+    ) -> str:
+        """
+        Create a container inside a range's DinD container.
+
+        Uses EXACT IP from blueprint - no IP translation needed.
+
+        Args:
+            range_id: Range identifier
+            docker_url: Docker URL for the range's DinD
+            name: Container name
+            image: Docker image
+            network_name: Network to attach to (inside DinD)
+            ip_address: Static IP address (exact blueprint IP)
+            Other args same as create_container()
+
+        Returns:
+            Container ID
+        """
+        range_client = self.get_range_client_sync(range_id, docker_url)
+
+        # Pull image if not present in DinD
+        try:
+            range_client.images.get(image)
+        except ImageNotFound:
+            logger.info(f"Pulling image {image} into DinD for range {range_id}")
+            range_client.images.pull(image)
+
+        # Get network
+        try:
+            network = range_client.networks.get(network_name)
+        except NotFound:
+            raise ValueError(f"Network {network_name} not found in DinD")
+
+        # Create networking config
+        networking_config = range_client.api.create_networking_config({
+            network.name: range_client.api.create_endpoint_config(
+                ipv4_address=ip_address
+            )
+        })
+
+        # Parse DNS
+        dns_list = [s.strip() for s in dns_servers.split(",") if s.strip()] if dns_servers else ["8.8.8.8", "8.8.4.4"]
+        dns_search_list = [s.strip() for s in dns_search.split(",") if s.strip()] if dns_search else None
+
+        if environment is None:
+            environment = {}
+
+        host_config_args = {
+            "cpu_count": cpu_limit,
+            "mem_limit": f"{memory_limit_mb}m",
+            "binds": volumes,
+            "privileged": privileged,
+            "cap_add": ["NET_ADMIN"],
+            "restart_policy": {"Name": "unless-stopped"},
+            "dns": dns_list
+        }
+        if dns_search_list:
+            host_config_args["dns_search"] = dns_search_list
+
+        try:
+            container = range_client.api.create_container(
+                image=image,
+                name=name,
+                hostname=hostname or name,
+                detach=True,
+                tty=True,
+                stdin_open=True,
+                networking_config=networking_config,
+                host_config=range_client.api.create_host_config(**host_config_args),
+                environment=environment,
+                labels=labels or {}
+            )
+            container_id = container["Id"]
+            logger.info(f"Created container '{name}' in range {range_id} DinD with IP {ip_address}")
+            return container_id
+        except APIError as e:
+            logger.error(f"Failed to create container in DinD: {e}")
+            raise
+
+    async def start_range_container_dind(
+        self,
+        range_id: str,
+        docker_url: str,
+        container_id: str
+    ) -> bool:
+        """Start a container inside a range's DinD."""
+        range_client = self.get_range_client_sync(range_id, docker_url)
+        try:
+            range_client.api.start(container_id)
+            logger.info(f"Started container {container_id[:12]} in range {range_id} DinD")
+            return True
+        except NotFound:
+            return False
+        except APIError as e:
+            logger.error(f"Failed to start container in DinD: {e}")
+            raise
+
+    async def stop_range_container_dind(
+        self,
+        range_id: str,
+        docker_url: str,
+        container_id: str,
+        timeout: int = 10
+    ) -> bool:
+        """Stop a container inside a range's DinD."""
+        range_client = self.get_range_client_sync(range_id, docker_url)
+        try:
+            range_client.api.stop(container_id, timeout=timeout)
+            logger.info(f"Stopped container {container_id[:12]} in range {range_id} DinD")
+            return True
+        except NotFound:
+            return False
+        except APIError as e:
+            logger.error(f"Failed to stop container in DinD: {e}")
+            raise
+
+    async def remove_range_container_dind(
+        self,
+        range_id: str,
+        docker_url: str,
+        container_id: str,
+        force: bool = True
+    ) -> bool:
+        """Remove a container inside a range's DinD."""
+        range_client = self.get_range_client_sync(range_id, docker_url)
+        try:
+            range_client.api.remove_container(container_id, force=force, v=True)
+            logger.info(f"Removed container {container_id[:12]} from range {range_id} DinD")
+            return True
+        except NotFound:
+            return False
+        except APIError as e:
+            logger.error(f"Failed to remove container in DinD: {e}")
+            raise
+
+    async def get_range_container_status_dind(
+        self,
+        range_id: str,
+        docker_url: str,
+        container_id: str
+    ) -> Optional[str]:
+        """Get container status inside a range's DinD."""
+        range_client = self.get_range_client_sync(range_id, docker_url)
+        try:
+            container = range_client.containers.get(container_id)
+            return container.status
+        except NotFound:
+            return None
+
+    async def list_range_containers_dind(
+        self,
+        range_id: str,
+        docker_url: str
+    ) -> List[Dict[str, Any]]:
+        """List all containers in a range's DinD."""
+        range_client = self.get_range_client_sync(range_id, docker_url)
+        containers = range_client.containers.list(all=True)
+
+        result = []
+        for container in containers:
+            networks = {}
+            for net_name, net_info in container.attrs.get("NetworkSettings", {}).get("Networks", {}).items():
+                if net_name not in ("bridge", "host", "none"):
+                    networks[net_name] = net_info.get("IPAddress")
+
+            result.append({
+                "id": container.id,
+                "name": container.name,
+                "status": container.status,
+                "image": container.image.tags[0] if container.image.tags else None,
+                "networks": networks,
+            })
+
+        return result
+
+    async def pull_image_to_dind(
+        self,
+        range_id: str,
+        docker_url: str,
+        image: str
+    ) -> None:
+        """Pull a Docker image into a range's DinD container."""
+        range_client = self.get_range_client_sync(range_id, docker_url)
+        logger.info(f"Pulling image '{image}' into DinD for range {range_id}")
+        range_client.images.pull(image)
+        logger.info(f"Successfully pulled '{image}' into DinD")
 
 
 # Singleton instance
