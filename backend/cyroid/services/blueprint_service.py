@@ -180,6 +180,7 @@ def create_range_from_blueprint(
     if config.msel and config.msel.content:
         msel = MSEL(
             range_id=range_obj.id,
+            name=f"{range_obj.name} Scenario",
             content=config.msel.content,
         )
         db.add(msel)
