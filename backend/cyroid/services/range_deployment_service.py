@@ -175,6 +175,20 @@ class RangeDeploymentService:
 
         db.commit()
 
+        # 2b. Set up iptables network isolation inside DinD
+        network_names = [network.name for network in networks]
+        # Networks with internet_enabled=True get NAT/outbound access
+        allow_internet = [
+            network.name for network in networks if network.internet_enabled
+        ]
+
+        await self.dind_service.setup_network_isolation_in_dind(
+            range_id=range_id,
+            docker_url=docker_url,
+            networks=network_names,
+            allow_internet=allow_internet,
+        )
+
         # 3. Pull required images into DinD
         vms = db.query(VM).filter(VM.range_id == range_obj.id).all()
         unique_images = set()
