@@ -1,7 +1,7 @@
 """Add seed blueprint fields
 
 Revision ID: b1p2s3e4e5d6
-Revises: d8e9f0a1b2c3
+Revises: 47632f1ca0b1
 Create Date: 2026-01-18 18:00:00.000000
 
 """
@@ -9,7 +9,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision = 'b1p2s3e4e5d6'
-down_revision = 'd8e9f0a1b2c3'
+down_revision = '47632f1ca0b1'
 branch_labels = None
 depends_on = None
 
