@@ -5,12 +5,15 @@ import dramatiq
 import logging
 from uuid import UUID
 
+import os
+
 from cyroid.database import get_session_local
 from cyroid.models.range import Range, RangeStatus
 from cyroid.models.network import Network
 from cyroid.models.vm import VM, VMStatus
-from cyroid.models.template import VMTemplate
+from cyroid.models.template import VMTemplate, VMType
 from cyroid.models.router import RangeRouter, RouterStatus
+from cyroid.config import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -186,7 +189,15 @@ def deploy_range_task(range_id: str):
                         is_kasmweb = "kasmweb/" in base_image
 
                         # Determine VNC port and scheme based on image type
-                        if base_image.startswith("iso:") or template.os_type == "windows" or template.os_type == "custom":
+                        # QEMU-based VMs (Linux VM, Windows, custom ISO) use port 8006
+                        is_qemu_vm = (
+                            template.vm_type == VMType.LINUX_VM or
+                            template.vm_type == VMType.WINDOWS_VM or
+                            template.os_type == "windows" or
+                            template.os_type == "custom" or
+                            base_image.startswith("iso:")
+                        )
+                        if is_qemu_vm:
                             vnc_port = "8006"
                             vnc_scheme = "http"
                             needs_auth = False
@@ -270,7 +281,75 @@ def deploy_range_task(range_id: str):
                             dns_servers=network.dns_servers,
                             dns_search=network.dns_search,
                         )
+                    elif template.vm_type == VMType.LINUX_VM:
+                        # Linux VM using qemux/qemu
+                        settings = get_settings()
+                        vm_storage_path = os.path.join(
+                            settings.vm_storage_dir,
+                            str(vm.range_id),
+                            str(vm.id),
+                            "storage"
+                        )
+                        linux_distro = template.linux_distro or "ubuntu"
+                        boot_mode = template.boot_mode or "uefi"
+                        disk_type = template.disk_type or "scsi"
+                        iso_path = template.cached_iso_path if hasattr(template, 'cached_iso_path') and template.cached_iso_path else None
+
+                        logger.info(f"Creating Linux VM {vm.hostname} with distro: {linux_distro}")
+                        container_id = docker.create_linux_vm_container(
+                            name=f"cyroid-{vm.hostname}-{str(vm.id)[:8]}",
+                            network_id=network.docker_network_id,
+                            ip_address=vm.ip_address,
+                            cpu_limit=vm.cpu,
+                            memory_limit_mb=vm.ram_mb,
+                            disk_size_gb=vm.disk_gb,
+                            linux_distro=linux_distro,
+                            labels=labels,
+                            iso_path=iso_path,
+                            storage_path=vm_storage_path,
+                            boot_mode=boot_mode,
+                            disk_type=disk_type,
+                            display_type=vm.display_type or "desktop",
+                            gateway=network.gateway,
+                            dns_servers=network.dns_servers,
+                            dns_search=network.dns_search,
+                        )
+                    elif template.os_type == "custom" or (template.base_image and template.base_image.startswith("iso:")):
+                        # Custom ISO or ISO-based Linux VMs use qemux/qemu
+                        settings = get_settings()
+                        vm_storage_path = os.path.join(
+                            settings.vm_storage_dir,
+                            str(vm.range_id),
+                            str(vm.id),
+                            "storage"
+                        )
+                        if template.os_type == "custom":
+                            linux_distro = "custom"
+                            iso_path = template.cached_iso_path if hasattr(template, 'cached_iso_path') and template.cached_iso_path else None
+                        else:
+                            linux_distro = template.base_image.replace("iso:", "")
+                            iso_path = None
+
+                        logger.info(f"Creating custom/ISO VM {vm.hostname} with distro: {linux_distro}")
+                        container_id = docker.create_linux_vm_container(
+                            name=f"cyroid-{vm.hostname}-{str(vm.id)[:8]}",
+                            network_id=network.docker_network_id,
+                            ip_address=vm.ip_address,
+                            cpu_limit=vm.cpu,
+                            memory_limit_mb=vm.ram_mb,
+                            disk_size_gb=vm.disk_gb,
+                            linux_distro=linux_distro,
+                            labels=labels,
+                            iso_path=iso_path,
+                            storage_path=vm_storage_path,
+                            display_type=vm.display_type or "desktop",
+                            gateway=network.gateway,
+                            dns_servers=network.dns_servers,
+                            dns_search=network.dns_search,
+                        )
                     else:
+                        # Docker container (Samba DC, linuxserver images, etc.)
+                        needs_privileged = "samba-dc" in (template.base_image or "")
                         container_id = docker.create_container(
                             name=f"cyroid-{vm.hostname}-{str(vm.id)[:8]}",
                             image=template.base_image,
@@ -282,6 +361,7 @@ def deploy_range_task(range_id: str):
                             labels=labels,
                             dns_servers=network.dns_servers,
                             dns_search=network.dns_search,
+                            privileged=needs_privileged,
                         )
 
                     vm.container_id = container_id

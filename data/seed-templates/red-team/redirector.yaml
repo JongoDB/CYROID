@@ -1,0 +1,28 @@
+# CYROID Red Team - Redirector Template
+seed_id: redteam-redirector
+name: "Red Team - Redirector"
+os_family: alpine
+os_version: "3.19"
+description: |
+  Lightweight Alpine redirector for C2 traffic.
+  Used for red team infrastructure and traffic redirection.
+
+os_type: linux
+os_variant: "Alpine 3.19"
+vm_type: container
+base_image: alpine:3.19
+
+default_cpu: 1
+default_ram_mb: 512
+default_disk_gb: 10
+
+native_arch: both
+
+config_script: "apk add --no-cache socat iptables && echo 1 > /proc/sys/net/ipv4/ip_forward"
+
+tags:
+  - red-team
+  - attacker
+  - redirector
+  - c2
+  - infrastructure

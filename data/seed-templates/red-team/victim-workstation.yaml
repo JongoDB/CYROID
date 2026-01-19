@@ -1,0 +1,26 @@
+# CYROID Red Team - Victim Workstation Template
+seed_id: redteam-victim-workstation
+name: "Red Team - Victim Workstation"
+os_family: ubuntu
+os_version: "22.04"
+description: |
+  Simulated employee workstation.
+  BeEF hook target for browser-based exploitation training.
+
+os_type: linux
+os_variant: "Ubuntu 22.04"
+vm_type: container
+base_image: redteam-lab-workstation:latest
+
+default_cpu: 1
+default_ram_mb: 1024
+default_disk_gb: 10
+
+native_arch: x86_64
+
+tags:
+  - red-team
+  - victim
+  - workstation
+  - beef-target
+  - browser-exploitation

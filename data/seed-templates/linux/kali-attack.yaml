@@ -5,20 +5,17 @@ os_family: kali
 os_version: "attack"
 description: |
   Kali Linux configured as an attack platform with common tools pre-installed.
+  Uses KasmVNC for fast, native container-based desktop access.
   Optimized for red team operations and penetration testing scenarios.
 
 os_type: linux
 os_variant: "Kali Linux Attack"
-vm_type: linux_vm
-linux_distro: kali
-base_image: qemus/qemu:latest
+vm_type: container
+base_image: kasmweb/kali-rolling-desktop:1.16.0
 
 default_cpu: 2
 default_ram_mb: 4096
-default_disk_gb: 60
-
-boot_mode: uefi
-disk_type: scsi
+default_disk_gb: 20
 
 native_arch: both
 

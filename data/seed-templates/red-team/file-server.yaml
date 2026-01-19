@@ -1,0 +1,26 @@
+# CYROID Red Team - File Server Template
+seed_id: redteam-file-server
+name: "Red Team - File Server"
+os_family: ubuntu
+os_version: "22.04"
+description: |
+  Samba file server with sensitive business data.
+  Target for credential harvesting and data exfiltration training.
+
+os_type: linux
+os_variant: "Ubuntu 22.04"
+vm_type: container
+base_image: redteam-lab-fileserver:latest
+
+default_cpu: 1
+default_ram_mb: 1024
+default_disk_gb: 10
+
+native_arch: x86_64
+
+tags:
+  - red-team
+  - victim
+  - samba
+  - exfil-target
+  - file-server

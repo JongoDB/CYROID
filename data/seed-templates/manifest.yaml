@@ -68,3 +68,30 @@ templates:
     category: network
     arch: both
     description: "VyOS router for internal network segments"
+
+  # ============ Red Team Training Lab ============
+  - seed_id: redteam-kali-attack
+    file: red-team/kali-attack-box.yaml
+    category: red-team
+    arch: x86_64
+    description: "Kali Attack Box with pre-installed red team tools"
+  - seed_id: redteam-wordpress-target
+    file: red-team/wordpress-target.yaml
+    category: red-team
+    arch: x86_64
+    description: "WordPress with SQLi/XSS vulnerabilities"
+  - seed_id: redteam-file-server
+    file: red-team/file-server.yaml
+    category: red-team
+    arch: x86_64
+    description: "Samba file server with sensitive data"
+  - seed_id: redteam-victim-workstation
+    file: red-team/victim-workstation.yaml
+    category: red-team
+    arch: x86_64
+    description: "Employee workstation for BeEF exploitation"
+  - seed_id: redteam-redirector
+    file: red-team/redirector.yaml
+    category: red-team
+    arch: both
+    description: "Lightweight C2 redirector"

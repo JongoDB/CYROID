@@ -4,21 +4,18 @@ name: "Ubuntu Server 24.04"
 os_family: ubuntu-server
 os_version: "24.04"
 description: |
-  Ubuntu Server 24.04 LTS as a full QEMU virtual machine.
-  Latest LTS release with improved performance and security.
+  Ubuntu Server 24.04 LTS as a lightweight container.
+  Uses linuxserver webtop for terminal/desktop access.
+  Suitable for web servers, API servers, and general Linux workloads.
 
 os_type: linux
 os_variant: "Ubuntu Server 24.04 LTS"
-vm_type: linux_vm
-linux_distro: ubuntu
-base_image: qemus/qemu:latest
+vm_type: container
+base_image: lscr.io/linuxserver/webtop:ubuntu-xfce
 
 default_cpu: 2
 default_ram_mb: 2048
 default_disk_gb: 20
-
-boot_mode: uefi
-disk_type: scsi
 
 native_arch: both
 

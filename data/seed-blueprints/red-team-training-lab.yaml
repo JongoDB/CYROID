@@ -1,0 +1,139 @@
+# CYROID Red Team Training Lab Blueprint
+seed_id: red-team-training-lab
+name: Red Team Training Lab
+description: |
+  Comprehensive red team training environment featuring:
+  - Kali Attack Box with pre-installed tools (Metasploit, Impacket, CrackMapExec, etc.)
+  - WordPress target with SQL injection vulnerabilities
+  - Samba Domain Controller
+  - Internal file server with sensitive data
+  - Victim workstation for BeEF exploitation
+  - C2 redirectors for infrastructure training
+
+  Attack paths: SQLi -> Credential theft -> Lateral movement -> Domain compromise
+
+base_subnet_prefix: "172.16"
+
+networks:
+  - name: internet
+    subnet: "172.16.0.0/24"
+    gateway: "172.16.0.1"
+    is_isolated: false
+
+  - name: dmz
+    subnet: "172.16.1.0/24"
+    gateway: "172.16.1.1"
+    is_isolated: true
+
+  - name: internal
+    subnet: "172.16.2.0/24"
+    gateway: "172.16.2.1"
+    is_isolated: true
+
+vms:
+  # Attack box
+  - hostname: kali
+    template_name: "Red Team - Kali Attack Box"
+    network_name: internet
+    ip_address: "172.16.0.10"
+    cpu: 4
+    ram_mb: 4096
+    disk_gb: 60
+    position_x: 100
+    position_y: 200
+
+  # C2 Redirectors
+  - hostname: redir1
+    template_name: "Red Team - Redirector"
+    network_name: internet
+    ip_address: "172.16.0.20"
+    cpu: 1
+    ram_mb: 512
+    disk_gb: 10
+    position_x: 100
+    position_y: 100
+
+  - hostname: redir2
+    template_name: "Red Team - Redirector"
+    network_name: internet
+    ip_address: "172.16.0.21"
+    cpu: 1
+    ram_mb: 512
+    disk_gb: 10
+    position_x: 100
+    position_y: 300
+
+  # DMZ - Web server (primary in DMZ, also on internet for attacker access)
+  - hostname: webserver
+    template_name: "Red Team - WordPress Target"
+    network_name: dmz
+    ip_address: "172.16.1.10"
+    cpu: 2
+    ram_mb: 2048
+    disk_gb: 20
+    position_x: 400
+    position_y: 200
+
+  # Internal network - Domain Controller
+  - hostname: dc01
+    template_name: "Samba DC"
+    network_name: internal
+    ip_address: "172.16.2.10"
+    cpu: 2
+    ram_mb: 2048
+    disk_gb: 20
+    position_x: 700
+    position_y: 100
+
+  # Internal network - File Server
+  - hostname: fileserver
+    template_name: "Red Team - File Server"
+    network_name: internal
+    ip_address: "172.16.2.20"
+    cpu: 1
+    ram_mb: 1024
+    disk_gb: 10
+    position_x: 700
+    position_y: 200
+
+  # Internal network - Victim Workstation
+  - hostname: ws01
+    template_name: "Red Team - Victim Workstation"
+    network_name: internal
+    ip_address: "172.16.2.30"
+    cpu: 1
+    ram_mb: 1024
+    disk_gb: 10
+    position_x: 700
+    position_y: 300
+
+router:
+  enabled: true
+  dhcp_enabled: false
+
+# Training scenario events (MSEL)
+events:
+  - sequence: 1
+    delay_minutes: 0
+    title: "Phase 1: Reconnaissance"
+    description: "Use Kali tools to scan and enumerate the DMZ webserver"
+
+  - sequence: 2
+    delay_minutes: 15
+    title: "Phase 2: Initial Access"
+    description: "Exploit SQL injection in WordPress to extract credentials"
+
+  - sequence: 3
+    delay_minutes: 30
+    title: "Phase 3: Credential Harvesting"
+    description: "Use extracted credentials to access internal network"
+
+  - sequence: 4
+    delay_minutes: 45
+    title: "Phase 4: Lateral Movement"
+    description: "Move from webserver to internal hosts using Impacket"
+
+  - sequence: 5
+    delay_minutes: 60
+    title: "Phase 5: Domain Compromise"
+    description: "Extract domain admin credentials and compromise DC"

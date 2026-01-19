@@ -64,12 +64,13 @@ class BlueprintResponse(BaseModel):
     version: int
     base_subnet_prefix: str
     next_offset: int
-    created_by: UUID
+    created_by: Optional[UUID] = None  # Nullable for seed blueprints
     created_at: datetime
     updated_at: datetime
     network_count: int = 0
     vm_count: int = 0
     instance_count: int = 0
+    is_seed: bool = False  # True for built-in blueprints
 
     class Config:
         from_attributes = True

@@ -328,6 +328,7 @@ def _blueprint_to_response(blueprint: RangeBlueprint, db: Session) -> BlueprintR
         network_count=len(config.get("networks", [])),
         vm_count=len(config.get("vms", [])),
         instance_count=len(blueprint.instances),
+        is_seed=blueprint.is_seed if hasattr(blueprint, 'is_seed') else False,
     )
 
 
@@ -348,7 +349,8 @@ def _blueprint_to_detail_response(
         vm_count=len(config.vms),
         instance_count=len(blueprint.instances) if hasattr(blueprint, 'instances') else 0,
         config=config,
-        created_by_username=username,
+        created_by_username=username if username else ("CYROID" if (hasattr(blueprint, 'is_seed') and blueprint.is_seed) else None),
+        is_seed=blueprint.is_seed if hasattr(blueprint, 'is_seed') else False,
     )
 
 
