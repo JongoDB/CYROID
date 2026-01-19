@@ -169,8 +169,8 @@ class RangeDeploymentService:
         vms = db.query(VM).filter(VM.range_id == range_obj.id).all()
         unique_images = set()
         for vm in vms:
-            if vm.template and vm.template.image:
-                unique_images.add(vm.template.image)
+            if vm.template and vm.template.base_image:
+                unique_images.add(vm.template.base_image)
 
         for image in unique_images:
             try:
@@ -184,7 +184,7 @@ class RangeDeploymentService:
 
         # 4. Create VMs inside DinD
         for vm in vms:
-            if not vm.template or not vm.template.image:
+            if not vm.template or not vm.template.base_image:
                 logger.warning(f"VM {vm.hostname} has no template/image, skipping")
                 continue
 
@@ -202,7 +202,7 @@ class RangeDeploymentService:
                 range_id=range_id,
                 docker_url=docker_url,
                 name=vm.hostname,
-                image=vm.template.image,
+                image=vm.template.base_image,
                 network_name=network.name,
                 ip_address=vm.ip_address,
                 cpu_limit=vm.cpu or 2,

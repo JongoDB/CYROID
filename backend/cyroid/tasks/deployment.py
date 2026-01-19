@@ -1,5 +1,6 @@
 # cyroid/tasks/deployment.py
 """Async deployment tasks using Dramatiq."""
+import asyncio
 import base64
 import dramatiq
 import logging
@@ -21,10 +22,52 @@ logger = logging.getLogger(__name__)
 @dramatiq.actor(max_retries=3, min_backoff=1000)
 def deploy_range_task(range_id: str):
     """
-    Async task to deploy a range.
-    Creates VyOS router, Docker networks, and starts all VMs.
+    Async task to deploy a range using DinD isolation.
+    Each range runs in its own Docker-in-Docker container.
     """
-    logger.info(f"Starting async deployment for range {range_id}")
+    logger.info(f"Starting DinD deployment for range {range_id}")
+
+    db = get_session_local()()
+    try:
+        from cyroid.services.range_deployment_service import get_range_deployment_service
+        deployment_service = get_range_deployment_service()
+
+        range_obj = db.query(Range).filter(Range.id == UUID(range_id)).first()
+        if not range_obj:
+            logger.error(f"Range {range_id} not found")
+            return
+
+        # Run async deployment synchronously
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            result = loop.run_until_complete(
+                deployment_service.deploy_range(db, UUID(range_id))
+            )
+            logger.info(f"Range {range_id} deployed successfully: {result}")
+        finally:
+            loop.close()
+
+    except Exception as e:
+        logger.error(f"Failed to deploy range {range_id}: {e}")
+        range_obj = db.query(Range).filter(Range.id == UUID(range_id)).first()
+        if range_obj:
+            range_obj.status = RangeStatus.ERROR
+            range_obj.error_message = str(e)[:1000]
+            db.commit()
+    finally:
+        db.close()
+
+
+@dramatiq.actor(max_retries=3, min_backoff=1000)
+def deploy_range_task_legacy(range_id: str):
+    """
+    Legacy deployment task (non-DinD).
+    Creates VyOS router, Docker networks, and starts all VMs directly on host.
+
+    DEPRECATED: Use deploy_range_task() which uses DinD isolation.
+    """
+    logger.info(f"Starting legacy deployment for range {range_id}")
 
     db = get_session_local()()
     try:

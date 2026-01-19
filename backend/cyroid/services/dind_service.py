@@ -275,20 +275,20 @@ class DinDService:
     ) -> None:
         """Wait for Docker daemon inside DinD to be ready."""
         timeout = timeout or self.dind_startup_timeout
-        client = docker.DockerClient(base_url=docker_url)
 
         for i in range(timeout):
             try:
+                # Create client inside retry loop - it connects on initialization
+                client = docker.DockerClient(base_url=docker_url)
                 client.ping()
                 logger.info(f"Docker daemon ready at {docker_url}")
                 client.close()
                 return
-            except Exception:
-                if i % 10 == 0 and i > 0:
-                    logger.debug(f"Waiting for Docker at {docker_url}... ({i}s)")
+            except Exception as e:
+                if i % 10 == 0:
+                    logger.debug(f"Waiting for Docker at {docker_url}... ({i}s) - {e}")
                 await asyncio.sleep(1)
 
-        client.close()
         raise TimeoutError(f"Docker daemon not ready at {docker_url} after {timeout}s")
 
     async def exec_in_container(

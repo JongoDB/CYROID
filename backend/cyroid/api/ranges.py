@@ -301,7 +301,10 @@ def get_deployment_status(
 
 @router.post("/{range_id}/deploy", response_model=RangeResponse)
 def deploy_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
-    """Deploy a range - creates Docker networks and starts all VMs"""
+    """Deploy a range using DinD isolation - creates isolated Docker environment with networks and VMs"""
+    from cyroid.services.range_deployment_service import get_range_deployment_service
+    import asyncio
+
     range_obj = db.query(Range).filter(Range.id == range_id).first()
     if not range_obj:
         raise HTTPException(
@@ -316,6 +319,7 @@ def deploy_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
         )
 
     range_obj.status = RangeStatus.DEPLOYING
+    range_obj.error_message = None  # Clear any previous error
     db.commit()
 
     # Initialize event service for progress logging
@@ -327,447 +331,45 @@ def deploy_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
     event_service.log_event(
         range_id=range_id,
         event_type=EventType.DEPLOYMENT_STARTED,
-        message=f"Starting deployment of range '{range_obj.name}'",
+        message=f"Starting DinD deployment of range '{range_obj.name}'",
         user_id=current_user.id,
         extra_data=json.dumps({
             "total_networks": len(networks),
             "total_vms": len(vms),
+            "isolation": "dind"
         })
     )
 
     try:
-        docker = get_docker_service()
-        vyos = get_vyos_service()
+        # Use the new DinD-based deployment service
+        deployment_service = get_range_deployment_service()
 
-        # Step 0: Create VyOS router for this range
-        range_router = db.query(RangeRouter).filter(RangeRouter.range_id == range_id).first()
-        if not range_router:
-            # Create router record
-            management_ip = vyos.allocate_management_ip()
-            range_router = RangeRouter(
-                range_id=range_id,
-                management_ip=management_ip,
-                status=RouterStatus.CREATING
+        # Run async deployment synchronously
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            result = loop.run_until_complete(
+                deployment_service.deploy_range(db, range_id)
             )
-            db.add(range_router)
-            db.commit()
+            logger.info(f"DinD deployment completed for range {range_id}: {result}")
+        finally:
+            loop.close()
 
-        # Create and start the router container if needed
-        if not range_router.container_id:
-            try:
-                range_router.status = RouterStatus.CREATING
-                db.commit()
-
-                event_service.log_event(
-                    range_id=range_id,
-                    event_type=EventType.ROUTER_CREATING,
-                    message=f"Creating VyOS router (management IP: {range_router.management_ip})",
-                    user_id=current_user.id
-                )
-
-                container_id = vyos.create_router_container(
-                    range_id=str(range_id),
-                    management_ip=range_router.management_ip
-                )
-                range_router.container_id = container_id
-                vyos.start_router(container_id)
-
-                # Wait for router to be ready
-                import time
-                time.sleep(3)  # VyOS needs time to initialize
-
-                range_router.status = RouterStatus.RUNNING
-                db.commit()
-
-                event_service.log_event(
-                    range_id=range_id,
-                    event_type=EventType.ROUTER_CREATED,
-                    message="VyOS router created and running",
-                    user_id=current_user.id
-                )
-                logger.info(f"VyOS router created for range {range_id}")
-            except Exception as e:
-                logger.error(f"Failed to create VyOS router: {e}")
-                range_router.status = RouterStatus.ERROR
-                range_router.error_message = str(e)[:500]
-                db.commit()
-                raise
-
-        # Step 1: Provision all networks
-        event_service.log_event(
-            range_id=range_id,
-            event_type=EventType.DEPLOYMENT_STEP,
-            message=f"Provisioning {len(networks)} network(s)",
-            user_id=current_user.id
-        )
-        interface_num = 1  # eth0 is management, start from eth1
-        for idx, network in enumerate(networks):
-            if not network.docker_network_id:
-                event_service.log_event(
-                    range_id=range_id,
-                    network_id=network.id,
-                    event_type=EventType.NETWORK_CREATING,
-                    message=f"Creating network '{network.name}' ({idx + 1}/{len(networks)})",
-                    user_id=current_user.id,
-                    extra_data=json.dumps({"subnet": network.subnet, "gateway": network.gateway})
-                )
-                # internal=False: VyOS router handles isolation via firewall rules,
-                # not Docker's internal network flag (which blocks all external traffic)
-                docker_network_id = docker.create_network(
-                    name=f"cyroid-{network.name}-{str(network.id)[:8]}",
-                    subnet=network.subnet,
-                    gateway=network.gateway,
-                    internal=False,
-                    labels={
-                        "cyroid.range_id": str(range_id),
-                        "cyroid.network_id": str(network.id),
-                    }
-                )
-                network.docker_network_id = docker_network_id
-
-                # Connect traefik to this network for VNC/web console routing
-                docker.connect_traefik_to_network(docker_network_id)
-
-                # Apply iptables isolation if network is isolated
-                if network.is_isolated:
-                    docker.setup_network_isolation(docker_network_id, network.subnet)
-
-                db.commit()
-
-                event_service.log_event(
-                    range_id=range_id,
-                    network_id=network.id,
-                    event_type=EventType.NETWORK_CREATED,
-                    message=f"Network '{network.name}' created ({network.subnet})",
-                    user_id=current_user.id
-                )
-
-            # Connect VyOS router to this network as the gateway
-            if range_router.container_id and range_router.status == RouterStatus.RUNNING:
-                try:
-                    import ipaddress
-                    interface_name = f"eth{interface_num}"
-                    network.vyos_interface = interface_name
-
-                    # VyOS gets the gateway IP (.1) - Docker bridge no longer claims it
-                    vyos_ip = network.gateway
-                    subnet_obj = ipaddress.ip_network(network.subnet, strict=False)
-
-                    # Connect router to network with gateway IP
-                    vyos.connect_to_network(
-                        container_id=range_router.container_id,
-                        network_id=network.docker_network_id,
-                        interface_ip=vyos_ip
-                    )
-
-                    # Configure interface in VyOS (need CIDR notation)
-                    ip_with_cidr = f"{vyos_ip}/{subnet_obj.prefixlen}"
-                    vyos.configure_interface(
-                        container_id=range_router.container_id,
-                        interface=interface_name,
-                        ip_address=ip_with_cidr,
-                        description=network.name
-                    )
-
-                    # Configure NAT if internet is enabled
-                    if network.internet_enabled:
-                        vyos.configure_nat_outbound(
-                            container_id=range_router.container_id,
-                            rule_number=interface_num * 10,
-                            source_network=network.subnet
-                        )
-
-                    interface_num += 1
-                    db.commit()
-                    logger.info(f"Connected VyOS router as gateway for {network.name} at {vyos_ip}")
-                except Exception as e:
-                    logger.warning(f"Failed to connect VyOS to network {network.name}: {e}")
-
-        # Step 2: Create and start all VMs
-        event_service.log_event(
-            range_id=range_id,
-            event_type=EventType.DEPLOYMENT_STEP,
-            message=f"Starting {len(vms)} VM(s)",
-            user_id=current_user.id
-        )
-        for vm_idx, vm in enumerate(vms):
-            if vm.container_id:
-                # Container exists, just start it
-                event_service.log_event(
-                    range_id=range_id,
-                    event_type=EventType.VM_CREATING,
-                    message=f"Starting existing VM '{vm.hostname}' ({vm_idx + 1}/{len(vms)})",
-                    vm_id=vm.id,
-                    user_id=current_user.id
-                )
-                docker.start_container(vm.container_id)
-            else:
-                # Create new container
-                network = db.query(Network).filter(Network.id == vm.network_id).first()
-                template = db.query(VMTemplate).filter(VMTemplate.id == vm.template_id).first()
-
-                if not network or not network.docker_network_id:
-                    logger.warning(f"Skipping VM {vm.id}: network not provisioned")
-                    continue
-
-                # Determine VM type for logging
-                vm_type = "container"
-                if template.os_type == OSType.WINDOWS:
-                    vm_type = "Windows VM"
-                elif template.os_type == OSType.CUSTOM or (template.base_image and template.base_image.startswith("iso:")):
-                    vm_type = "Linux VM (QEMU)"
-
-                event_service.log_event(
-                    range_id=range_id,
-                    event_type=EventType.VM_CREATING,
-                    message=f"Creating {vm_type} '{vm.hostname}' ({vm_idx + 1}/{len(vms)})",
-                    vm_id=vm.id,
-                    user_id=current_user.id,
-                    extra_data=json.dumps({
-                        "image": template.base_image,
-                        "ip_address": vm.ip_address,
-                        "cpu": vm.cpu,
-                        "ram_mb": vm.ram_mb
-                    })
-                )
-
-                vm_id_short = str(vm.id)[:8]
-                labels = {
-                    "cyroid.range_id": str(range_id),
-                    "cyroid.vm_id": str(vm.id),
-                    "cyroid.hostname": vm.hostname,
-                }
-
-                # Add traefik labels for VNC web console routing
-                display_type = vm.display_type or "desktop"
-                if display_type == "desktop":
-                    base_image = template.base_image or ""
-                    is_linuxserver = "linuxserver/" in base_image or "lscr.io/linuxserver" in base_image
-                    is_kasmweb = "kasmweb/" in base_image
-
-                    if base_image.startswith("iso:") or template.os_type == OSType.WINDOWS or template.os_type == OSType.CUSTOM:
-                        vnc_port = "8006"
-                        vnc_scheme = "http"
-                        needs_auth = False
-                    elif is_linuxserver:
-                        vnc_port = "3000"
-                        vnc_scheme = "http"
-                        needs_auth = False
-                    elif is_kasmweb:
-                        vnc_port = "6901"
-                        vnc_scheme = "https"
-                        needs_auth = True
-                    else:
-                        vnc_port = "6901"
-                        vnc_scheme = "https"
-                        needs_auth = False
-
-                    router_name = f"vnc-{vm_id_short}"
-                    middlewares = [f"vnc-strip-{vm_id_short}"]
-
-                    # Use range network for routing (traefik connects to range networks, not VMs to traefik-routing)
-                    range_network_name = f"cyroid-{network.name}-{str(network.id)[:8]}"
-
-                    labels.update({
-                        "traefik.enable": "true",
-                        "traefik.docker.network": range_network_name,  # Use range network for routing
-                        f"traefik.http.services.{router_name}.loadbalancer.server.port": vnc_port,
-                        f"traefik.http.services.{router_name}.loadbalancer.server.scheme": vnc_scheme,
-                        f"traefik.http.routers.{router_name}.rule": f"PathPrefix(`/vnc/{vm.id}`)",
-                        f"traefik.http.routers.{router_name}.entrypoints": "web",
-                        f"traefik.http.routers.{router_name}.service": router_name,
-                        f"traefik.http.routers.{router_name}.priority": "100",
-                        f"traefik.http.routers.{router_name}-secure.rule": f"PathPrefix(`/vnc/{vm.id}`)",
-                        f"traefik.http.routers.{router_name}-secure.entrypoints": "websecure",
-                        f"traefik.http.routers.{router_name}-secure.tls": "true",
-                        f"traefik.http.routers.{router_name}-secure.service": router_name,
-                        f"traefik.http.routers.{router_name}-secure.priority": "100",
-                        f"traefik.http.middlewares.vnc-strip-{vm_id_short}.stripprefix.prefixes": f"/vnc/{vm.id}",
-                    })
-
-                    if vnc_scheme == "https":
-                        labels[f"traefik.http.services.{router_name}.loadbalancer.serversTransport"] = "insecure-transport@file"
-
-                    if needs_auth:
-                        import base64
-                        # Use hardcoded VNC credentials for seamless console auto-login
-                        auth_string = base64.b64encode(b"kasm_user:vncpassword").decode()
-                        auth_middleware = f"vnc-auth-{vm_id_short}"
-                        labels[f"traefik.http.middlewares.{auth_middleware}.headers.customrequestheaders.Authorization"] = f"Basic {auth_string}"
-                        middlewares.append(auth_middleware)
-
-                    labels[f"traefik.http.routers.{router_name}.middlewares"] = ",".join(middlewares)
-                    labels[f"traefik.http.routers.{router_name}-secure.middlewares"] = ",".join(middlewares)
-
-                if template.os_type == OSType.WINDOWS:
-                    settings = get_settings()
-                    vm_storage_path = os.path.join(
-                        settings.vm_storage_dir,
-                        str(vm.range_id),
-                        str(vm.id),
-                        "storage"
-                    )
-                    windows_version = vm.windows_version or template.os_variant or "11"
-                    iso_path = vm.iso_path or (template.cached_iso_path if hasattr(template, 'cached_iso_path') and template.cached_iso_path else None)
-
-                    container_id = docker.create_windows_container(
-                        name=f"cyroid-{vm.hostname}-{str(vm.id)[:8]}",
-                        network_id=network.docker_network_id,
-                        ip_address=vm.ip_address,
-                        cpu_limit=vm.cpu,
-                        memory_limit_mb=vm.ram_mb,
-                        disk_size_gb=vm.disk_gb,
-                        windows_version=windows_version,
-                        labels=labels,
-                        iso_path=iso_path,
-                        storage_path=vm_storage_path,
-                        display_type=vm.display_type or "desktop",
-                        gateway=network.gateway,
-                        dns_servers=network.dns_servers,
-                        dns_search=network.dns_search,
-                    )
-                elif template.os_type == OSType.CUSTOM:
-                    # Custom ISO VMs use qemux/qemu
-                    settings = get_settings()
-                    vm_storage_path = os.path.join(
-                        settings.vm_storage_dir,
-                        str(vm.range_id),
-                        str(vm.id),
-                        "storage"
-                    )
-                    iso_path = template.cached_iso_path if hasattr(template, 'cached_iso_path') and template.cached_iso_path else None
-
-                    container_id = docker.create_linux_vm_container(
-                        name=f"cyroid-{vm.hostname}-{str(vm.id)[:8]}",
-                        network_id=network.docker_network_id,
-                        ip_address=vm.ip_address,
-                        cpu_limit=vm.cpu,
-                        memory_limit_mb=vm.ram_mb,
-                        disk_size_gb=vm.disk_gb,
-                        linux_distro="custom",
-                        labels=labels,
-                        iso_path=iso_path,
-                        storage_path=vm_storage_path,
-                        display_type=vm.display_type or "desktop",
-                        gateway=network.gateway,
-                        dns_servers=network.dns_servers,
-                        dns_search=network.dns_search,
-                    )
-                elif template.base_image.startswith("iso:"):
-                    # Linux ISO VMs use qemux/qemu
-                    settings = get_settings()
-                    vm_storage_path = os.path.join(
-                        settings.vm_storage_dir,
-                        str(vm.range_id),
-                        str(vm.id),
-                        "storage"
-                    )
-                    linux_distro = template.base_image.replace("iso:", "")
-
-                    container_id = docker.create_linux_vm_container(
-                        name=f"cyroid-{vm.hostname}-{str(vm.id)[:8]}",
-                        network_id=network.docker_network_id,
-                        ip_address=vm.ip_address,
-                        cpu_limit=vm.cpu,
-                        memory_limit_mb=vm.ram_mb,
-                        disk_size_gb=vm.disk_gb,
-                        linux_distro=linux_distro,
-                        labels=labels,
-                        storage_path=vm_storage_path,
-                        display_type=vm.display_type or "desktop",
-                        gateway=network.gateway,
-                        dns_servers=network.dns_servers,
-                        dns_search=network.dns_search,
-                    )
-                else:
-                    # Docker container
-                    # Samba AD DC needs privileged mode for filesystem ACLs
-                    needs_privileged = "samba-dc" in (template.base_image or "")
-
-                    container_id = docker.create_container(
-                        name=f"cyroid-{vm.hostname}-{str(vm.id)[:8]}",
-                        image=template.base_image,
-                        network_id=network.docker_network_id,
-                        ip_address=vm.ip_address,
-                        cpu_limit=vm.cpu,
-                        memory_limit_mb=vm.ram_mb,
-                        hostname=vm.hostname,
-                        labels=labels,
-                        linux_username=vm.linux_username,
-                        linux_password=vm.linux_password,
-                        linux_user_sudo=vm.linux_user_sudo,
-                        dns_servers=network.dns_servers,
-                        dns_search=network.dns_search,
-                        privileged=needs_privileged,
-                    )
-
-                vm.container_id = container_id
-                docker.start_container(container_id)
-
-                # Configure default route for Docker containers (VyOS is the gateway)
-                # Windows/Linux VMs (QEMU-based) handle their own routing internally
-                base_image = template.base_image or ""
-                is_docker_container = (
-                    template.os_type != OSType.WINDOWS and
-                    template.os_type != OSType.CUSTOM and
-                    not base_image.startswith("iso:")
-                )
-                if is_docker_container and network.gateway:
-                    try:
-                        # Give container a moment to initialize networking
-                        import time
-                        time.sleep(1)
-                        docker.configure_default_route(container_id, network.gateway)
-                    except Exception as e:
-                        logger.warning(f"Failed to configure default route for VM {vm.id}: {e}")
-
-                # Configure Linux user for KasmVNC containers
-                if "kasmweb/" in base_image:
-                    # KasmVNC uses 'kasm-user' as the default user
-                    username = vm.linux_username or "kasm-user"
-                    if vm.linux_password:
-                        docker.set_linux_user_password(container_id, username, vm.linux_password)
-                    if vm.linux_user_sudo:
-                        docker.grant_sudo_privileges(container_id, username)
-
-                # Run config script if present
-                if template.config_script:
-                    try:
-                        docker.exec_command(container_id, template.config_script)
-                    except Exception as e:
-                        logger.warning(f"Config script failed for VM {vm.id}: {e}")
-
-            vm.status = VMStatus.RUNNING
-            db.commit()
-
-            event_service.log_event(
-                range_id=range_id,
-                event_type=EventType.VM_STARTED,
-                message=f"VM '{vm.hostname}' is now running",
-                vm_id=vm.id,
-                user_id=current_user.id
-            )
-
-        range_obj.status = RangeStatus.RUNNING
-        # Set lifecycle timestamps
-        from datetime import timezone
-        now = datetime.now(timezone.utc)
-        range_obj.deployed_at = now
-        range_obj.started_at = now
-        db.commit()
+        # Refresh range object to get updated status
+        db.refresh(range_obj)
 
         # Log deployment completion
         event_service.log_event(
             range_id=range_id,
             event_type=EventType.DEPLOYMENT_COMPLETED,
-            message=f"Range '{range_obj.name}' deployed successfully",
+            message=f"Range '{range_obj.name}' deployed successfully with DinD isolation",
             user_id=current_user.id,
             extra_data=json.dumps({
                 "networks_deployed": len(networks),
-                "vms_deployed": len(vms)
+                "vms_deployed": len(vms),
+                "dind_container_id": range_obj.dind_container_id
             })
         )
-        db.refresh(range_obj)
 
     except Exception as e:
         import traceback
