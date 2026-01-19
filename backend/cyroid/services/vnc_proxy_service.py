@@ -13,11 +13,12 @@ forward traffic from the DinD management IP to VMs' VNC ports.
 
 Architecture:
     Traefik (host) -> 172.30.1.5:15900 -> nginx (in DinD) -> vm-container:8006
+
+Note: The nginx config is injected via command argument (not volume mount)
+because DinD has its own isolated filesystem and cannot see host paths.
 """
 
 import logging
-import tempfile
-from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
@@ -94,47 +95,47 @@ class VNCProxyService:
         for vm_id in port_mappings:
             port_mappings[vm_id]["proxy_host"] = dind_mgmt_ip
 
-        # Create temporary directory for nginx config
-        config_dir = tempfile.mkdtemp(prefix="cyroid-vnc-proxy-")
-        config_path = Path(config_dir) / "nginx.conf"
+        # Prepare port mappings for Docker
+        # Map each proxy port to the same port on all interfaces
+        docker_ports = {}
+        for vm_id, mapping in port_mappings.items():
+            port = mapping["proxy_port"]
+            docker_ports[f"{port}/tcp"] = port
+
+        # Create container name
+        short_id = str(range_id).replace("-", "")[:12]
+        container_name = f"{PROXY_CONTAINER_PREFIX}-{short_id}"
+
+        # Labels for identification
+        labels = {
+            "cyroid.type": "vnc-proxy",
+            "cyroid.range_id": str(range_id),
+        }
+
+        # Escape single quotes in config for shell command
+        # Replace ' with '"'"' (end quote, escaped quote, start quote)
+        escaped_config = nginx_config.replace("'", "'\"'\"'")
+
+        # Build command that writes config and starts nginx
+        # We inject the config via shell command instead of volume mount because
+        # DinD has an isolated filesystem and cannot see host paths
+        command = [
+            "sh",
+            "-c",
+            f"echo '{escaped_config}' > /etc/nginx/nginx.conf && nginx -g 'daemon off;'",
+        ]
 
         try:
-            # Write nginx config
-            config_path.write_text(nginx_config)
-            logger.debug(f"Generated nginx config at {config_path}")
-
-            # Prepare port mappings for Docker
-            # Map each proxy port to the same port on all interfaces
-            docker_ports = {}
-            for vm_id, mapping in port_mappings.items():
-                port = mapping["proxy_port"]
-                docker_ports[f"{port}/tcp"] = port
-
-            # Create container name
-            short_id = str(range_id).replace("-", "")[:12]
-            container_name = f"{PROXY_CONTAINER_PREFIX}-{short_id}"
-
-            # Labels for identification
-            labels = {
-                "cyroid.type": "vnc-proxy",
-                "cyroid.range_id": str(range_id),
-            }
-
-            # Volume mount for nginx config
-            volumes = {
-                str(config_path): {"bind": "/etc/nginx/nginx.conf", "mode": "ro"}
-            }
-
             # Create and start the proxy container
             container = range_client.containers.run(
                 image=NGINX_IMAGE,
                 name=container_name,
                 detach=True,
                 ports=docker_ports,
-                volumes=volumes,
                 labels=labels,
                 network_mode="bridge",  # Use default bridge to access all VM containers
                 restart_policy={"Name": "unless-stopped"},
+                command=command,
             )
 
             logger.info(

@@ -1,7 +1,7 @@
 # backend/tests/unit/test_vnc_proxy_service.py
 """Unit tests for VNC proxy service for DinD console access."""
 import pytest
-from unittest.mock import MagicMock, patch, AsyncMock
+from unittest.mock import MagicMock
 
 
 class TestVNCProxyService:
@@ -77,8 +77,8 @@ class TestVNCProxyService:
             assert mapping['proxy_host'] == '172.30.1.10'
 
     @pytest.mark.asyncio
-    async def test_deploy_vnc_proxy_generates_nginx_stream_config(self, vnc_proxy_service):
-        """Nginx config should contain stream blocks for TCP proxying."""
+    async def test_deploy_vnc_proxy_injects_nginx_config_via_command(self, vnc_proxy_service):
+        """Nginx config should be injected via command (not volume mount) for DinD compatibility."""
         mock_range_client = MagicMock()
         vnc_proxy_service.docker_service.get_range_client_sync.return_value = mock_range_client
 
@@ -97,13 +97,22 @@ class TestVNCProxyService:
             vm_ports=vm_ports
         )
 
-        # Check that containers.run was called with nginx config mounted
+        # Check that containers.run was called with command (not volumes)
         call_kwargs = mock_range_client.containers.run.call_args[1]
-        assert 'volumes' in call_kwargs
 
-        # The nginx config should be in a bind mount or volume
-        volumes = call_kwargs['volumes']
-        assert any('/etc/nginx' in str(v) for v in volumes.values() if isinstance(v, dict))
+        # Should NOT have volumes (DinD can't see host paths)
+        assert 'volumes' not in call_kwargs
+
+        # Should have command that injects config via shell
+        assert 'command' in call_kwargs
+        command = call_kwargs['command']
+        assert command[0] == 'sh'
+        assert command[1] == '-c'
+        # Command should write config to nginx.conf and start nginx
+        assert '/etc/nginx/nginx.conf' in command[2]
+        assert 'nginx -g' in command[2]
+        # Should contain nginx stream config
+        assert 'stream {' in command[2]
 
     @pytest.mark.asyncio
     async def test_remove_vnc_proxy_removes_container(self, vnc_proxy_service):
