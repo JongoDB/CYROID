@@ -21,7 +21,14 @@ class VM(Base, UUIDMixin, TimestampMixin):
 
     range_id: Mapped[UUID] = mapped_column(ForeignKey("ranges.id", ondelete="CASCADE"))
     network_id: Mapped[UUID] = mapped_column(ForeignKey("networks.id"))
-    template_id: Mapped[UUID] = mapped_column(ForeignKey("vm_templates.id"))
+
+    # Source: either template OR snapshot (mutually exclusive)
+    template_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey("vm_templates.id"), nullable=True
+    )
+    snapshot_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey("snapshots.id"), nullable=True
+    )
 
     hostname: Mapped[str] = mapped_column(String(63))
     ip_address: Mapped[str] = mapped_column(String(15))
@@ -91,7 +98,12 @@ class VM(Base, UUIDMixin, TimestampMixin):
     network = relationship("Network", back_populates="vms")
     template = relationship("VMTemplate", back_populates="vms")
     snapshots: Mapped[List["Snapshot"]] = relationship(
-        "Snapshot", back_populates="vm"
+        "Snapshot", back_populates="vm", foreign_keys="Snapshot.vm_id"
+    )
+    source_snapshot = relationship(
+        "Snapshot",
+        back_populates="created_vms",
+        foreign_keys=[snapshot_id]
     )
     artifact_placements: Mapped[List["ArtifactPlacement"]] = relationship(
         "ArtifactPlacement", back_populates="vm", cascade="all, delete-orphan"

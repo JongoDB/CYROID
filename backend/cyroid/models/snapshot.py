@@ -48,4 +48,11 @@ class Snapshot(Base, UUIDMixin, TimestampMixin):
     tags: Mapped[List[str]] = mapped_column(JSON, default=list)
 
     # Relationships
-    vm = relationship("VM", back_populates="snapshots")
+    # VM this snapshot was taken from (Snapshot.vm_id -> VM.id)
+    vm = relationship("VM", back_populates="snapshots", foreign_keys=[vm_id])
+    # VMs created from this snapshot (VM.snapshot_id -> Snapshot.id)
+    created_vms = relationship(
+        "VM",
+        back_populates="source_snapshot",
+        foreign_keys="VM.snapshot_id"
+    )
