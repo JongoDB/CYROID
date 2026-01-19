@@ -177,7 +177,8 @@
       "Bash(jq:*)",
       "Bash(gh pr comment:*)",
       "Bash(./scripts/tag-release.sh:*)",
-      "Bash(gh issue comment:*)"
+      "Bash(gh issue comment:*)",
+      "Bash(gh issue edit:*)"
     ]
   },
   "enableAllProjectMcpServers": true,

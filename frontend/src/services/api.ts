@@ -1163,4 +1163,316 @@ export const filesApi = {
     api.post('/files/lock/heartbeat', null, { params: { path, lock_token: lockToken } }),
 }
 
+// ============ Content API ============
+
+export type ContentType = 'student_guide' | 'msel' | 'curriculum' | 'instructor_notes' | 'reference_material' | 'custom'
+
+export interface ContentAsset {
+  id: string
+  content_id: string
+  filename: string
+  file_path: string
+  mime_type: string
+  file_size: number
+  sha256_hash?: string
+  created_at: string
+}
+
+export interface Content {
+  id: string
+  title: string
+  description?: string
+  content_type: ContentType
+  body_markdown: string
+  body_html?: string
+  version: string
+  tags: string[]
+  is_published: boolean
+  organization?: string
+  created_by_id: string
+  created_at: string
+  updated_at: string
+  assets: ContentAsset[]
+}
+
+export interface ContentListItem {
+  id: string
+  title: string
+  description?: string
+  content_type: ContentType
+  version: string
+  tags: string[]
+  is_published: boolean
+  created_by_id: string
+  created_at: string
+  updated_at: string
+}
+
+export interface ContentCreate {
+  title: string
+  description?: string
+  content_type?: ContentType
+  body_markdown?: string
+  tags?: string[]
+  organization?: string
+}
+
+export interface ContentUpdate {
+  title?: string
+  description?: string
+  content_type?: ContentType
+  body_markdown?: string
+  tags?: string[]
+  organization?: string
+  is_published?: boolean
+}
+
+export interface ContentExport {
+  title: string
+  description?: string
+  content_type: ContentType
+  body_markdown: string
+  version: string
+  tags: string[]
+  organization?: string
+  exported_at: string
+  export_format: string
+}
+
+export interface ContentImport {
+  title: string
+  description?: string
+  content_type?: ContentType
+  body_markdown: string
+  version?: string
+  tags?: string[]
+  organization?: string
+}
+
+export interface ContentTypeOption {
+  value: ContentType
+  label: string
+}
+
+export const contentApi = {
+  list: (params?: {
+    content_type?: ContentType
+    tag?: string
+    search?: string
+    published_only?: boolean
+    limit?: number
+    offset?: number
+  }) =>
+    api.get<ContentListItem[]>('/content', { params }),
+
+  get: (id: string) =>
+    api.get<Content>(`/content/${id}`),
+
+  create: (data: ContentCreate) =>
+    api.post<Content>('/content', data),
+
+  update: (id: string, data: ContentUpdate) =>
+    api.put<Content>(`/content/${id}`, data),
+
+  delete: (id: string) =>
+    api.delete(`/content/${id}`),
+
+  publish: (id: string) =>
+    api.post<Content>(`/content/${id}/publish`),
+
+  unpublish: (id: string) =>
+    api.post<Content>(`/content/${id}/unpublish`),
+
+  createVersion: (id: string, newVersion: string) =>
+    api.post<Content>(`/content/${id}/version`, null, { params: { new_version: newVersion } }),
+
+  exportContent: (id: string, format: 'json' | 'md' | 'html' = 'json') =>
+    api.get<ContentExport | Blob>(`/content/${id}/export`, {
+      params: { format },
+      ...(format !== 'json' ? { responseType: 'blob' } : {}),
+    }),
+
+  importContent: (data: ContentImport) =>
+    api.post<Content>('/content/import', data),
+
+  uploadAsset: (contentId: string, file: File) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    return api.post<ContentAsset>(`/content/${contentId}/assets`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  },
+
+  deleteAsset: (contentId: string, assetId: string) =>
+    api.delete(`/content/${contentId}/assets/${assetId}`),
+
+  getTypes: () =>
+    api.get<ContentTypeOption[]>('/content/types/available'),
+}
+
+// ============ Training Events API ============
+
+export type EventStatus = 'draft' | 'scheduled' | 'running' | 'completed' | 'cancelled'
+
+export interface EventParticipant {
+  id: string
+  event_id: string
+  user_id: string
+  role: string
+  is_confirmed: boolean
+  created_at: string
+  username?: string
+}
+
+export interface TrainingEvent {
+  id: string
+  name: string
+  description?: string
+  start_datetime: string
+  end_datetime?: string
+  is_all_day: boolean
+  timezone: string
+  organization?: string
+  location?: string
+  blueprint_id?: string
+  content_ids: string[]
+  status: EventStatus
+  allowed_roles: string[]
+  tags: string[]
+  created_by_id: string
+  range_id?: string
+  created_at: string
+  updated_at: string
+  participant_count: number
+  blueprint_name?: string
+  created_by_username?: string
+}
+
+export interface TrainingEventDetail extends TrainingEvent {
+  participants: EventParticipant[]
+}
+
+export interface TrainingEventListItem {
+  id: string
+  name: string
+  description?: string
+  start_datetime: string
+  end_datetime?: string
+  is_all_day: boolean
+  timezone: string
+  organization?: string
+  location?: string
+  status: EventStatus
+  tags: string[]
+  allowed_roles: string[]
+  participant_count: number
+  has_blueprint: boolean
+  created_by_id: string
+  created_at: string
+}
+
+export interface EventCreate {
+  name: string
+  description?: string
+  start_datetime: string
+  end_datetime?: string
+  is_all_day?: boolean
+  timezone?: string
+  organization?: string
+  location?: string
+  blueprint_id?: string
+  content_ids?: string[]
+  allowed_roles?: string[]
+  tags?: string[]
+}
+
+export interface EventUpdate {
+  name?: string
+  description?: string
+  start_datetime?: string
+  end_datetime?: string
+  is_all_day?: boolean
+  timezone?: string
+  organization?: string
+  location?: string
+  blueprint_id?: string
+  content_ids?: string[]
+  allowed_roles?: string[]
+  tags?: string[]
+  status?: EventStatus
+}
+
+export interface EventContentItem {
+  id: string
+  title: string
+  description?: string
+  content_type: string
+  body_html?: string
+  version: string
+}
+
+export interface EventBriefing {
+  event_id: string
+  event_name: string
+  user_role: string
+  content_items: EventContentItem[]
+  range_id?: string
+  range_status?: string
+}
+
+export const trainingEventsApi = {
+  list: (params?: {
+    status?: EventStatus
+    start_after?: string
+    start_before?: string
+    my_events?: boolean
+    tag?: string
+    search?: string
+    limit?: number
+    offset?: number
+  }) =>
+    api.get<TrainingEventListItem[]>('/training-events', { params }),
+
+  get: (id: string) =>
+    api.get<TrainingEventDetail>(`/training-events/${id}`),
+
+  create: (data: EventCreate) =>
+    api.post<TrainingEvent>('/training-events', data),
+
+  update: (id: string, data: EventUpdate) =>
+    api.put<TrainingEvent>(`/training-events/${id}`, data),
+
+  delete: (id: string) =>
+    api.delete(`/training-events/${id}`),
+
+  publish: (id: string) =>
+    api.post<TrainingEvent>(`/training-events/${id}/publish`),
+
+  start: (id: string, autoDeploy = false) =>
+    api.post<TrainingEvent>(`/training-events/${id}/start`, null, { params: { auto_deploy: autoDeploy } }),
+
+  complete: (id: string) =>
+    api.post<TrainingEvent>(`/training-events/${id}/complete`),
+
+  cancel: (id: string) =>
+    api.post<TrainingEvent>(`/training-events/${id}/cancel`),
+
+  // Participants
+  listParticipants: (eventId: string) =>
+    api.get<EventParticipant[]>(`/training-events/${eventId}/participants`),
+
+  addParticipant: (eventId: string, userId: string, role = 'student') =>
+    api.post<EventParticipant>(`/training-events/${eventId}/participants`, { user_id: userId, role }),
+
+  join: (eventId: string, role = 'student') =>
+    api.post<EventParticipant>(`/training-events/${eventId}/join`, null, { params: { role } }),
+
+  removeParticipant: (eventId: string, userId: string) =>
+    api.delete(`/training-events/${eventId}/participants/${userId}`),
+
+  // Briefing (role-based content)
+  getBriefing: (eventId: string) =>
+    api.get<EventBriefing>(`/training-events/${eventId}/briefing`),
+}
+
 export default api

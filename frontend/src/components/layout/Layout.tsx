@@ -16,7 +16,9 @@ import {
   Key,
   LayoutTemplate,
   Target,
-  Settings
+  Settings,
+  BookOpen,
+  CalendarDays
 } from 'lucide-react'
 import clsx from 'clsx'
 import PasswordChangeModal from '../common/PasswordChangeModal'
@@ -38,6 +40,8 @@ const navigation: NavItem[] = [
   { name: 'VM Templates', href: '/templates', icon: Server },
   { name: 'Range Blueprints', href: '/blueprints', icon: LayoutTemplate },
   { name: 'Training Scenarios', href: '/scenarios', icon: Target },
+  { name: 'Content Library', href: '/content', icon: BookOpen },
+  { name: 'Training Events', href: '/events', icon: CalendarDays },
   { name: 'Ranges', href: '/ranges', icon: Network },
   { name: 'Artifacts', href: '/artifacts', icon: FileBox },
 ]

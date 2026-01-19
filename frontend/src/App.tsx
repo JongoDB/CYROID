@@ -19,6 +19,10 @@ import StudentLab from './pages/StudentLab'
 import ImageCache from './pages/ImageCache'
 import UserManagement from './pages/UserManagement'
 import Admin from './pages/Admin'
+import ContentLibrary from './pages/ContentLibrary'
+import ContentEditor from './pages/ContentEditor'
+import TrainingEvents from './pages/TrainingEvents'
+import TrainingEventDetail from './pages/TrainingEventDetail'
 import ProtectedRoute from './components/common/ProtectedRoute'
 import Layout from './components/layout/Layout'
 
@@ -76,6 +80,10 @@ function App() {
                 <Route path="/cache" element={<ImageCache />} />
                 <Route path="/users" element={<UserManagement />} />
                 <Route path="/admin" element={<Admin />} />
+                <Route path="/content" element={<ContentLibrary />} />
+                <Route path="/content/:id" element={<ContentEditor />} />
+                <Route path="/events" element={<TrainingEvents />} />
+                <Route path="/events/:id" element={<TrainingEventDetail />} />
                 <Route path="/artifacts" element={<div>Artifacts - Coming Soon</div>} />
               </Routes>
             </Layout>
