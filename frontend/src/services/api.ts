@@ -912,6 +912,209 @@ export const adminApi = {
     api.get<DockerStatusResponse>('/admin/docker-status'),
 }
 
+// ============ Infrastructure Observability API ============
+
+export interface ServiceHealth {
+  name: string
+  display_name: string
+  status: 'healthy' | 'unhealthy' | 'degraded' | 'unknown'
+  container_id?: string
+  container_status?: string
+  uptime_seconds?: number
+  uptime_human?: string
+  cpu_percent?: number
+  memory_mb?: number
+  memory_limit_mb?: number
+  memory_percent?: number
+  ports: string[]
+  health_check_output?: string
+  last_checked: string
+}
+
+export interface InfrastructureServicesResponse {
+  services: ServiceHealth[]
+  overall_status: 'healthy' | 'degraded' | 'unhealthy'
+  checked_at: string
+}
+
+export interface LogEntry {
+  timestamp?: string
+  level?: string
+  message: string
+  raw: string
+}
+
+export interface ServiceLogsResponse {
+  service: string
+  logs: LogEntry[]
+  total_lines: number
+  has_more: boolean
+  filters_applied: Record<string, unknown>
+}
+
+export interface InfraDockerContainer {
+  id: string
+  name: string
+  image: string
+  status: string
+  state: string
+  created?: string
+  ports: string[]
+  labels: Record<string, string>
+  is_cyroid_infra: boolean
+  is_cyroid_vm: boolean
+}
+
+export interface InfraDockerNetwork {
+  id: string
+  name: string
+  driver: string
+  scope: string
+  internal: boolean
+  subnet?: string
+  gateway?: string
+  container_count: number
+  is_cyroid_range: boolean
+}
+
+export interface InfraDockerVolume {
+  name: string
+  driver: string
+  mountpoint: string
+  created?: string
+  size_bytes?: number
+  labels: Record<string, string>
+}
+
+export interface InfraDockerImage {
+  id: string
+  tags: string[]
+  size_bytes: number
+  size_human: string
+  created?: string
+  is_cyroid_related: boolean
+}
+
+export interface DockerSummary {
+  total_containers: number
+  running_containers: number
+  stopped_containers: number
+  cyroid_vms: number
+  cyroid_infra: number
+  total_networks: number
+  cyroid_networks: number
+  total_volumes: number
+  total_images: number
+}
+
+export interface DockerOverviewResponse {
+  containers: InfraDockerContainer[]
+  networks: InfraDockerNetwork[]
+  volumes: InfraDockerVolume[]
+  images: InfraDockerImage[]
+  summary: DockerSummary
+}
+
+export interface HostMetrics {
+  cpu_count: number
+  cpu_percent: number
+  memory_total_mb: number
+  memory_used_mb: number
+  memory_available_mb: number
+  memory_percent: number
+  disk_total_gb: number
+  disk_used_gb: number
+  disk_free_gb: number
+  disk_percent: number
+  load_average?: number[]
+}
+
+export interface DatabaseMetrics {
+  connection_count: number
+  active_connections: number
+  idle_connections: number
+  database_size_mb: number
+  database_size_human: string
+  table_count: number
+  largest_tables: Array<{ name: string; size_bytes: number; size_human: string }>
+}
+
+export interface TaskQueueMetrics {
+  queue_length: number
+  workers_active: number
+  messages_total: number
+  delayed_messages: number
+}
+
+export interface StorageMetrics {
+  minio_bucket_count: number
+  minio_total_objects: number
+  minio_total_size_mb: number
+  iso_cache_size_mb: number
+  iso_cache_files: number
+  template_storage_size_mb: number
+  template_storage_files: number
+  vm_storage_size_mb: number
+  vm_storage_dirs: number
+}
+
+export interface InfrastructureMetricsResponse {
+  host: HostMetrics
+  database: DatabaseMetrics
+  task_queue: TaskQueueMetrics
+  storage: StorageMetrics
+  collected_at: string
+}
+
+export interface MigrationInfo {
+  revision: string
+  description: string
+  applied: boolean
+}
+
+export interface ConfigItem {
+  key: string
+  value: string
+  source: string
+}
+
+export interface SystemInfoResponse {
+  version: string
+  commit: string
+  build_date: string
+  app_name: string
+  python_version: string
+  docker_version?: string
+  architecture: string
+  is_arm: boolean
+  database_revision?: string
+  migrations: MigrationInfo[]
+  config: ConfigItem[]
+}
+
+export interface LogsQueryParams {
+  service: string
+  level?: string
+  search?: string
+  since?: string
+  until?: string
+  limit?: number
+  offset?: number
+}
+
+export const infrastructureApi = {
+  getServices: () =>
+    api.get<InfrastructureServicesResponse>('/admin/infrastructure/services'),
+  getLogs: (params: LogsQueryParams) =>
+    api.get<ServiceLogsResponse>('/admin/infrastructure/logs', { params }),
+  getDocker: () =>
+    api.get<DockerOverviewResponse>('/admin/infrastructure/docker'),
+  getMetrics: () =>
+    api.get<InfrastructureMetricsResponse>('/admin/infrastructure/metrics'),
+  getSystem: () =>
+    api.get<SystemInfoResponse>('/admin/infrastructure/system'),
+}
+
 // ============ Files API ============
 
 export interface FileInfo {
