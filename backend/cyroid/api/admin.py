@@ -17,6 +17,7 @@ from cyroid.models.user import User
 from cyroid.models.range import Range, RangeStatus
 from cyroid.models.vm import VM, VMStatus
 from cyroid.models.network import Network
+from cyroid.models.blueprint import RangeInstance
 from cyroid.services.docker_service import get_docker_service
 
 logger = logging.getLogger(__name__)
@@ -95,7 +96,14 @@ def cleanup_all_resources(
 
             # Update or delete database records
             if options.delete_database_records:
-                # Delete everything - VMs, networks, router, then range
+                # Delete everything - range_instances, VMs, networks, router, then range
+                # First delete range_instances that reference this range
+                range_instances = db.query(RangeInstance).filter(
+                    RangeInstance.range_id == range_obj.id
+                ).all()
+                for instance in range_instances:
+                    db.delete(instance)
+                    result.database_records_deleted += 1
                 for vm in range_obj.vms:
                     db.delete(vm)
                     result.database_records_deleted += 1
