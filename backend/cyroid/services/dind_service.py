@@ -8,7 +8,7 @@ instances using the same blueprint IPs.
 
 import asyncio
 import logging
-from typing import Optional
+from typing import List, Optional
 
 import docker
 from docker.errors import APIError, NotFound
@@ -408,6 +408,118 @@ class DinDService:
             }
         except NotFound:
             raise ValueError(f"DinD container not found for range {range_id}")
+
+    def _get_container_name(self, range_id: str) -> str:
+        """Get the DinD container name for a range."""
+        short_id = str(range_id).replace("-", "")[:12]
+        return f"cyroid-range-{short_id}"
+
+    async def setup_network_isolation_in_dind(
+        self,
+        range_id: str,
+        networks: List[str],
+        allow_internet: Optional[List[str]] = None,
+    ) -> None:
+        """
+        Apply iptables rules inside DinD container for network isolation.
+
+        This sets up firewall rules within the DinD container to:
+        - Block forwarding between different networks by default
+        - Allow traffic within the same network
+        - Optionally allow internet access for specified networks via NAT
+
+        Args:
+            range_id: Range identifier
+            networks: List of network names in this range
+            allow_internet: Networks that should have internet access (via DinD NAT)
+        """
+        allow_internet = allow_internet or []
+        container_name = self._get_container_name(range_id)
+
+        try:
+            # Get the DinD container (runs on host Docker daemon)
+            dind_container = self.host_client.containers.get(container_name)
+        except NotFound:
+            logger.error(f"Cannot find DinD container {container_name}")
+            return
+        except Exception as e:
+            logger.error(f"Error getting DinD container {container_name}: {e}")
+            return
+
+        # Build list of iptables rules to apply
+        rules = []
+
+        # Default: drop forwarding between networks
+        rules.append("iptables -P FORWARD DROP")
+
+        # Allow established connections (for return traffic)
+        rules.append(
+            "iptables -A FORWARD -m state --state ESTABLISHED,RELATED -j ACCEPT"
+        )
+
+        # Allow traffic within each network (same Docker bridge)
+        # Docker bridge names are based on network ID, but we use a simpler approach
+        # by allowing all traffic on the same interface
+        for network in networks:
+            # Allow loopback within each network
+            # Note: Docker internally handles same-network communication,
+            # but we add explicit rules for clarity
+            bridge_prefix = network[:12]  # Docker truncates to 12 chars
+            rules.append(
+                f"iptables -A FORWARD -i br-{bridge_prefix} -o br-{bridge_prefix} -j ACCEPT"
+            )
+
+        # Allow internet access for specified networks
+        for network in allow_internet:
+            bridge_prefix = network[:12]
+            # Allow outbound traffic from this network to eth0 (external)
+            rules.append(f"iptables -A FORWARD -i br-{bridge_prefix} -o eth0 -j ACCEPT")
+
+        # Set up NAT/MASQUERADE for internet-enabled networks (once, not per network)
+        if allow_internet:
+            # This allows return traffic from internet
+            rules.append("iptables -A FORWARD -i eth0 -m state --state ESTABLISHED,RELATED -j ACCEPT")
+            # MASQUERADE for outbound traffic (NAT)
+            rules.append(
+                "iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE"
+            )
+
+        # Execute rules inside the DinD container
+        for rule in rules:
+            try:
+                exit_code, output = dind_container.exec_run(rule, privileged=True)
+                if exit_code != 0:
+                    output_str = output.decode() if isinstance(output, bytes) else str(output)
+                    logger.warning(f"iptables rule failed: {rule} -> {output_str}")
+                else:
+                    logger.debug(f"Applied iptables rule: {rule}")
+            except Exception as e:
+                logger.warning(f"Error executing iptables rule '{rule}': {e}")
+
+        logger.info(
+            f"Applied network isolation rules for range {range_id} "
+            f"({len(networks)} networks, {len(allow_internet)} with internet)"
+        )
+
+    async def teardown_network_isolation_in_dind(
+        self,
+        range_id: str,
+    ) -> None:
+        """
+        Remove iptables rules for a range.
+
+        Note: This is effectively a no-op since destroying the DinD container
+        automatically removes all iptables rules. This method exists for
+        symmetry with setup and potential future use cases where rules might
+        need to be removed without destroying the container.
+
+        Args:
+            range_id: Range identifier
+        """
+        # No explicit action needed - destroying DinD container removes all rules
+        # Log for debugging purposes
+        logger.debug(f"Teardown network isolation for range {range_id} (no-op)")
+        pass
 
 
 # Singleton instance for dependency injection
