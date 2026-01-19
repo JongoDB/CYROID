@@ -67,6 +67,8 @@ services:
       - ${CYROID_DATA_DIR:-/data/cyroid}/shared:${CYROID_DATA_DIR:-/data/cyroid}/shared
       # Seed templates for built-in CYROID templates
       - ./data/seed-templates:/data/seed-templates:ro
+      # Seed blueprints for built-in CYROID blueprints
+      - ./data/seed-blueprints:/data/seed-blueprints:ro
       # Training scenarios (read from filesystem, writable for uploads)
       - ./data/scenarios:/data/scenarios
       # Buildable Docker images with Dockerfiles

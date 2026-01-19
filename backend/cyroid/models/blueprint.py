@@ -17,8 +17,12 @@ class RangeBlueprint(Base, UUIDMixin, TimestampMixin):
     base_subnet_prefix: Mapped[str] = mapped_column(String(20))  # e.g., "10.100"
     next_offset: Mapped[int] = mapped_column(Integer, default=0)
 
-    # Ownership
-    created_by: Mapped[UUID] = mapped_column(ForeignKey("users.id"))
+    # Built-in blueprint identification (like templates)
+    is_seed: Mapped[bool] = mapped_column(default=False)  # True for blueprints shipped with CYROID
+    seed_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, unique=True)  # e.g., "red-team-training-lab"
+
+    # Ownership (nullable for seed blueprints)
+    created_by: Mapped[Optional[UUID]] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_by_user = relationship("User", foreign_keys=[created_by])
 
     # Relationships
