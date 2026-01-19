@@ -91,7 +91,7 @@ class VM(Base, UUIDMixin, TimestampMixin):
     network = relationship("Network", back_populates="vms")
     template = relationship("VMTemplate", back_populates="vms")
     snapshots: Mapped[List["Snapshot"]] = relationship(
-        "Snapshot", back_populates="vm", cascade="all, delete-orphan"
+        "Snapshot", back_populates="vm"
     )
     artifact_placements: Mapped[List["ArtifactPlacement"]] = relationship(
         "ArtifactPlacement", back_populates="vm", cascade="all, delete-orphan"
