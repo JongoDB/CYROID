@@ -157,3 +157,133 @@ def test_teardown_range(client, auth_headers):
 
     assert response.status_code == 200
     assert response.json()["status"] == "draft"
+
+
+# ============================================================================
+# DinD-Aware Lifecycle Endpoint Tests
+# ============================================================================
+
+def test_start_range_requires_stopped_status(client, auth_headers):
+    """Test that start_range requires the range to be in STOPPED status."""
+    # Create a range (draft status)
+    create_response = client.post(
+        "/api/v1/ranges",
+        headers=auth_headers,
+        json={"name": "Test Range"},
+    )
+    range_id = create_response.json()["id"]
+
+    # Try to start a draft range - should fail
+    response = client.post(f"/api/v1/ranges/{range_id}/start", headers=auth_headers)
+    assert response.status_code == 400
+    assert "Cannot start range" in response.json()["detail"]
+
+
+def test_stop_range_requires_running_status(client, auth_headers):
+    """Test that stop_range requires the range to be in RUNNING status."""
+    # Create a range (draft status)
+    create_response = client.post(
+        "/api/v1/ranges",
+        headers=auth_headers,
+        json={"name": "Test Range"},
+    )
+    range_id = create_response.json()["id"]
+
+    # Try to stop a draft range - should fail
+    response = client.post(f"/api/v1/ranges/{range_id}/stop", headers=auth_headers)
+    assert response.status_code == 400
+    assert "Cannot stop range" in response.json()["detail"]
+
+
+def test_start_stopped_range(client, auth_headers):
+    """Test starting a stopped DinD-based range."""
+    # Create and deploy a range
+    create_response = client.post(
+        "/api/v1/ranges",
+        headers=auth_headers,
+        json={"name": "Test Range"},
+    )
+    range_id = create_response.json()["id"]
+
+    # Deploy it
+    deploy_response = client.post(f"/api/v1/ranges/{range_id}/deploy", headers=auth_headers)
+    assert deploy_response.status_code == 200
+    assert deploy_response.json()["status"] == "running"
+
+    # Stop it
+    stop_response = client.post(f"/api/v1/ranges/{range_id}/stop", headers=auth_headers)
+    assert stop_response.status_code == 200
+    assert stop_response.json()["status"] == "stopped"
+
+    # Start it again
+    start_response = client.post(f"/api/v1/ranges/{range_id}/start", headers=auth_headers)
+    assert start_response.status_code == 200
+    assert start_response.json()["status"] == "running"
+    assert "started_at" in start_response.json()
+
+
+def test_stop_running_range_with_dind(client, auth_headers):
+    """Test stopping a running DinD-based range."""
+    # Create and deploy a range
+    create_response = client.post(
+        "/api/v1/ranges",
+        headers=auth_headers,
+        json={"name": "Test Range"},
+    )
+    range_id = create_response.json()["id"]
+
+    # Deploy it
+    deploy_response = client.post(f"/api/v1/ranges/{range_id}/deploy", headers=auth_headers)
+    assert deploy_response.status_code == 200
+
+    # Stop it
+    stop_response = client.post(f"/api/v1/ranges/{range_id}/stop", headers=auth_headers)
+    assert stop_response.status_code == 200
+    assert stop_response.json()["status"] == "stopped"
+    assert "stopped_at" in stop_response.json()
+
+
+def test_delete_range_not_found(client, auth_headers):
+    """Test deleting a non-existent range returns 404."""
+    import uuid
+    fake_id = str(uuid.uuid4())
+    response = client.delete(f"/api/v1/ranges/{fake_id}", headers=auth_headers)
+    assert response.status_code == 404
+
+
+def test_delete_deployed_range(client, auth_headers):
+    """Test deleting a deployed range cleans up DinD resources."""
+    # Create and deploy a range
+    create_response = client.post(
+        "/api/v1/ranges",
+        headers=auth_headers,
+        json={"name": "Test Range"},
+    )
+    range_id = create_response.json()["id"]
+
+    # Deploy it
+    client.post(f"/api/v1/ranges/{range_id}/deploy", headers=auth_headers)
+
+    # Delete it
+    response = client.delete(f"/api/v1/ranges/{range_id}", headers=auth_headers)
+    assert response.status_code == 204
+
+    # Verify it's gone
+    get_response = client.get(f"/api/v1/ranges/{range_id}", headers=auth_headers)
+    assert get_response.status_code == 404
+
+
+def test_start_range_not_found(client, auth_headers):
+    """Test starting a non-existent range returns 404."""
+    import uuid
+    fake_id = str(uuid.uuid4())
+    response = client.post(f"/api/v1/ranges/{fake_id}/start", headers=auth_headers)
+    assert response.status_code == 404
+
+
+def test_stop_range_not_found(client, auth_headers):
+    """Test stopping a non-existent range returns 404."""
+    import uuid
+    fake_id = str(uuid.uuid4())
+    response = client.post(f"/api/v1/ranges/{fake_id}/stop", headers=auth_headers)
+    assert response.status_code == 404

@@ -51,6 +51,12 @@ def get_vyos_service():
     return VyOSService()
 
 
+def get_dind_service():
+    """Lazy import for DinD service."""
+    from cyroid.services.dind_service import get_dind_service as _get_dind_service
+    return _get_dind_service()
+
+
 def compute_deployment_status(range_obj, events: list) -> DeploymentStatusResponse:
     """Compute per-resource deployment status from events."""
     from datetime import timezone
@@ -254,6 +260,19 @@ def update_range(
 
 @router.delete("/{range_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
+    """Delete a range and clean up all associated Docker resources.
+
+    For DinD-based deployments:
+    - Destroys the DinD container (which automatically cleans up all VMs/networks inside)
+    - Clears Docker client cache for this range
+    - Deletes database record
+
+    For legacy deployments:
+    - Cleans up containers and networks via labels
+    - Deletes database record
+    """
+    import asyncio
+
     range_obj = db.query(Range).filter(Range.id == range_id).first()
     if not range_obj:
         raise HTTPException(
@@ -264,9 +283,34 @@ def delete_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
     # Cleanup Docker resources before deleting
     try:
         docker = get_docker_service()
-        docker.cleanup_range(str(range_id))
+        dind = get_dind_service()
+
+        # Check if this is a DinD-based deployment
+        if range_obj.dind_container_id:
+            # DinD-based deployment: destroy the DinD container
+            # This automatically cleans up all VMs and networks inside it
+            logger.info(f"Deleting DinD container for range {range_id}")
+
+            # Run async delete_range_container
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                loop.run_until_complete(dind.delete_range_container(str(range_id)))
+                logger.info(f"Successfully deleted DinD container for range {range_id}")
+            finally:
+                loop.close()
+
+            # Clear the Docker client cache for this range
+            docker.dind_service.close_range_client(str(range_id))
+
+        else:
+            # Legacy non-DinD deployment: use label-based cleanup
+            logger.info(f"Cleaning up legacy (non-DinD) range {range_id}")
+            docker.cleanup_range(str(range_id))
+
     except Exception as e:
         logger.warning(f"Failed to cleanup Docker resources for range {range_id}: {e}")
+        # Continue with database deletion even if Docker cleanup fails
 
     db.delete(range_obj)
     db.commit()
@@ -398,7 +442,16 @@ def deploy_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
 
 @router.post("/{range_id}/start", response_model=RangeResponse)
 def start_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
-    """Start all VMs and router in a stopped range."""
+    """Start all VMs and router in a stopped range.
+
+    For DinD-based deployments:
+    - Ensures the DinD container itself is running (starts it if stopped)
+    - Waits for Docker daemon inside DinD to be ready
+    - Starts VyOS router container inside DinD first
+    - Starts all VM containers inside DinD
+    """
+    import asyncio
+
     range_obj = db.query(Range).filter(Range.id == range_id).first()
     if not range_obj:
         raise HTTPException(
@@ -414,27 +467,94 @@ def start_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
 
     try:
         docker = get_docker_service()
-        vyos = get_vyos_service()
+        dind = get_dind_service()
 
-        # Step 1: Start the router first (VMs need networking)
-        range_router = db.query(RangeRouter).filter(RangeRouter.range_id == range_id).first()
-        if range_router and range_router.container_id:
+        # Check if this is a DinD-based deployment
+        if range_obj.dind_container_id and range_obj.dind_docker_url:
+            # DinD-based deployment
+            logger.info(f"Starting DinD-based range {range_id}")
+
+            # Step 0: Ensure the DinD container itself is running
+            # Use asyncio to run the async start_range_container method
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
             try:
-                vyos.start_router(range_router.container_id)
-                range_router.status = RouterStatus.RUNNING
-                db.commit()
-                logger.info(f"Started VyOS router for range {range_id}")
-            except Exception as e:
-                logger.warning(f"Failed to start VyOS router: {e}")
+                dind_info = loop.run_until_complete(
+                    dind.start_range_container(str(range_id))
+                )
+                logger.info(f"DinD container started/confirmed running: {dind_info}")
 
-        # Step 2: Start all VM containers
-        vms = db.query(VM).filter(VM.range_id == range_id).all()
-        for vm in vms:
-            if vm.container_id:
-                docker.start_container(vm.container_id)
-                vm.status = VMStatus.RUNNING
-                db.commit()
-                logger.info(f"Started VM {vm.hostname}")
+                # Update docker_url in case IP changed after restart
+                if dind_info.get("docker_url") and dind_info["docker_url"] != range_obj.dind_docker_url:
+                    range_obj.dind_docker_url = dind_info["docker_url"]
+                    range_obj.dind_mgmt_ip = dind_info.get("mgmt_ip")
+                    db.commit()
+                    logger.info(f"Updated DinD Docker URL to {dind_info['docker_url']}")
+            finally:
+                loop.close()
+
+            # Get Docker client for the inner Docker daemon
+            range_client = docker.get_range_client_sync(
+                str(range_id),
+                range_obj.dind_docker_url
+            )
+
+            # Step 1: Start VyOS router first (VMs need networking)
+            range_router = db.query(RangeRouter).filter(RangeRouter.range_id == range_id).first()
+            if range_router and range_router.container_id:
+                try:
+                    container = range_client.containers.get(range_router.container_id)
+                    container.start()
+                    range_router.status = RouterStatus.RUNNING
+                    db.commit()
+                    logger.info(f"Started VyOS router for range {range_id} inside DinD")
+                except Exception as e:
+                    logger.warning(f"Failed to start VyOS router: {e}")
+
+            # Step 2: Start all VM containers inside DinD
+            vms = db.query(VM).filter(VM.range_id == range_id).all()
+            for vm in vms:
+                if vm.container_id:
+                    try:
+                        container = range_client.containers.get(vm.container_id)
+                        container.start()
+                        vm.status = VMStatus.RUNNING
+                        db.commit()
+                        logger.info(f"Started VM {vm.hostname} inside DinD")
+                    except Exception as e:
+                        logger.warning(f"Failed to start VM {vm.hostname}: {e}")
+
+        else:
+            # Legacy non-DinD deployment (fallback)
+            # Range must have been deployed with DinD to start - otherwise redeploy is required
+            if not range_obj.dind_container_id:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Range has no DinD container. Please redeploy the range.",
+                )
+
+            logger.info(f"Starting legacy (non-DinD) range {range_id}")
+            vyos = get_vyos_service()
+
+            # Step 1: Start the router first (VMs need networking)
+            range_router = db.query(RangeRouter).filter(RangeRouter.range_id == range_id).first()
+            if range_router and range_router.container_id:
+                try:
+                    vyos.start_router(range_router.container_id)
+                    range_router.status = RouterStatus.RUNNING
+                    db.commit()
+                    logger.info(f"Started VyOS router for range {range_id}")
+                except Exception as e:
+                    logger.warning(f"Failed to start VyOS router: {e}")
+
+            # Step 2: Start all VM containers
+            vms = db.query(VM).filter(VM.range_id == range_id).all()
+            for vm in vms:
+                if vm.container_id:
+                    docker.start_container(vm.container_id)
+                    vm.status = VMStatus.RUNNING
+                    db.commit()
+                    logger.info(f"Started VM {vm.hostname}")
 
         range_obj.status = RangeStatus.RUNNING
         # Set lifecycle timestamp
@@ -452,6 +572,8 @@ def start_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
         )
         db.refresh(range_obj)
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to start range {range_id}: {e}")
         raise HTTPException(
@@ -468,7 +590,15 @@ def stop_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
 
     This stops all containers but preserves networks for quick restart.
     Use teardown to fully clean up resources.
+
+    For DinD-based deployments:
+    - Gets Docker client connected to inner Docker daemon
+    - Stops all VM containers inside the DinD container
+    - Stops VyOS router container inside DinD
+    - Does NOT stop the DinD container itself (preserves for restart)
     """
+    import asyncio
+
     range_obj = db.query(Range).filter(Range.id == range_id).first()
     if not range_obj:
         raise HTTPException(
@@ -484,27 +614,70 @@ def stop_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
 
     try:
         docker = get_docker_service()
-        vyos = get_vyos_service()
+        dind = get_dind_service()
 
-        # Step 1: Stop all VM containers
-        vms = db.query(VM).filter(VM.range_id == range_id).all()
-        for vm in vms:
-            if vm.container_id:
-                docker.stop_container(vm.container_id)
-                vm.status = VMStatus.STOPPED
-                db.commit()
-                logger.info(f"Stopped VM {vm.hostname}")
+        # Check if this is a DinD-based deployment
+        if range_obj.dind_container_id and range_obj.dind_docker_url:
+            # DinD-based deployment: operate on containers inside DinD
+            logger.info(f"Stopping DinD-based range {range_id}")
 
-        # Step 2: Stop the router container
-        range_router = db.query(RangeRouter).filter(RangeRouter.range_id == range_id).first()
-        if range_router and range_router.container_id:
-            try:
-                vyos.stop_router(range_router.container_id)
-                range_router.status = RouterStatus.STOPPED
-                db.commit()
-                logger.info(f"Stopped VyOS router for range {range_id}")
-            except Exception as e:
-                logger.warning(f"Failed to stop VyOS router: {e}")
+            # Get Docker client for the inner Docker daemon
+            range_client = docker.get_range_client_sync(
+                str(range_id),
+                range_obj.dind_docker_url
+            )
+
+            # Step 1: Stop all VM containers inside DinD
+            vms = db.query(VM).filter(VM.range_id == range_id).all()
+            for vm in vms:
+                if vm.container_id:
+                    try:
+                        container = range_client.containers.get(vm.container_id)
+                        container.stop(timeout=30)
+                        vm.status = VMStatus.STOPPED
+                        db.commit()
+                        logger.info(f"Stopped VM {vm.hostname} inside DinD")
+                    except Exception as e:
+                        logger.warning(f"Failed to stop VM {vm.hostname}: {e}")
+
+            # Step 2: Stop VyOS router container inside DinD
+            range_router = db.query(RangeRouter).filter(RangeRouter.range_id == range_id).first()
+            if range_router and range_router.container_id:
+                try:
+                    container = range_client.containers.get(range_router.container_id)
+                    container.stop(timeout=30)
+                    range_router.status = RouterStatus.STOPPED
+                    db.commit()
+                    logger.info(f"Stopped VyOS router for range {range_id} inside DinD")
+                except Exception as e:
+                    logger.warning(f"Failed to stop VyOS router: {e}")
+
+            # Note: We do NOT stop the DinD container itself - this allows quick restart
+
+        else:
+            # Legacy non-DinD deployment (fallback)
+            logger.info(f"Stopping legacy (non-DinD) range {range_id}")
+            vyos = get_vyos_service()
+
+            # Step 1: Stop all VM containers
+            vms = db.query(VM).filter(VM.range_id == range_id).all()
+            for vm in vms:
+                if vm.container_id:
+                    docker.stop_container(vm.container_id)
+                    vm.status = VMStatus.STOPPED
+                    db.commit()
+                    logger.info(f"Stopped VM {vm.hostname}")
+
+            # Step 2: Stop the router container
+            range_router = db.query(RangeRouter).filter(RangeRouter.range_id == range_id).first()
+            if range_router and range_router.container_id:
+                try:
+                    vyos.stop_router(range_router.container_id)
+                    range_router.status = RouterStatus.STOPPED
+                    db.commit()
+                    logger.info(f"Stopped VyOS router for range {range_id}")
+                except Exception as e:
+                    logger.warning(f"Failed to stop VyOS router: {e}")
 
         range_obj.status = RangeStatus.STOPPED
         # Set lifecycle timestamp
