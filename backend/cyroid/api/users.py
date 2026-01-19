@@ -348,9 +348,9 @@ def get_available_roles(current_user: CurrentUser):
             "description": "Create and manage cyber ranges, VMs, and templates"
         },
         {
-            "value": "facilitator",
-            "label": "Facilitator",
-            "description": "Run exercises and manage MSEL/injects"
+            "value": "student",
+            "label": "Student",
+            "description": "Participate in exercises and view training content"
         },
         {
             "value": "evaluator",

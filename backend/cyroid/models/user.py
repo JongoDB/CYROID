@@ -13,12 +13,12 @@ from cyroid.models.base import Base, TimestampMixin, UUIDMixin
 class UserRole(str, Enum):
     ADMIN = "admin"
     ENGINEER = "engineer"
-    FACILITATOR = "facilitator"
+    STUDENT = "student"  # Renamed from FACILITATOR
     EVALUATOR = "evaluator"
 
 
 # Available roles as constants (for validation)
-AVAILABLE_ROLES = ["admin", "engineer", "facilitator", "evaluator"]
+AVAILABLE_ROLES = ["admin", "engineer", "student", "evaluator"]
 
 
 class UserAttribute(Base, UUIDMixin, TimestampMixin):

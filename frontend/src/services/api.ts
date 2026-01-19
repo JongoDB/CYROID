@@ -111,7 +111,7 @@ export const authApi = {
 }
 
 // User Management API (admin-only)
-export type UserRole = 'admin' | 'engineer' | 'facilitator' | 'evaluator'
+export type UserRole = 'admin' | 'engineer' | 'student' | 'evaluator'
 
 export interface UserUpdate {
   email?: string
