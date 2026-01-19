@@ -1,7 +1,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Status-Active%20Development-brightgreen" alt="Status">
-  <img src="https://img.shields.io/badge/Phase-4%20of%207-blue" alt="Phase">
-  <img src="https://img.shields.io/badge/Version-0.4.0--alpha-orange" alt="Version">
+  <img src="https://img.shields.io/badge/Phase-5%20of%207-blue" alt="Phase">
+  <img src="https://img.shields.io/badge/Version-0.11.0--alpha-orange" alt="Version">
   <img src="https://img.shields.io/badge/License-Proprietary-red" alt="License">
 </p>
 
@@ -31,28 +31,60 @@
 
 - **Full Lifecycle Management**: Planning → Development → Deployment → Execution → Teardown
 - **Multi-OS Support**: Linux containers, Linux VMs (QEMU/KVM), Windows VMs (dockur/windows)
-- **Network Isolation**: Complete Docker network segmentation with custom subnets
+- **Complete Isolation**: Each range runs in its own Docker-in-Docker (DinD) container
 - **Web-Based Console**: VNC access to all VMs through browser
 - **Scenario Automation**: MSEL (Master Scenario Events List) execution engine
 - **Evidence Management**: Student submission, validation, and automated scoring
 
 ---
 
+## What's New in v0.11.0
+
+### DinD (Docker-in-Docker) Isolation
+
+Every range now deploys inside its own isolated Docker-in-Docker container, providing:
+
+- **Complete Network Isolation**: Each range has its own Docker daemon and network namespace
+- **Identical IP Spaces**: Multiple ranges can use the same blueprint IPs simultaneously
+- **Simplified Cleanup**: Deleting a range just removes its DinD container
+- **No IP Translation**: Blueprint IPs are used exactly as defined
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    CYROID Host Docker                                │
+│                                                                      │
+│   cyroid-mgmt (172.30.0.0/24)         cyroid-ranges (172.30.1.0/24) │
+│   ├── API: 172.30.0.10                ├── Range-1 DinD: 172.30.1.x  │
+│   ├── DB: 172.30.0.11                 │   └── Internal: 10.0.1.0/24 │
+│   ├── Redis: 172.30.0.12              ├── Range-2 DinD: 172.30.1.y  │
+│   ├── MinIO: 172.30.0.13              │   └── Internal: 10.0.1.0/24 │
+│   ├── Traefik: 172.30.0.14            │       (Same IPs - isolated!)│
+│   ├── Worker: 172.30.0.15             └── ...                       │
+│   └── Frontend: 172.30.0.20                                         │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
 ## Features
 
-### Implemented (Phases 1-4)
+### Implemented (Phases 1-4 + v0.11.0)
 
 | Category | Feature | Status |
 |----------|---------|--------|
 | **Authentication** | JWT-based auth with role management | ✅ Complete |
 | **User Management** | RBAC (Admin, Range Engineer, White Cell, Evaluator) | ✅ Complete |
+| **ABAC** | Attribute-based access control with resource tags | ✅ Complete |
 | **VM Templates** | CRUD operations, OS library (24+ Linux distros, Windows 7-11, Server 2003-2025) | ✅ Complete |
 | **Range Builder** | Visual drag-drop network designer | ✅ Complete |
+| **DinD Isolation** | Each range runs in isolated Docker-in-Docker container | ✅ Complete |
 | **Network Management** | Multi-segment Docker networks with custom subnets | ✅ Complete |
 | **VM Lifecycle** | Create, start, stop, restart, delete with real-time status | ✅ Complete |
 | **VNC Console** | Web-based graphical access via Traefik proxy | ✅ Complete |
+| **Console Pop-out** | Default new window, Shift+click for inline | ✅ Complete |
 | **Dynamic Networking** | Add/remove network interfaces on running VMs | ✅ Complete |
 | **Range Templating** | Import/export/clone range configurations | ✅ Complete |
+| **Comprehensive Export** | Full config, artifacts, MSEL, offline Docker images | ✅ Complete |
 | **Resource Monitoring** | CPU, memory, network statistics per VM | ✅ Complete |
 | **Event Logging** | Timestamped activity feed with real-time streaming | ✅ Complete |
 | **Artifact Repository** | MinIO-backed storage with SHA256 hashing | ✅ Complete |
@@ -60,15 +92,17 @@
 | **Execution Console** | Multi-panel dashboard with VM grid | ✅ Complete |
 | **MSEL Parser** | Markdown/YAML inject timeline | ✅ Complete |
 | **Manual Injects** | Trigger scenario events from console | ✅ Complete |
-| **ABAC** | Attribute-based access control with resource tags | ✅ Complete |
+| **Connection Tracking** | Monitor student activity | ✅ Complete |
+| **Version Display** | API endpoint + UI footer | ✅ Complete |
+| **Multi-Architecture** | x86_64 + ARM64 native, emulation warnings | ✅ Complete |
 
 ### In Development (Phase 5)
 
 | Feature | Progress | Target |
 |---------|----------|--------|
-| Evidence Submission Portal | 🟡 70% | Phase 5 |
-| Automated Evidence Validation | 🟡 50% | Phase 5 |
-| Scoring Engine | 🟡 30% | Phase 5 |
+| Evidence Submission Portal | 🟡 40% | Phase 5 |
+| Automated Evidence Validation | 🟡 30% | Phase 5 |
+| Scoring Engine | 🟡 20% | Phase 5 |
 | Network Traffic Visualization | 🟡 60% | Phase 5 |
 
 ### Planned (Phases 6-7)
@@ -78,7 +112,7 @@
 | MSEL Time-based Automation | 6 | High |
 | Attack Scenario Scripts | 6 | High |
 | CAC/PKI Authentication | 6 | Medium |
-| Offline/Air-gap Mode | 6 | Medium |
+| Offline/Air-gap Mode | 6 | ✅ Done (via export) |
 | Purple Team Integration (Caldera) | 7 | Medium |
 | Collaborative Range Editing | 7 | Low |
 | Advanced Reporting & Analytics | 7 | Low |
@@ -89,6 +123,8 @@
 ---
 
 ## Architecture
+
+### High-Level Overview
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
@@ -108,12 +144,12 @@
 └──────────────────────────────┬──────────────────────────────────────────┘
                                │ HTTPS/WSS
 ┌──────────────────────────────▼──────────────────────────────────────────┐
-│                     Traefik Reverse Proxy (v3)                           │
+│                     Traefik Reverse Proxy (v2.11)                        │
 │           HTTP Routing • VNC Path Proxy • SSL/TLS Termination            │
 └──────────────────────────────┬──────────────────────────────────────────┘
                                │
 ┌──────────────────────────────▼──────────────────────────────────────────┐
-│                   FastAPI Backend (Python 3.12)                          │
+│                   FastAPI Backend (Python 3.11)                          │
 │  ┌─────────────────────────────────────────────────────────────────┐    │
 │  │                        API Layer                                  │    │
 │  │  /auth  /users  /ranges  /vms  /networks  /templates  /artifacts │    │
@@ -121,8 +157,8 @@
 │  └─────────────────────────────────────────────────────────────────┘    │
 │  ┌─────────────────────────────────────────────────────────────────┐    │
 │  │                      Service Layer                                │    │
-│  │  DockerService • EventService • MSELParser • StorageService      │    │
-│  │  InjectService • ConnectionService • ValidationEngine            │    │
+│  │  DinDService • DockerService • RangeDeploymentService            │    │
+│  │  EventService • MSELParser • StorageService • VyOSService        │    │
 │  └─────────────────────────────────────────────────────────────────┘    │
 │  ┌─────────────────────────────────────────────────────────────────┐    │
 │  │                       Data Layer                                  │    │
@@ -134,33 +170,49 @@
     │ PostgreSQL │  │   Redis    │  │ MinIO  │  │  Docker  │
     │     16     │  │     7      │  │  S3    │  │  Engine  │
     │            │  │            │  │        │  │          │
-    │ • Users    │  │ • Cache    │  │ • ISOs │  │ • VMs    │
-    │ • Ranges   │  │ • Queue    │  │ • Tmpl │  │ • Nets   │
-    │ • VMs      │  │ • Sessions │  │ • Artf │  │ • Vols   │
+    │ • Users    │  │ • Cache    │  │ • ISOs │  │ • DinD   │
+    │ • Ranges   │  │ • Queue    │  │ • Tmpl │  │   Ranges │
+    │ • VMs      │  │ • Sessions │  │ • Artf │  │ • Nets   │
     │ • Events   │  │            │  │        │  │          │
     └────────────┘  └────────────┘  └────────┘  └──────────┘
-                                                      │
-                           ┌──────────────────────────┴───────────────────┐
-                           │           VM Container Types                 │
-                           ├──────────────────────────────────────────────┤
-                           │  ┌─────────────┐  ┌─────────────────────┐   │
-                           │  │   Docker    │  │   Linux VMs         │   │
-                           │  │ Containers  │  │   (qemus/qemu)      │   │
-                           │  │             │  │                     │   │
-                           │  │ • Ubuntu    │  │ • Ubuntu  • Debian  │   │
-                           │  │ • Alpine    │  │ • Fedora  • Rocky   │   │
-                           │  │ • Debian    │  │ • Arch    • Mint    │   │
-                           │  │ • CentOS    │  │ • Kali    • Parrot  │   │
-                           │  └─────────────┘  └─────────────────────┘   │
-                           │  ┌─────────────────────────────────────────┐│
-                           │  │           Windows VMs                   ││
-                           │  │         (dockur/windows)                ││
-                           │  │                                         ││
-                           │  │ • Windows 7/8/10/11                     ││
-                           │  │ • Windows Server 2003-2025              ││
-                           │  │ • KVM/QEMU acceleration                 ││
-                           │  └─────────────────────────────────────────┘│
-                           └──────────────────────────────────────────────┘
+```
+
+### DinD Range Isolation Architecture
+
+```
+┌────────────────────────────────────────────────────────────────────────────┐
+│                           Docker Host                                       │
+│                                                                             │
+│  ┌───────────────────────────────────────────────────────────────────────┐ │
+│  │              cyroid-mgmt Network (172.30.0.0/24)                       │ │
+│  │           CYROID Infrastructure Services (External)                    │ │
+│  └─────────┬──────────────────┬──────────────────┬───────────────────────┘ │
+│            │                  │                  │                         │
+│       ┌────┴────┐        ┌────┴────┐        ┌────┴────┐                    │
+│       │ CYROID  │        │ Traefik │        │ Database│                    │
+│       │   API   │        │ (VNC)   │        │  Redis  │                    │
+│       │ Worker  │        │         │        │  MinIO  │                    │
+│       └────┬────┘        └────┬────┘        └─────────┘                    │
+│            │                  │                                            │
+│  ┌─────────┴──────────────────┴─────────────────────────────────────────┐ │
+│  │              cyroid-ranges Network (172.30.1.0/24)                    │ │
+│  │              Range DinD Containers (Isolated)                         │ │
+│  └───────────┬────────────────────────────────┬─────────────────────────┘ │
+│              │                                │                           │
+│   ┌──────────▼──────────┐          ┌──────────▼──────────┐               │
+│   │   Range 1 DinD      │          │   Range 2 DinD      │               │
+│   │   (172.30.1.10)     │          │   (172.30.1.11)     │               │
+│   │                     │          │                     │               │
+│   │  ┌───────────────┐  │          │  ┌───────────────┐  │               │
+│   │  │ Inner Docker  │  │          │  │ Inner Docker  │  │               │
+│   │  │               │  │          │  │               │  │               │
+│   │  │ Net: 10.0.1.0 │  │          │  │ Net: 10.0.1.0 │  │  Same IPs!    │
+│   │  │ VM1: 10.0.1.10│  │          │  │ VM1: 10.0.1.10│  │  Fully        │
+│   │  │ VM2: 10.0.1.11│  │          │  │ VM2: 10.0.1.11│  │  Isolated!    │
+│   │  │ VyOS: 10.0.1.1│  │          │  │ VyOS: 10.0.1.1│  │               │
+│   │  └───────────────┘  │          │  └───────────────┘  │               │
+│   └─────────────────────┘          └─────────────────────┘               │
+└────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### Technology Stack
@@ -176,7 +228,7 @@
 | | noVNC | 1.4 | VNC Client |
 | | xterm.js | 5.x | Terminal Emulator |
 | **Backend** | FastAPI | 0.109 | API Framework |
-| | Python | 3.12 | Runtime |
+| | Python | 3.11 | Runtime |
 | | SQLAlchemy | 2.0 | ORM |
 | | Alembic | 1.13 | Migrations |
 | | Dramatiq | 1.15 | Task Queue |
@@ -184,35 +236,35 @@
 | **Infrastructure** | PostgreSQL | 16 | Primary Database |
 | | Redis | 7 | Cache & Queue |
 | | MinIO | Latest | Object Storage (S3) |
-| | Traefik | 3.x | Reverse Proxy |
+| | Traefik | 2.11 | Reverse Proxy |
 | | Docker | 24+ | Container Runtime |
+| | Docker DinD | 24 | Range Isolation |
 
-### Network Segmentation Architecture
+### Per-Range Network Architecture (Inside DinD)
 
-CYROID uses VyOS router containers to provide per-range network isolation, NAT, and routing:
+Each range runs VyOS router containers for internal network management:
 
 ```
 ┌────────────────────────────────────────────────────────────────────────────┐
-│                           Docker Host                                       │
+│                        Range DinD Container                                 │
 │                                                                             │
 │  ┌───────────────────────────────────────────────────────────────────────┐ │
 │  │               Management Network (10.0.0.0/16)                         │ │
-│  │                      cyroid-management                                 │ │
-│  └─────────┬──────────────────┬──────────────────┬───────────────────────┘ │
-│            │                  │                  │                         │
-│       ┌────┴────┐        ┌────┴────┐        ┌────┴────┐                    │
-│       │ CYROID  │        │ Traefik │        │ VyOS-1  │                    │
-│       │   API   │        │         │        │ Router  │                    │
-│       └─────────┘        └─────────┘        └────┬────┘                    │
-│                                                  │                         │
-│        Range 1                                   │                         │
-│  ┌───────────────────────────────────────────────┘                         │
-│  │                                                                         │
-│  │  eth1 ──► Network A (10.0.1.0/24) ──┬── VM1 (10.0.1.10)                │
-│  │                                      └── VM2 (10.0.1.11)                │
-│  │                                                                         │
-│  │  eth2 ──► Network B (10.0.2.0/24) ──── VM3 (10.0.2.10)                 │
-│  └─────────────────────────────────────────────────────────────────────────┘
+│  │                      Internal to DinD                                  │ │
+│  └─────────┬────────────────────────────────────────────────────────────┘ │
+│            │                                                               │
+│       ┌────┴────┐                                                          │
+│       │ VyOS    │                                                          │
+│       │ Router  │                                                          │
+│       └────┬────┘                                                          │
+│            │                                                               │
+│  ┌─────────┴───────────────────────────────────────────────────────────┐  │
+│  │                                                                      │  │
+│  │  eth1 ──► Network A (10.0.1.0/24) ──┬── VM1 (10.0.1.10)            │  │
+│  │                                      └── VM2 (10.0.1.11)            │  │
+│  │                                                                      │  │
+│  │  eth2 ──► Network B (10.0.2.0/24) ──── VM3 (10.0.2.10)             │  │
+│  └─────────────────────────────────────────────────────────────────────┘  │
 └────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -220,11 +272,11 @@ CYROID uses VyOS router containers to provide per-range network isolation, NAT, 
 
 | Feature | Description |
 |---------|-------------|
+| **DinD Isolation** | Each range runs in its own Docker-in-Docker container |
 | **Per-Range VyOS Router** | Each range gets a dedicated VyOS container for routing/NAT |
-| **Management Network** | 10.0.0.0/16 for CYROID ↔ VyOS communication |
 | **Network Isolation** | Shield icon toggle - VyOS firewall blocks external access |
 | **Internet Access** | Globe icon toggle - VyOS NAT enables per-network internet |
-| **VNC Unaffected** | Traefik connects directly to range networks for console access |
+| **VNC Access** | Traefik routes through cyroid-ranges to DinD containers |
 
 **Network Connectivity Matrix:**
 
@@ -259,6 +311,9 @@ cp .env.example .env
 # Generate secure secrets
 sed -i "s/your-secret-key-here/$(openssl rand -hex 32)/" .env
 
+# Initialize CYROID networks
+./scripts/init-networks.sh
+
 # Start all services
 docker-compose up -d
 
@@ -266,7 +321,22 @@ docker-compose up -d
 docker-compose ps
 
 # Check API health
-curl http://localhost:8000/health
+curl http://localhost/api/v1/version
+```
+
+### Network Initialization
+
+CYROID uses external Docker networks for isolation. Initialize them before first run:
+
+```bash
+# Create required networks
+./scripts/init-networks.sh
+
+# Output:
+# === Initializing CYROID Networks ===
+# Created cyroid-mgmt (172.30.0.0/24)
+# Created cyroid-ranges (172.30.1.0/24)
+# Created traefik-routing
 ```
 
 ### Access Points
@@ -274,7 +344,7 @@ curl http://localhost:8000/health
 | Service | URL | Credentials |
 |---------|-----|-------------|
 | Web UI | http://localhost | Self-register |
-| API Docs | http://localhost:8000/docs | JWT required |
+| API Docs | http://localhost/api/v1/docs | JWT required |
 | Traefik Dashboard | http://localhost:8080 | None |
 | MinIO Console | http://localhost:9001 | See .env |
 
@@ -283,7 +353,7 @@ curl http://localhost:8000/health
 1. **Register**: Navigate to http://localhost and create an account
 2. **Create Template**: Go to Templates → Add Template → Configure a VM template
 3. **Build Range**: Go to Ranges → New Range → Add VMs and networks
-4. **Deploy**: Click Deploy to provision all resources
+4. **Deploy**: Click Deploy to provision all resources (creates DinD container)
 5. **Access VMs**: Use the VNC console to interact with running VMs
 
 ---
@@ -297,6 +367,7 @@ CYROID runs natively on both **x86_64** and **ARM64** architectures (Apple Silic
 | Feature | x86_64 | ARM64 |
 |---------|--------|-------|
 | Core Platform (API, Frontend, DB) | ✅ Native | ✅ Native |
+| DinD Range Containers | ✅ Native | ✅ Native |
 | Linux Containers | ✅ Native | ✅ Native |
 | Linux VMs (Ubuntu, Debian, Fedora, Alpine, Rocky, Alma, Kali) | ✅ Native | ✅ Native |
 | Linux VMs (Arch, Manjaro, Security Onion, others) | ✅ Native | ⚠️ Emulated |
@@ -309,6 +380,7 @@ When running CYROID on ARM64 hosts (e.g., Apple Silicon Macs, AWS Graviton insta
 
 **Native Performance:**
 - All core platform services (API, database, cache, storage) run natively
+- DinD range containers run natively
 - Docker containers run natively
 - Linux VMs for supported distributions download ARM64 ISOs automatically
 
@@ -325,16 +397,6 @@ When running CYROID on ARM64 hosts (e.g., Apple Silicon Macs, AWS Graviton insta
 | Emulated x86 | 5-10% | Development, testing, demos |
 
 > **Note:** The UI displays inline warnings when VMs will run via emulation, allowing you to understand performance implications before deployment.
-
-### Development on ARM
-
-CYROID fully supports development workflows on ARM64:
-
-1. All features remain fully functional
-2. The UI clearly indicates when emulation is active
-3. No code changes required between ARM development and x86 production deployment
-
-The platform automatically detects host architecture and selects native ISOs where available.
 
 ---
 
@@ -359,9 +421,12 @@ CYROID/
 │   │   ├── models/            # SQLAlchemy models
 │   │   ├── schemas/           # Pydantic schemas
 │   │   ├── services/          # Business logic
-│   │   │   ├── docker_service.py
-│   │   │   ├── event_service.py
-│   │   │   └── storage_service.py
+│   │   │   ├── dind_service.py         # DinD container management
+│   │   │   ├── docker_service.py       # Docker orchestration
+│   │   │   ├── range_deployment_service.py  # Range lifecycle
+│   │   │   ├── vyos_service.py         # VyOS router management
+│   │   │   ├── event_service.py        # Event broadcasting
+│   │   │   └── storage_service.py      # MinIO storage
 │   │   └── tasks/             # Async workers (Dramatiq)
 │   ├── alembic/               # Database migrations
 │   ├── tests/                 # Test suite
@@ -383,6 +448,14 @@ CYROID/
 │   │   ├── services/          # API client
 │   │   └── types/             # TypeScript types
 │   └── Dockerfile
+│
+├── docker/                     # Docker configurations
+│   ├── Dockerfile.dind-base   # Custom DinD image
+│   └── daemon.json            # DinD daemon config
+│
+├── scripts/                    # Utility scripts
+│   ├── init-networks.sh       # Network initialization
+│   └── build-dind-image.sh    # Custom DinD build
 │
 ├── docs/                       # Documentation
 │   └── plans/                 # Development plans
@@ -406,20 +479,27 @@ Phase 2: Network & Deployment       ██████████████�
 Phase 3: Templates & Artifacts      ████████████████████ 100% ✅
 Phase 4: Execution & Monitoring     ████████████████████ 100% ✅
 Phase 5: Evidence & Scoring         ████████░░░░░░░░░░░░  40% 🟡
-Phase 6: Automation & Intelligence  ░░░░░░░░░░░░░░░░░░░░   0% ⏳
+Phase 6: Automation & Intelligence  ███░░░░░░░░░░░░░░░░░  17% 🟡
 Phase 7: Advanced Features          ░░░░░░░░░░░░░░░░░░░░   0% ⏳
 ```
 
 ### Milestone Details
 
 #### Phase 1-4: Foundation (Complete)
-- User authentication and RBAC
-- VM template library with 24+ OS options
+- User authentication and RBAC/ABAC
+- VM template library with 27+ OS options
 - Visual range builder with drag-drop networking
 - Full VM lifecycle management
-- VNC console access
+- VNC console access with pop-out windows
 - Range templating (import/export/clone)
+- Comprehensive export with Docker images
 - Event logging and real-time monitoring
+
+#### Phase 4.5: DinD Isolation (Complete - v0.11.0)
+- [x] Docker-in-Docker range containers
+- [x] Complete network namespace isolation
+- [x] Multiple ranges with identical IP spaces
+- [x] Simplified range deployment/cleanup
 
 #### Phase 5: Evidence & Scoring (Current)
 - [ ] Evidence submission portal (upload interface)
@@ -436,7 +516,7 @@ Phase 7: Advanced Features          ░░░░░░░░░░░░░░�
 - [ ] Attack scenario automation
 - [ ] Advanced scoring (timeline reconstruction)
 - [ ] CAC/PKI authentication
-- [ ] Offline deployment mode
+- [x] Offline deployment mode (via comprehensive export)
 
 #### Phase 7: Advanced Features
 - [ ] Purple team integration (Caldera, Atomic Red Team)
@@ -451,7 +531,7 @@ Phase 7: Advanced Features          ░░░░░░░░░░░░░░�
 |--------|--------|---------|
 | Range deployment time (10 VMs) | < 5 minutes | ~3 minutes |
 | VM console latency | < 500ms | ~200ms |
-| Concurrent ranges supported | 10+ | Tested: 5 |
+| Concurrent ranges supported | 10+ | Unlimited (DinD isolated) |
 | VM templates available | 30+ | 27 |
 | API response time (p95) | < 200ms | ~150ms |
 
@@ -459,7 +539,7 @@ Phase 7: Advanced Features          ░░░░░░░░░░░░░░�
 
 ## API Reference
 
-Full API documentation available at `http://localhost:8000/docs` (Swagger UI) when the server is running.
+Full API documentation available at `http://localhost/api/v1/docs` (Swagger UI) when the server is running.
 
 ### Key Endpoints
 
@@ -476,8 +556,8 @@ GET    /api/v1/ranges             # List all ranges
 POST   /api/v1/ranges             # Create range
 GET    /api/v1/ranges/{id}        # Get range details
 PUT    /api/v1/ranges/{id}        # Update range
-DELETE /api/v1/ranges/{id}        # Delete range
-POST   /api/v1/ranges/{id}/deploy # Deploy range
+DELETE /api/v1/ranges/{id}        # Delete range (removes DinD container)
+POST   /api/v1/ranges/{id}/deploy # Deploy range (creates DinD container)
 POST   /api/v1/ranges/{id}/start  # Start all VMs
 POST   /api/v1/ranges/{id}/stop   # Stop all VMs
 GET    /api/v1/ranges/{id}/export # Export as template
@@ -531,13 +611,13 @@ Access control uses ABAC (Attribute-Based Access Control) with resource tags for
 
 ```bash
 # Database
-DATABASE_URL=postgresql://cyroid:cyroid@db:5432/cyroid
+DATABASE_URL=postgresql://cyroid:cyroid@172.30.0.11:5432/cyroid
 
 # Redis
-REDIS_URL=redis://redis:6379/0
+REDIS_URL=redis://172.30.0.12:6379/0
 
 # MinIO
-MINIO_ENDPOINT=minio:9000
+MINIO_ENDPOINT=172.30.0.13:9000
 MINIO_ACCESS_KEY=cyroid
 MINIO_SECRET_KEY=<secure-password>
 
@@ -551,9 +631,19 @@ ISO_CACHE_DIR=/data/cyroid/iso-cache
 TEMPLATE_STORAGE_DIR=/data/cyroid/template-storage
 VM_STORAGE_DIR=/data/cyroid/vm-storage
 
-# Docker
-DOCKER_HOST=unix:///var/run/docker.sock
+# DinD Configuration
+DIND_IMAGE=docker:24-dind
+DIND_STARTUP_TIMEOUT=60
+DIND_DOCKER_PORT=2375
 ```
+
+### Network Configuration
+
+| Network | Subnet | Purpose |
+|---------|--------|---------|
+| cyroid-mgmt | 172.30.0.0/24 | CYROID infrastructure services |
+| cyroid-ranges | 172.30.1.0/24 | Range DinD containers |
+| traefik-routing | Dynamic | Traefik service routing |
 
 ### VM Resource Defaults
 
@@ -564,19 +654,47 @@ DOCKER_HOST=unix:///var/run/docker.sock
 | Windows Workstation | 2 | 4 GB | 60 GB |
 | Windows Server | 4 | 8 GB | 80 GB |
 
-### Limits
+### DinD Range Defaults
 
-| Parameter | Soft Limit | Hard Limit |
-|-----------|------------|------------|
-| VMs per Range | 25 (warning) | 50 (enforced) |
-| Networks per Range | - | 20 |
-| Concurrent Ranges | - | Based on host resources |
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| Memory Limit | 8g | Per-range DinD container |
+| CPU Limit | 4.0 | Per-range DinD container |
+| Docker Port | 2375 | Internal Docker daemon |
 
 ---
 
 ## Troubleshooting
 
 ### Common Issues
+
+<details>
+<summary><strong>Network Initialization Errors</strong></summary>
+
+```bash
+# Networks must be created before docker-compose up
+./scripts/init-networks.sh
+
+# If networks already exist with different config
+docker network rm cyroid-mgmt cyroid-ranges traefik-routing
+./scripts/init-networks.sh
+```
+</details>
+
+<details>
+<summary><strong>DinD Container Won't Start</strong></summary>
+
+```bash
+# Check Docker daemon status
+docker info
+
+# Verify privileged mode is allowed
+docker run --rm --privileged docker:24-dind dockerd --help
+
+# Check range container logs
+docker logs cyroid-range-<range-id-first-12-chars>
+```
+</details>
 
 <details>
 <summary><strong>Docker Connection Errors</strong></summary>
@@ -616,11 +734,11 @@ sudo usermod -aG kvm $USER
 
 ```bash
 # Verify VM has display_type="desktop"
-# Check traefik network exists
-docker network ls | grep traefik
+# Check traefik can reach range network
+docker network inspect cyroid-ranges
 
-# Verify VM is running
-docker ps | grep <vm-name>
+# Verify DinD container is running
+docker ps | grep cyroid-range
 
 # Check traefik logs
 docker-compose logs traefik
@@ -680,6 +798,17 @@ docker-compose exec api alembic upgrade head
 docker-compose exec api alembic downgrade -1
 ```
 
+### Building Custom DinD Image
+
+```bash
+# Build optimized DinD image
+./scripts/build-dind-image.sh
+
+# Use custom image
+export DIND_IMAGE=cyroid-dind:latest
+docker-compose up -d
+```
+
 ---
 
 ## Contributing
@@ -698,16 +827,32 @@ Proprietary - All Rights Reserved
 
 ---
 
+## Version History
+
+| Version | Date | Highlights |
+|---------|------|------------|
+| 0.11.0 | 2026-01-19 | DinD isolation for all ranges, simplified deployment |
+| 0.10.1 | 2026-01-16 | Bug fixes, dropdown overlay fix |
+| 0.10.0 | 2026-01-16 | Multi-architecture support (x86_64 + ARM64) |
+| 0.9.0 | 2026-01-15 | Version display, console pop-out default |
+| 0.8.0 | 2026-01-15 | Comprehensive range export with Docker images |
+| 0.7.0 | 2026-01-14 | Execution console, MSEL, monitoring |
+| 0.6.0 | 2026-01-13 | Range templates, artifacts, snapshots |
+| 0.5.0 | 2026-01-12 | Multi-network, visual builder, deployment |
+| 0.4.0 | 2026-01-11 | Initial auth, templates, basic ranges |
+
+---
+
 ## Project Statistics
 
 | Metric | Value |
 |--------|-------|
-| Backend LoC | ~4,000+ Python |
-| Frontend LoC | ~3,000+ TypeScript |
-| Database Models | 15+ |
-| API Endpoints | 50+ |
+| Backend LoC | ~8,000+ Python |
+| Frontend LoC | ~5,000+ TypeScript |
+| Database Models | 18+ |
+| API Endpoints | 60+ |
 | Supported OS Templates | 27+ |
-| Development Phase | 4 of 7 (57%) |
+| Development Phase | 5 of 7 (71%) |
 
 ---
 
