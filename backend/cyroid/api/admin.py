@@ -27,6 +27,7 @@ from cyroid.models.vm import VM, VMStatus
 from cyroid.models.network import Network
 from cyroid.models.blueprint import RangeInstance
 from cyroid.services.docker_service import get_docker_service
+from cyroid.services.dind_service import get_dind_service
 from cyroid.schemas.infrastructure import (
     ServiceHealth,
     InfrastructureServicesResponse,
@@ -60,6 +61,7 @@ AdminUser = Annotated[User, Depends(require_admin())]
 class CleanupResult(BaseModel):
     """Result of a cleanup operation."""
     ranges_cleaned: int
+    dind_containers_removed: int
     containers_removed: int
     networks_removed: int
     database_records_updated: int
@@ -68,11 +70,19 @@ class CleanupResult(BaseModel):
     orphaned_resources_cleaned: int
 
 
+class CleanupMode(str):
+    """Cleanup operation mode."""
+    RESET_TO_DRAFT = "reset_to_draft"  # Stop DinD containers, reset DB to draft state
+    PURGE_RANGES = "purge_ranges"  # Delete DinD containers AND DB records
+
+
 class CleanupRequest(BaseModel):
     """Options for cleanup operation."""
-    clean_database: bool = True  # Also reset database records
-    delete_database_records: bool = False  # Delete all ranges/VMs/networks from DB
-    force: bool = False  # Force cleanup even if ranges appear active
+    mode: str = CleanupMode.RESET_TO_DRAFT  # "reset_to_draft" or "purge_ranges"
+    # Legacy fields for backwards compatibility
+    clean_database: bool = True
+    delete_database_records: bool = False
+    force: bool = False
 
 
 @router.post("/cleanup-all", response_model=CleanupResult)
@@ -82,26 +92,29 @@ def cleanup_all_resources(
     options: Optional[CleanupRequest] = None,
 ):
     """
-    Nuclear cleanup: Remove ALL CYROID range resources.
+    Cleanup CYROID range resources with two modes:
 
-    This will:
-    1. Stop and remove all VM containers (not CYROID infrastructure)
-    2. Remove all range networks (not management network)
-    3. Optionally reset database records to reflect cleanup
+    **reset_to_draft**: Stop all DinD containers, reset ranges to draft state (keeps range definitions)
+    **purge_ranges**: Delete all DinD containers AND range records from database (keeps templates, ISOs)
 
     **Requires admin privileges.**
-
-    Use this when:
-    - Starting fresh after testing
-    - Recovering from inconsistent state
-    - Preparing for a clean deployment
     """
+    import asyncio
+
     if options is None:
         options = CleanupRequest()
 
+    # Handle legacy options
+    if options.delete_database_records:
+        options.mode = CleanupMode.PURGE_RANGES
+    elif options.clean_database:
+        options.mode = CleanupMode.RESET_TO_DRAFT
+
     docker = get_docker_service()
+    dind = get_dind_service()
     result = CleanupResult(
         ranges_cleaned=0,
+        dind_containers_removed=0,
         containers_removed=0,
         networks_removed=0,
         database_records_updated=0,
@@ -110,21 +123,41 @@ def cleanup_all_resources(
         orphaned_resources_cleaned=0,
     )
 
-    # Step 1: Get all ranges from database and clean them up properly
-    logger.info(f"Admin cleanup initiated by user {admin_user.email}")
+    logger.info(f"Admin cleanup initiated by user {admin_user.email}, mode={options.mode}")
+
+    # Step 1: Get all ranges from database
     ranges = db.query(Range).all()
 
     for range_obj in ranges:
         try:
-            # Use the proper cleanup method for each range
-            cleanup_result = docker.cleanup_range(str(range_obj.id))
-            result.containers_removed += cleanup_result.get("containers", 0)
-            result.networks_removed += cleanup_result.get("networks", 0)
+            range_id = str(range_obj.id)
+
+            # Delete DinD container if exists (this cleans up all VMs/networks inside)
+            if range_obj.dind_container_id or range_obj.dind_container_name:
+                try:
+                    # Run async delete synchronously
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    try:
+                        loop.run_until_complete(dind.delete_range_container(range_id))
+                        result.dind_containers_removed += 1
+                    finally:
+                        loop.close()
+                except Exception as e:
+                    logger.warning(f"Could not delete DinD container for range {range_id}: {e}")
+
+            # Also try legacy cleanup (for any pre-DinD containers/networks)
+            try:
+                cleanup_result = docker.cleanup_range(range_id)
+                result.containers_removed += cleanup_result.get("containers", 0)
+                result.networks_removed += cleanup_result.get("networks", 0)
+            except Exception as e:
+                logger.debug(f"Legacy cleanup for range {range_id}: {e}")
+
             result.ranges_cleaned += 1
 
-            # Update or delete database records
-            if options.delete_database_records:
-                # Delete everything - range_instances, VMs, networks, router, then range
+            if options.mode == CleanupMode.PURGE_RANGES:
+                # Delete all range data from database
                 # First delete range_instances that reference this range
                 range_instances = db.query(RangeInstance).filter(
                     RangeInstance.range_id == range_obj.id
@@ -132,23 +165,40 @@ def cleanup_all_resources(
                 for instance in range_instances:
                     db.delete(instance)
                     result.database_records_deleted += 1
+
+                # Delete VMs
                 for vm in range_obj.vms:
                     db.delete(vm)
                     result.database_records_deleted += 1
+
+                # Delete networks
                 for network in range_obj.networks:
                     db.delete(network)
                     result.database_records_deleted += 1
+
+                # Delete router if exists
                 if range_obj.router:
                     db.delete(range_obj.router)
                     result.database_records_deleted += 1
+
+                # Delete range
                 db.delete(range_obj)
                 result.database_records_deleted += 1
-            elif options.clean_database:
-                # Reset range status
+
+            else:  # RESET_TO_DRAFT
+                # Reset range to draft state
                 range_obj.status = RangeStatus.DRAFT
                 range_obj.error_message = None
+                range_obj.dind_container_id = None
+                range_obj.dind_container_name = None
+                range_obj.dind_mgmt_ip = None
+                range_obj.dind_docker_url = None
+                range_obj.deployed_at = None
+                range_obj.started_at = None
+                range_obj.stopped_at = None
+                result.database_records_updated += 1
 
-                # Reset all VMs in this range
+                # Reset all VMs
                 for vm in range_obj.vms:
                     vm.status = VMStatus.PENDING
                     vm.container_id = None
@@ -166,39 +216,59 @@ def cleanup_all_resources(
                     range_obj.router.status = "pending"
                     result.database_records_updated += 1
 
-                result.database_records_updated += 1  # For the range itself
-
         except Exception as e:
             error_msg = f"Failed to cleanup range {range_obj.name}: {e}"
             logger.error(error_msg)
             result.errors.append(error_msg)
 
-    # Step 2: Clean up any orphaned Docker resources (not in database)
-    logger.info("Cleaning up orphaned Docker resources...")
+    # Step 2: Clean up orphaned DinD containers (not tracked in database)
+    logger.info("Cleaning up orphaned DinD containers...")
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            orphan_containers = loop.run_until_complete(dind.list_range_containers())
+            for container in orphan_containers:
+                try:
+                    container_name = container.get("container_name", "")
+                    # Force remove orphaned container
+                    host_container = dind.host_client.containers.get(container_name)
+                    host_container.stop(timeout=5)
+                    host_container.remove(force=True)
+                    result.orphaned_resources_cleaned += 1
+                    logger.info(f"Removed orphaned DinD container: {container_name}")
+                except Exception as e:
+                    logger.warning(f"Could not remove orphan container: {e}")
+        finally:
+            loop.close()
+    except Exception as e:
+        error_msg = f"Failed orphan DinD cleanup: {e}"
+        logger.warning(error_msg)
+
+    # Step 3: Clean up any orphaned legacy Docker resources
+    logger.info("Cleaning up orphaned legacy Docker resources...")
     try:
         orphan_cleanup = docker.cleanup_all_cyroid_resources()
-        result.orphaned_resources_cleaned = (
+        result.orphaned_resources_cleaned += (
             orphan_cleanup.get("containers_removed", 0) +
             orphan_cleanup.get("networks_removed", 0)
         )
         result.errors.extend(orphan_cleanup.get("errors", []))
     except Exception as e:
-        error_msg = f"Failed orphan cleanup: {e}"
-        logger.error(error_msg)
-        result.errors.append(error_msg)
+        logger.debug(f"Legacy orphan cleanup: {e}")
 
     # Commit database changes
-    if options.clean_database or options.delete_database_records:
-        try:
-            db.commit()
-        except Exception as e:
-            error_msg = f"Failed to commit database changes: {e}"
-            logger.error(error_msg)
-            result.errors.append(error_msg)
-            db.rollback()
+    try:
+        db.commit()
+    except Exception as e:
+        error_msg = f"Failed to commit database changes: {e}"
+        logger.error(error_msg)
+        result.errors.append(error_msg)
+        db.rollback()
 
     logger.info(f"Admin cleanup complete: {result.ranges_cleaned} ranges, "
-               f"{result.containers_removed} containers, "
+               f"{result.dind_containers_removed} DinD containers, "
+               f"{result.containers_removed} legacy containers, "
                f"{result.networks_removed} networks")
 
     return result

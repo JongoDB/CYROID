@@ -1,6 +1,6 @@
 // frontend/src/pages/Admin.tsx
 import { useEffect, useState } from 'react'
-import { adminApi, usersApi, type CleanupResult, type DockerStatusResponse, type User, type RoleInfo, type UserAttribute, type AdminCreateUser } from '../services/api'
+import { adminApi, usersApi, type CleanupResult, type CleanupMode, type DockerStatusResponse, type User, type RoleInfo, type UserAttribute, type AdminCreateUser } from '../services/api'
 import { useAuthStore } from '../stores/authStore'
 import {
   Shield,
@@ -39,7 +39,7 @@ export default function Admin() {
   const [cleanupLoading, setCleanupLoading] = useState(false)
   const [cleanupResult, setCleanupResult] = useState<CleanupResult | null>(null)
   const [showCleanupConfirm, setShowCleanupConfirm] = useState(false)
-  const [cleanupOptions, setCleanupOptions] = useState({ clean_database: true, delete_database_records: false, force: false })
+  const [cleanupMode, setCleanupMode] = useState<CleanupMode>('reset_to_draft')
 
   // Users tab state
   const [users, setUsers] = useState<User[]>([])
@@ -95,10 +95,10 @@ export default function Admin() {
     try {
       setCleanupLoading(true)
       setCleanupResult(null)
-      const res = await adminApi.cleanupAll(cleanupOptions)
+      const res = await adminApi.cleanupAll({ mode: cleanupMode })
       setCleanupResult(res.data)
       setShowCleanupConfirm(false)
-      setSuccessMessage('Cleanup completed successfully')
+      setSuccessMessage(`Cleanup completed successfully (${cleanupMode === 'reset_to_draft' ? 'reset to draft' : 'purged'})`)
       // Refresh Docker status
       fetchDockerStatus()
     } catch (err: any) {
@@ -475,36 +475,40 @@ export default function Admin() {
                   System Cleanup
                 </h3>
                 <p className="mt-1 text-sm text-gray-500">
-                  Remove all CYROID range resources (containers, networks, database records).
+                  Stop all running ranges and clean up Docker resources.
                 </p>
               </div>
               <div className="px-4 py-5 sm:p-6">
                 {cleanupResult && (
                   <div className="mb-6 p-4 bg-gray-50 rounded-lg">
                     <h4 className="text-sm font-medium text-gray-900 mb-2">Cleanup Results</h4>
-                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                       <div>
-                        <span className="text-gray-500">Ranges cleaned:</span>
+                        <span className="text-gray-500">Ranges:</span>
                         <span className="ml-2 font-medium">{cleanupResult.ranges_cleaned}</span>
                       </div>
                       <div>
-                        <span className="text-gray-500">Containers removed:</span>
+                        <span className="text-gray-500">DinD containers:</span>
+                        <span className="ml-2 font-medium">{cleanupResult.dind_containers_removed}</span>
+                      </div>
+                      <div>
+                        <span className="text-gray-500">Legacy containers:</span>
                         <span className="ml-2 font-medium">{cleanupResult.containers_removed}</span>
                       </div>
                       <div>
-                        <span className="text-gray-500">Networks removed:</span>
+                        <span className="text-gray-500">Networks:</span>
                         <span className="ml-2 font-medium">{cleanupResult.networks_removed}</span>
                       </div>
                       <div>
-                        <span className="text-gray-500">DB records updated:</span>
+                        <span className="text-gray-500">DB updated:</span>
                         <span className="ml-2 font-medium">{cleanupResult.database_records_updated}</span>
                       </div>
                       <div>
-                        <span className="text-gray-500">DB records deleted:</span>
+                        <span className="text-gray-500">DB deleted:</span>
                         <span className="ml-2 font-medium">{cleanupResult.database_records_deleted}</span>
                       </div>
                       <div>
-                        <span className="text-gray-500">Orphaned resources:</span>
+                        <span className="text-gray-500">Orphaned:</span>
                         <span className="ml-2 font-medium">{cleanupResult.orphaned_resources_cleaned}</span>
                       </div>
                     </div>
@@ -522,33 +526,62 @@ export default function Admin() {
                 )}
 
                 <div className="space-y-4">
+                  <div className="text-sm font-medium text-gray-700 mb-2">Select cleanup mode:</div>
                   <div className="flex flex-col gap-3">
-                    <label className="flex items-center gap-2">
+                    <label className={clsx(
+                      "flex items-start gap-3 p-4 border rounded-lg cursor-pointer transition-colors",
+                      cleanupMode === 'reset_to_draft'
+                        ? "border-primary-500 bg-primary-50"
+                        : "border-gray-200 hover:border-gray-300"
+                    )}>
                       <input
-                        type="checkbox"
-                        checked={cleanupOptions.clean_database}
-                        onChange={(e) => setCleanupOptions({ ...cleanupOptions, clean_database: e.target.checked, delete_database_records: false })}
-                        disabled={cleanupOptions.delete_database_records}
-                        className="rounded border-gray-300 text-primary-600 focus:ring-primary-500 disabled:opacity-50"
+                        type="radio"
+                        name="cleanupMode"
+                        checked={cleanupMode === 'reset_to_draft'}
+                        onChange={() => setCleanupMode('reset_to_draft')}
+                        className="mt-1 text-primary-600 focus:ring-primary-500"
                       />
-                      <span className="text-sm text-gray-700">Reset database records (resets ranges to draft state)</span>
+                      <div>
+                        <div className="font-medium text-gray-900">Reset to Draft</div>
+                        <div className="text-sm text-gray-500 mt-1">
+                          Stop all DinD containers and reset ranges to draft state.
+                          Range definitions, VMs, and networks are preserved in the database and can be redeployed.
+                        </div>
+                      </div>
                     </label>
-                    <label className="flex items-center gap-2">
+                    <label className={clsx(
+                      "flex items-start gap-3 p-4 border rounded-lg cursor-pointer transition-colors",
+                      cleanupMode === 'purge_ranges'
+                        ? "border-red-500 bg-red-50"
+                        : "border-gray-200 hover:border-gray-300"
+                    )}>
                       <input
-                        type="checkbox"
-                        checked={cleanupOptions.delete_database_records}
-                        onChange={(e) => setCleanupOptions({ ...cleanupOptions, delete_database_records: e.target.checked, clean_database: !e.target.checked })}
-                        className="rounded border-gray-300 text-red-600 focus:ring-red-500"
+                        type="radio"
+                        name="cleanupMode"
+                        checked={cleanupMode === 'purge_ranges'}
+                        onChange={() => setCleanupMode('purge_ranges')}
+                        className="mt-1 text-red-600 focus:ring-red-500"
                       />
-                      <span className="text-sm text-red-700 font-medium">Delete ALL ranges from database (permanent)</span>
+                      <div>
+                        <div className="font-medium text-red-700">Purge All Ranges</div>
+                        <div className="text-sm text-gray-500 mt-1">
+                          Stop all DinD containers AND delete all ranges from the database.
+                          Templates, ISOs, and storage are preserved. <span className="text-red-600 font-medium">This cannot be undone.</span>
+                        </div>
+                      </div>
                     </label>
                   </div>
 
-                  <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-4 pt-4">
                     <button
                       onClick={() => setShowCleanupConfirm(true)}
                       disabled={cleanupLoading}
-                      className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 disabled:opacity-50"
+                      className={clsx(
+                        "inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50",
+                        cleanupMode === 'purge_ranges'
+                          ? "bg-red-600 hover:bg-red-700 focus:ring-red-500"
+                          : "bg-primary-600 hover:bg-primary-700 focus:ring-primary-500"
+                      )}
                     >
                       {cleanupLoading ? (
                         <>
@@ -558,7 +591,7 @@ export default function Admin() {
                       ) : (
                         <>
                           <Trash2 className="h-4 w-4 mr-2" />
-                          Cleanup All Resources
+                          {cleanupMode === 'purge_ranges' ? 'Purge All Ranges' : 'Reset All to Draft'}
                         </>
                       )}
                     </button>
@@ -574,28 +607,58 @@ export default function Admin() {
                   <div className="fixed inset-0 bg-gray-500 bg-opacity-75" onClick={() => setShowCleanupConfirm(false)} />
                   <div className="relative bg-white rounded-lg shadow-xl max-w-md w-full p-6">
                     <div className="flex items-center gap-4 mb-4">
-                      <div className="flex-shrink-0 h-12 w-12 rounded-full bg-red-100 flex items-center justify-center">
-                        <AlertTriangle className="h-6 w-6 text-red-600" />
+                      <div className={clsx(
+                        "flex-shrink-0 h-12 w-12 rounded-full flex items-center justify-center",
+                        cleanupMode === 'purge_ranges' ? "bg-red-100" : "bg-yellow-100"
+                      )}>
+                        <AlertTriangle className={clsx(
+                          "h-6 w-6",
+                          cleanupMode === 'purge_ranges' ? "text-red-600" : "text-yellow-600"
+                        )} />
                       </div>
                       <div>
-                        <h3 className="text-lg font-medium text-gray-900">Confirm Cleanup</h3>
-                        <p className="text-sm text-gray-500">This action cannot be undone.</p>
+                        <h3 className="text-lg font-medium text-gray-900">
+                          {cleanupMode === 'purge_ranges' ? 'Confirm Purge' : 'Confirm Reset'}
+                        </h3>
+                        <p className="text-sm text-gray-500">
+                          {cleanupMode === 'purge_ranges'
+                            ? 'This will permanently delete all range data.'
+                            : 'This will stop all running ranges.'}
+                        </p>
                       </div>
                     </div>
 
-                    <div className="bg-red-50 border border-red-200 rounded-md p-4 mb-6">
-                      <p className="text-sm text-red-700">
-                        This will remove <strong>ALL</strong> CYROID range resources:
-                      </p>
-                      <ul className="mt-2 text-sm text-red-700 list-disc list-inside">
-                        <li>Stop and remove all VM containers</li>
-                        <li>Remove all range networks</li>
-                        {cleanupOptions.delete_database_records ? (
-                          <li className="font-bold">DELETE all ranges, VMs, and networks from database (PERMANENT)</li>
-                        ) : cleanupOptions.clean_database && (
-                          <li>Reset all database records to draft state</li>
-                        )}
-                      </ul>
+                    <div className={clsx(
+                      "border rounded-md p-4 mb-6",
+                      cleanupMode === 'purge_ranges'
+                        ? "bg-red-50 border-red-200"
+                        : "bg-yellow-50 border-yellow-200"
+                    )}>
+                      {cleanupMode === 'purge_ranges' ? (
+                        <>
+                          <p className="text-sm text-red-700 font-medium">This will permanently:</p>
+                          <ul className="mt-2 text-sm text-red-700 list-disc list-inside">
+                            <li>Stop and remove all DinD range containers</li>
+                            <li>Delete all ranges from the database</li>
+                            <li>Delete all VMs and networks from the database</li>
+                          </ul>
+                          <p className="mt-3 text-sm text-gray-600">
+                            Templates, ISOs, blueprints, and storage will be preserved.
+                          </p>
+                        </>
+                      ) : (
+                        <>
+                          <p className="text-sm text-yellow-700 font-medium">This will:</p>
+                          <ul className="mt-2 text-sm text-yellow-700 list-disc list-inside">
+                            <li>Stop and remove all DinD range containers</li>
+                            <li>Reset all ranges to draft state</li>
+                            <li>Clear deployment info (container IDs, IPs)</li>
+                          </ul>
+                          <p className="mt-3 text-sm text-gray-600">
+                            Range definitions will be preserved and can be redeployed.
+                          </p>
+                        </>
+                      )}
                     </div>
 
                     <div className="flex justify-end gap-3">
@@ -608,9 +671,14 @@ export default function Admin() {
                       <button
                         onClick={handleCleanup}
                         disabled={cleanupLoading}
-                        className="px-4 py-2 text-sm font-medium text-white bg-red-600 border border-transparent rounded-md hover:bg-red-700 disabled:opacity-50"
+                        className={clsx(
+                          "px-4 py-2 text-sm font-medium text-white border border-transparent rounded-md disabled:opacity-50",
+                          cleanupMode === 'purge_ranges'
+                            ? "bg-red-600 hover:bg-red-700"
+                            : "bg-primary-600 hover:bg-primary-700"
+                        )}
                       >
-                        {cleanupLoading ? 'Cleaning...' : 'Yes, Clean Everything'}
+                        {cleanupLoading ? 'Processing...' : (cleanupMode === 'purge_ranges' ? 'Yes, Purge Everything' : 'Yes, Reset to Draft')}
                       </button>
                     </div>
                   </div>

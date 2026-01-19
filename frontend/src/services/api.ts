@@ -869,7 +869,11 @@ export const scenariosApi = {
 
 // ============ Admin API ============
 
+export type CleanupMode = 'reset_to_draft' | 'purge_ranges'
+
 export interface CleanupRequest {
+  mode?: CleanupMode
+  // Legacy fields for backwards compatibility
   clean_database?: boolean
   delete_database_records?: boolean
   force?: boolean
@@ -877,6 +881,7 @@ export interface CleanupRequest {
 
 export interface CleanupResult {
   ranges_cleaned: number
+  dind_containers_removed: number
   containers_removed: number
   networks_removed: number
   database_records_updated: number
