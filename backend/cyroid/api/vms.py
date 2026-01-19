@@ -708,7 +708,23 @@ def get_vm_vnc_info(vm_id: UUID, db: DBSession, current_user: CurrentUser, reque
         )
 
     try:
-        # VNC is proxied through traefik at /vnc/{vm_id}
+        # Check if range uses DinD isolation with VNC proxy
+        range_obj = db.query(Range).filter(Range.id == vm.range_id).first()
+        if range_obj and range_obj.vnc_proxy_mappings:
+            proxy_mapping = range_obj.vnc_proxy_mappings.get(str(vm.id))
+            if proxy_mapping:
+                # DinD range with VNC proxy - return proxy connection info
+                return {
+                    "vm_id": str(vm.id),
+                    "hostname": vm.hostname,
+                    "path": f"/vnc/{vm.id}",
+                    "websocket_path": "websockify",
+                    "proxy_host": proxy_mapping.get("proxy_host"),
+                    "proxy_port": proxy_mapping.get("proxy_port"),
+                    "method": "dind_proxy",
+                }
+
+        # Standard deployment - VNC is proxied through traefik at /vnc/{vm_id}
         vnc_path = f"/vnc/{vm.id}"
 
         # All VNC implementations (KasmVNC, noVNC/websockify, dockur) use /websockify path

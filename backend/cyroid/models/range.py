@@ -3,7 +3,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional, List
 from uuid import UUID
-from sqlalchemy import String, Text, ForeignKey, DateTime
+from sqlalchemy import String, Text, ForeignKey, DateTime, JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from cyroid.models.base import Base, TimestampMixin, UUIDMixin
@@ -52,6 +52,9 @@ class Range(Base, UUIDMixin, TimestampMixin):
     dind_docker_url: Mapped[Optional[str]] = mapped_column(
         String(128), nullable=True
     )
+
+    # VNC proxy port mappings (JSON: {vm_id: {proxy_host, proxy_port, original_port}})
+    vnc_proxy_mappings: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
 
     # Ownership
     created_by: Mapped[UUID] = mapped_column(ForeignKey("users.id"))
