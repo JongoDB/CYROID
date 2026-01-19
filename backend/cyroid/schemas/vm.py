@@ -2,7 +2,7 @@
 from datetime import datetime
 from typing import Optional
 from uuid import UUID
-from pydantic import BaseModel, Field, computed_field, field_serializer
+from pydantic import BaseModel, Field, computed_field, field_serializer, model_validator
 
 from cyroid.models.vm import VMStatus
 
@@ -20,7 +20,22 @@ class VMBase(BaseModel):
 class VMCreate(VMBase):
     range_id: UUID
     network_id: UUID
-    template_id: UUID
+    template_id: Optional[UUID] = None  # Optional: use template_id OR snapshot_id
+    snapshot_id: Optional[UUID] = None  # Optional: use snapshot_id OR template_id
+
+    @model_validator(mode='after')
+    def check_source(self) -> 'VMCreate':
+        """Ensure exactly one of template_id or snapshot_id is provided."""
+        has_template = self.template_id is not None
+        has_snapshot = self.snapshot_id is not None
+
+        if has_template and has_snapshot:
+            raise ValueError("Cannot specify both template_id and snapshot_id")
+        if not has_template and not has_snapshot:
+            raise ValueError("Must provide either template_id or snapshot_id")
+
+        return self
+
     # Windows-specific settings (for dockur/windows VMs)
     # Version codes: 11, 11l, 11e, 10, 10l, 10e, 8e, 7u, vu, xp, 2k, 2025, 2022, 2019, 2016, 2012, 2008, 2003
     windows_version: Optional[str] = Field(None, max_length=10, description="Windows version code for dockur/windows")
