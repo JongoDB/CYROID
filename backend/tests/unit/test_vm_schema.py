@@ -22,7 +22,7 @@ class TestVMCreateValidation:
                 disk_gb=40,
             )
         error_str = str(exc_info.value).lower()
-        assert "template_id or snapshot_id" in error_str or "must provide" in error_str
+        assert "must provide either template_id or snapshot_id" in error_str
 
     def test_rejects_both_template_and_snapshot(self):
         """Cannot provide both template_id and snapshot_id."""
@@ -39,7 +39,7 @@ class TestVMCreateValidation:
                 disk_gb=40,
             )
         error_str = str(exc_info.value).lower()
-        assert "cannot specify both" in error_str or "both" in error_str
+        assert "cannot specify both template_id and snapshot_id" in error_str
 
     def test_accepts_template_only(self):
         """Should accept template_id without snapshot_id."""
