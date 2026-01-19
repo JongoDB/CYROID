@@ -177,11 +177,12 @@ def create_range_from_blueprint(
         db.add(vm)
 
     # Create MSEL if present
-    if config.msel and config.msel.content:
+    if config.msel and (config.msel.content or config.msel.walkthrough):
         msel = MSEL(
             range_id=range_obj.id,
             name=f"{range_obj.name} Scenario",
-            content=config.msel.content,
+            content=config.msel.content or "",
+            walkthrough=config.msel.walkthrough,
         )
         db.add(msel)
 

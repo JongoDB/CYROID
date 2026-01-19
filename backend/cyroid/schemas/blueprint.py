@@ -34,6 +34,7 @@ class RouterConfig(BaseModel):
 class MSELConfig(BaseModel):
     content: Optional[str] = None
     format: str = "yaml"
+    walkthrough: Optional[dict] = None  # Structured walkthrough/guide content
 
 
 class BlueprintConfig(BaseModel):

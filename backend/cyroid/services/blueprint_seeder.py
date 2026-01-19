@@ -73,11 +73,13 @@ def build_config_from_yaml(blueprint_data: dict) -> dict:
 
     # Convert events to MSEL format if present
     events = blueprint_data.get("events", [])
-    if events:
-        msel_content = yaml.dump({"events": events}, default_flow_style=False)
+    walkthrough = blueprint_data.get("walkthrough")
+    if events or walkthrough:
+        msel_content = yaml.dump({"events": events}, default_flow_style=False) if events else ""
         config["msel"] = {
             "content": msel_content,
-            "format": "yaml"
+            "format": "yaml",
+            "walkthrough": walkthrough
         }
 
     return config

