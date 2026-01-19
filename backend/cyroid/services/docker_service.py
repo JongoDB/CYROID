@@ -20,7 +20,7 @@ IP conflicts between concurrent range instances using identical blueprint IPs.
 """
 import docker
 from docker.errors import APIError, NotFound, ImageNotFound
-from typing import Optional, Dict, List, Any, TYPE_CHECKING
+from typing import Optional, Dict, List, Any, Callable, TYPE_CHECKING
 import logging
 import time
 import ipaddress
@@ -2595,15 +2595,130 @@ local-hostname: {name}
 
         return result
 
+    async def transfer_image_to_dind(
+        self,
+        range_id: str,
+        docker_url: str,
+        image: str,
+        pull_if_missing: bool = True,
+        progress_callback: Optional[Callable[[int, int, str], None]] = None,
+    ) -> bool:
+        """
+        Transfer a Docker image from host to a DinD container.
+
+        This method exports the image from the host Docker daemon and imports
+        it into the DinD container's Docker daemon. This works for:
+        - Locally built images
+        - Snapshots saved as images
+        - Images without registry access in DinD
+
+        Args:
+            range_id: Range identifier
+            docker_url: DinD Docker URL (tcp://ip:port)
+            image: Image name/tag to transfer
+            pull_if_missing: If True, pull image to host if not found locally
+            progress_callback: Optional callback for progress reporting.
+                Signature: (transferred: int, total: int, status: str) -> None
+                Status values: 'starting', 'found_on_host', 'pulling_to_host',
+                'pulled_to_host', 'already_exists', 'transferring', 'complete', 'error'
+
+        Returns:
+            True if transfer succeeded, False otherwise
+        """
+        # Helper to safely call progress callback
+        def report_progress(transferred: int, total: int, status: str) -> None:
+            if progress_callback:
+                try:
+                    progress_callback(transferred, total, status)
+                except Exception as e:
+                    logger.warning(f"Progress callback error: {e}")
+
+        logger.info(f"Transferring image '{image}' to DinD for range {range_id}")
+        report_progress(0, 0, 'starting')
+
+        image_size = 0
+
+        # Check if image exists on host
+        try:
+            host_image = self.client.images.get(image)
+            image_size = host_image.attrs.get('Size', 0)
+            logger.debug(f"Image '{image}' found on host (size: {image_size})")
+            report_progress(0, image_size, 'found_on_host')
+        except docker.errors.ImageNotFound:
+            if pull_if_missing:
+                logger.info(f"Image '{image}' not on host, pulling...")
+                report_progress(0, 0, 'pulling_to_host')
+                try:
+                    host_image = self.client.images.pull(image)
+                    image_size = host_image.attrs.get('Size', 0)
+                    logger.info(f"Pulled '{image}' to host (size: {image_size})")
+                    report_progress(image_size, image_size, 'pulled_to_host')
+                except Exception as e:
+                    logger.error(f"Failed to pull '{image}' to host: {e}")
+                    report_progress(0, 0, 'error')
+                    return False
+            else:
+                logger.error(f"Image '{image}' not found on host")
+                report_progress(0, 0, 'error')
+                return False
+
+        try:
+            # Get client for DinD
+            range_client = self.get_range_client_sync(range_id, docker_url)
+
+            # Check if image already exists in DinD
+            try:
+                range_client.images.get(image)
+                logger.info(f"Image '{image}' already exists in DinD, skipping transfer")
+                report_progress(image_size, image_size, 'already_exists')
+                return True
+            except docker.errors.ImageNotFound:
+                pass  # Need to transfer
+
+            # Export image from host and import to DinD
+            # Use generator to stream in chunks for large images
+            logger.info(f"Streaming image '{image}' from host to DinD...")
+            report_progress(0, image_size, 'transferring')
+
+            # Get image as tar stream from host
+            image_data = host_image.save(named=True)
+
+            # Load into DinD - images.load accepts an iterator of bytes
+            result = range_client.images.load(image_data)
+
+            if result:
+                loaded_images = [img.tags[0] if img.tags else img.id for img in result]
+                logger.info(f"Successfully transferred to DinD: {loaded_images}")
+            else:
+                logger.info(f"Successfully transferred '{image}' to DinD")
+
+            report_progress(image_size, image_size, 'complete')
+            return True
+
+        except Exception as e:
+            logger.error(f"Error transferring image '{image}' to DinD: {e}")
+            report_progress(0, image_size, 'error')
+            return False
+
     async def pull_image_to_dind(
         self,
         range_id: str,
         docker_url: str,
         image: str
     ) -> None:
-        """Pull a Docker image into a range's DinD container."""
+        """
+        Pull/transfer a Docker image into a range's DinD container.
+
+        First attempts to transfer from host, falls back to pulling directly
+        into DinD if transfer fails.
+        """
+        # Try host-to-DinD transfer first (handles local images and snapshots)
+        if await self.transfer_image_to_dind(range_id, docker_url, image):
+            return
+
+        # Fallback: try direct pull into DinD (requires internet in DinD)
+        logger.info(f"Falling back to direct pull of '{image}' into DinD")
         range_client = self.get_range_client_sync(range_id, docker_url)
-        logger.info(f"Pulling image '{image}' into DinD for range {range_id}")
         range_client.images.pull(image)
         logger.info(f"Successfully pulled '{image}' into DinD")
 
