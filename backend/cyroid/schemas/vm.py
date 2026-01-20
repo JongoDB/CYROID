@@ -110,7 +110,8 @@ class VMResponse(VMBase):
     id: UUID
     range_id: UUID
     network_id: UUID
-    template_id: UUID
+    template_id: Optional[UUID] = None  # Optional: VM can be from template OR snapshot
+    snapshot_id: Optional[UUID] = None  # Optional: VM can be from snapshot OR template
     status: VMStatus
     error_message: Optional[str] = None
     container_id: Optional[str] = None

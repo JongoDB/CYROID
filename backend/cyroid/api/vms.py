@@ -10,6 +10,7 @@ from cyroid.models.vm import VM, VMStatus
 from cyroid.models.range import Range, RangeStatus
 from cyroid.models.network import Network
 from cyroid.models.template import VMTemplate, OSType, VMType
+from cyroid.models.snapshot import Snapshot
 from cyroid.models.event_log import EventType
 from cyroid.schemas.vm import VMCreate, VMUpdate, VMResponse
 from cyroid.services.event_service import EventService
@@ -25,13 +26,18 @@ router = APIRouter(prefix="/vms", tags=["VMs"])
 ARM64_NATIVE_DISTROS = {'ubuntu', 'debian', 'fedora', 'alpine', 'rocky', 'alma', 'kali'}
 
 
-def compute_emulation_status(vm: VM, template: Optional[VMTemplate] = None) -> Tuple[bool, Optional[str]]:
+def compute_emulation_status(
+    vm: VM,
+    template: Optional[VMTemplate] = None,
+    snapshot: Optional[Snapshot] = None
+) -> Tuple[bool, Optional[str]]:
     """
     Determine if a VM will run via emulation on this host.
 
     Args:
         vm: The VM model instance
-        template: The VM's template (optional, will be loaded if not provided)
+        template: The VM's template (optional)
+        snapshot: The VM's source snapshot (optional)
 
     Returns:
         Tuple of (is_emulated, warning_message)
@@ -40,11 +46,18 @@ def compute_emulation_status(vm: VM, template: Optional[VMTemplate] = None) -> T
         # x86 hosts run everything natively
         return False, None
 
-    # On ARM hosts, check VM type
-    vm_type = template.vm_type if template else None
+    # Get VM type and OS type from template or snapshot
+    vm_type = None
+    os_type = None
+    if template:
+        vm_type = template.vm_type
+        os_type = template.os_type
+    elif snapshot:
+        vm_type = VMType(snapshot.vm_type) if snapshot.vm_type else None
+        os_type = OSType(snapshot.os_type) if snapshot.os_type else None
 
     # Windows VMs are always x86
-    if vm_type == VMType.WINDOWS_VM or (template and template.os_type == OSType.WINDOWS):
+    if vm_type == VMType.WINDOWS_VM or os_type == OSType.WINDOWS:
         return True, "Windows VMs run via x86 emulation on ARM hosts. Performance may be reduced."
 
     # Linux VMs - check if distro has ARM64 support
@@ -56,8 +69,8 @@ def compute_emulation_status(vm: VM, template: Optional[VMTemplate] = None) -> T
         return True, f"This Linux VM may run via x86 emulation. Performance may be reduced."
 
     # Custom ISOs - check template native_arch
-    if template and template.os_type == OSType.CUSTOM:
-        native_arch = template.native_arch if hasattr(template, 'native_arch') else 'x86_64'
+    if os_type == OSType.CUSTOM:
+        native_arch = template.native_arch if template and hasattr(template, 'native_arch') else 'x86_64'
         if native_arch == 'arm64' or native_arch == 'both':
             return False, None
         return True, "Custom ISO runs via x86 emulation on ARM hosts. Performance may be reduced."
@@ -67,27 +80,33 @@ def compute_emulation_status(vm: VM, template: Optional[VMTemplate] = None) -> T
         # Most container images are multi-arch, assume native
         return False, None
 
-    # Default: assume native for containers
+    # Default: assume native for containers and snapshot-based VMs
     return False, None
 
 
-def vm_to_response(vm: VM, template: Optional[VMTemplate] = None) -> dict:
+def vm_to_response(
+    vm: VM,
+    template: Optional[VMTemplate] = None,
+    snapshot: Optional[Snapshot] = None
+) -> dict:
     """
     Convert VM model to response dict with emulation status.
 
     Args:
         vm: The VM model instance
         template: The VM's template (optional)
+        snapshot: The VM's source snapshot (optional)
 
     Returns:
         Dictionary for VMResponse
     """
-    emulated, warning = compute_emulation_status(vm, template)
+    emulated, warning = compute_emulation_status(vm, template, snapshot)
     response = {
         "id": vm.id,
         "range_id": vm.range_id,
         "network_id": vm.network_id,
         "template_id": vm.template_id,
+        "snapshot_id": vm.snapshot_id,
         "hostname": vm.hostname,
         "ip_address": vm.ip_address,
         "cpu": vm.cpu,
@@ -145,8 +164,13 @@ def list_vms(range_id: UUID, db: DBSession, current_user: CurrentUser):
     # Build responses with emulation status
     responses = []
     for vm in vms:
-        template = db.query(VMTemplate).filter(VMTemplate.id == vm.template_id).first()
-        responses.append(vm_to_response(vm, template))
+        template = None
+        snapshot = None
+        if vm.template_id:
+            template = db.query(VMTemplate).filter(VMTemplate.id == vm.template_id).first()
+        elif vm.snapshot_id:
+            snapshot = db.query(Snapshot).filter(Snapshot.id == vm.snapshot_id).first()
+        responses.append(vm_to_response(vm, template, snapshot))
     return responses
 
 
@@ -175,14 +199,31 @@ def create_vm(vm_data: VMCreate, db: DBSession, current_user: CurrentUser):
             detail="Network does not belong to this range",
         )
 
-    # Verify template exists
-    template = db.query(VMTemplate).filter(VMTemplate.id == vm_data.template_id).first()
-    if not template:
-        logger.warning(f"VM creation failed: Template not found (id={vm_data.template_id})")
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Template not found: {vm_data.template_id}",
-        )
+    # Validate source (template OR snapshot)
+    template = None
+    snapshot = None
+
+    if vm_data.template_id:
+        template = db.query(VMTemplate).filter(VMTemplate.id == vm_data.template_id).first()
+        if not template:
+            logger.warning(f"VM creation failed: Template not found (id={vm_data.template_id})")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Template not found: {vm_data.template_id}",
+            )
+    elif vm_data.snapshot_id:
+        snapshot = db.query(Snapshot).filter(Snapshot.id == vm_data.snapshot_id).first()
+        if not snapshot:
+            logger.warning(f"VM creation failed: Snapshot not found (id={vm_data.snapshot_id})")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Snapshot not found: {vm_data.snapshot_id}",
+            )
+        if not snapshot.docker_image_id and not snapshot.docker_image_tag:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Snapshot has no Docker image",
+            )
 
     # Check for duplicate hostname in the range
     existing = db.query(VM).filter(
@@ -210,7 +251,7 @@ def create_vm(vm_data: VMCreate, db: DBSession, current_user: CurrentUser):
     db.add(vm)
     db.commit()
     db.refresh(vm)
-    return vm_to_response(vm, template)
+    return vm_to_response(vm, template, snapshot)
 
 
 @router.get("/{vm_id}", response_model=VMResponse)
@@ -221,8 +262,13 @@ def get_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
             status_code=status.HTTP_404_NOT_FOUND,
             detail="VM not found",
         )
-    template = db.query(VMTemplate).filter(VMTemplate.id == vm.template_id).first()
-    return vm_to_response(vm, template)
+    template = None
+    snapshot = None
+    if vm.template_id:
+        template = db.query(VMTemplate).filter(VMTemplate.id == vm.template_id).first()
+    elif vm.snapshot_id:
+        snapshot = db.query(Snapshot).filter(Snapshot.id == vm.snapshot_id).first()
+    return vm_to_response(vm, template, snapshot)
 
 
 @router.put("/{vm_id}", response_model=VMResponse)
@@ -245,8 +291,13 @@ def update_vm(
 
     db.commit()
     db.refresh(vm)
-    template = db.query(VMTemplate).filter(VMTemplate.id == vm.template_id).first()
-    return vm_to_response(vm, template)
+    template = None
+    snapshot = None
+    if vm.template_id:
+        template = db.query(VMTemplate).filter(VMTemplate.id == vm.template_id).first()
+    elif vm.snapshot_id:
+        snapshot = db.query(Snapshot).filter(Snapshot.id == vm.snapshot_id).first()
+    return vm_to_response(vm, template, snapshot)
 
 
 @router.delete("/{vm_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -292,14 +343,50 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
     try:
         docker = get_docker_service()
 
-        # Get network and template info
+        # Get network info
         network = db.query(Network).filter(Network.id == vm.network_id).first()
-        template = db.query(VMTemplate).filter(VMTemplate.id == vm.template_id).first()
 
         if not network or not network.docker_network_id:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Network not provisioned",
+            )
+
+        # Get source configuration (template OR snapshot)
+        template = None
+        snapshot = None
+        base_image = None
+        os_type = None
+        vm_type = None
+        config_script = None
+
+        if vm.template_id:
+            template = db.query(VMTemplate).filter(VMTemplate.id == vm.template_id).first()
+            if not template:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="VM's template not found",
+                )
+            base_image = template.base_image
+            os_type = template.os_type
+            vm_type = template.vm_type
+            config_script = template.config_script
+        elif vm.snapshot_id:
+            snapshot = db.query(Snapshot).filter(Snapshot.id == vm.snapshot_id).first()
+            if not snapshot:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="VM's snapshot not found",
+                )
+            # Use docker_image_tag if available, otherwise docker_image_id
+            base_image = snapshot.docker_image_tag or snapshot.docker_image_id
+            os_type = OSType(snapshot.os_type) if snapshot.os_type else OSType.LINUX
+            vm_type = VMType(snapshot.vm_type) if snapshot.vm_type else VMType.CONTAINER
+            config_script = None  # Snapshots don't have config scripts
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="VM has no template or snapshot",
             )
 
         # Container already exists - just start it
@@ -319,11 +406,16 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
             display_type = vm.display_type or "desktop"
             if display_type == "desktop":
                 # Determine VNC port and scheme based on image type
-                base_image = template.base_image or ""
-                is_linuxserver = "linuxserver/" in base_image or "lscr.io/linuxserver" in base_image
-                is_kasmweb = "kasmweb/" in base_image
+                image_for_check = base_image or ""
+                is_linuxserver = "linuxserver/" in image_for_check or "lscr.io/linuxserver" in image_for_check
+                is_kasmweb = "kasmweb/" in image_for_check
 
-                if base_image.startswith("iso:") or template.os_type == OSType.WINDOWS or template.os_type == OSType.CUSTOM:
+                # For snapshots, use the snapshot's VNC port if specified
+                if snapshot and snapshot.vnc_port:
+                    vnc_port = str(snapshot.vnc_port)
+                    vnc_scheme = "http"
+                    needs_auth = False
+                elif image_for_check.startswith("iso:") or os_type == OSType.WINDOWS or os_type == OSType.CUSTOM:
                     # qemus/qemu and dockur/windows use port 8006 over HTTP
                     vnc_port = "8006"
                     vnc_scheme = "http"
@@ -389,7 +481,7 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
                 labels[f"traefik.http.routers.{router_name}.middlewares"] = ",".join(middlewares)
                 labels[f"traefik.http.routers.{router_name}-secure.middlewares"] = ",".join(middlewares)
 
-            if template.os_type == OSType.WINDOWS:
+            if os_type == OSType.WINDOWS:
                 settings = get_settings()
 
                 # Setup VM-specific storage path
@@ -400,14 +492,14 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
                     "storage"
                 )
 
-                # Determine Windows version (VM setting takes priority over template)
+                # Determine Windows version (VM setting takes priority over template/snapshot base_image)
                 # Version codes: 11, 11l, 11e, 10, 10l, 10e, 8e, 7u, vu, xp, 2k, 2025, 2022, 2019, 2016, 2012, 2008, 2003
                 # Use base_image for version code (e.g., "2019"), NOT os_variant (e.g., "Windows Server 2019")
-                windows_version = vm.windows_version or template.base_image or "11"
+                windows_version = vm.windows_version or base_image or "11"
 
                 # Determine ISO path (VM setting takes priority)
-                iso_path = vm.iso_path or (template.cached_iso_path if hasattr(template, 'cached_iso_path') and template.cached_iso_path else None)
-                clone_from = template.golden_image_path if hasattr(template, 'golden_image_path') and template.golden_image_path else None
+                iso_path = vm.iso_path or (template.cached_iso_path if template and hasattr(template, 'cached_iso_path') and template.cached_iso_path else None)
+                clone_from = template.golden_image_path if template and hasattr(template, 'golden_image_path') and template.golden_image_path else None
 
                 # Setup per-VM shared folder path
                 shared_folder_path = None
@@ -421,7 +513,7 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
 
                 # Setup OEM directory for post-install script (from template config_script)
                 oem_script_path = None
-                if template.config_script:
+                if config_script:
                     oem_dir = os.path.join(
                         settings.vm_storage_dir,
                         str(vm.range_id),
@@ -431,7 +523,7 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
                     os.makedirs(oem_dir, exist_ok=True)
                     install_bat = os.path.join(oem_dir, "install.bat")
                     with open(install_bat, "w") as f:
-                        f.write(template.config_script)
+                        f.write(config_script)
                     oem_script_path = oem_dir
                     logger.info(f"Created OEM install.bat for VM {vm.id}")
 
@@ -468,7 +560,7 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
                     manual_install=vm.manual_install,
                     oem_script_path=oem_script_path,
                 )
-            elif template.os_type == OSType.CUSTOM:
+            elif os_type == OSType.CUSTOM:
                 # Custom ISO VMs use qemux/qemu with the custom ISO
                 settings = get_settings()
 
@@ -481,7 +573,7 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
                 )
 
                 # Get custom ISO path from template
-                iso_path = template.cached_iso_path if hasattr(template, 'cached_iso_path') and template.cached_iso_path else None
+                iso_path = template.cached_iso_path if template and hasattr(template, 'cached_iso_path') and template.cached_iso_path else None
 
                 container_id = docker.create_linux_vm_container(
                     name=f"cyroid-{vm.hostname}-{str(vm.id)[:8]}",
@@ -508,9 +600,10 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
                     dns_search=network.dns_search,
                 )
             else:
+                # Container (standard Docker container) or snapshot-based VM
                 container_id = docker.create_container(
                     name=f"cyroid-{vm.hostname}-{str(vm.id)[:8]}",
-                    image=template.base_image,
+                    image=base_image,
                     network_id=network.docker_network_id,
                     ip_address=vm.ip_address,
                     cpu_limit=vm.cpu,
@@ -530,8 +623,8 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
             docker.start_container(container_id)
 
             # Configure Linux user for KasmVNC containers
-            base_image_check = template.base_image or ""
-            if "kasmweb/" in base_image_check:
+            image_for_check = base_image or ""
+            if "kasmweb/" in image_for_check:
                 # KasmVNC uses 'kasm-user' as the default user
                 username = vm.linux_username or "kasm-user"
                 if vm.linux_password:
@@ -539,10 +632,10 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
                 if vm.linux_user_sudo:
                     docker.grant_sudo_privileges(container_id, username)
 
-            # Run config script if present
-            if template.config_script:
+            # Run config script if present (only from templates, not snapshots)
+            if config_script:
                 try:
-                    docker.exec_command(container_id, template.config_script)
+                    docker.exec_command(container_id, config_script)
                 except Exception as e:
                     logger.warning(f"Config script failed for VM {vm_id}: {e}")
 
@@ -589,7 +682,7 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
             detail=f"Failed to start VM: {str(e)}",
         )
 
-    return vm_to_response(vm, template)
+    return vm_to_response(vm, template, snapshot)
 
 
 @router.post("/{vm_id}/stop", response_model=VMResponse)
@@ -643,8 +736,13 @@ def stop_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
             detail=f"Failed to stop VM: {str(e)}",
         )
 
-    template = db.query(VMTemplate).filter(VMTemplate.id == vm.template_id).first()
-    return vm_to_response(vm, template)
+    template = None
+    snapshot = None
+    if vm.template_id:
+        template = db.query(VMTemplate).filter(VMTemplate.id == vm.template_id).first()
+    elif vm.snapshot_id:
+        snapshot = db.query(Snapshot).filter(Snapshot.id == vm.snapshot_id).first()
+    return vm_to_response(vm, template, snapshot)
 
 
 @router.get("/{vm_id}/stats")
@@ -1045,8 +1143,13 @@ def restart_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
             detail=f"Failed to restart VM: {str(e)}",
         )
 
-    template = db.query(VMTemplate).filter(VMTemplate.id == vm.template_id).first()
-    return vm_to_response(vm, template)
+    template = None
+    snapshot = None
+    if vm.template_id:
+        template = db.query(VMTemplate).filter(VMTemplate.id == vm.template_id).first()
+    elif vm.snapshot_id:
+        snapshot = db.query(Snapshot).filter(Snapshot.id == vm.snapshot_id).first()
+    return vm_to_response(vm, template, snapshot)
 
 
 @router.get("/{vm_id}/logs")
