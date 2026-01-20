@@ -23,6 +23,8 @@ from cyroid.models.vm import VM
 from cyroid.models.template import VMType
 from cyroid.models.network import Network
 from cyroid.models.snapshot import Snapshot
+from cyroid.models.base_image import BaseImage
+from cyroid.models.golden_image import GoldenImage
 from cyroid.services.docker_service import DockerService
 from cyroid.utils.arch import HOST_ARCH, requires_emulation
 from cyroid.config import get_settings
@@ -150,13 +152,25 @@ class DeploymentValidator:
             return results
 
         for vm in vms:
-            # Snapshot-based VM
+            # Base Image (Image Library - container or ISO)
+            if vm.base_image_id:
+                result = self._validate_base_image_vm(vm)
+                results.append(result)
+                continue
+
+            # Golden Image (Image Library - snapshot or import)
+            if vm.golden_image_id:
+                result = self._validate_golden_image_vm(vm)
+                results.append(result)
+                continue
+
+            # Snapshot-based VM (legacy)
             if vm.snapshot_id:
                 result = self._validate_snapshot_vm(vm)
                 results.append(result)
                 continue
 
-            # Template-based VM
+            # Template-based VM (legacy)
             if vm.template_id:
                 template = self.db.query(VMTemplate).filter(
                     VMTemplate.id == vm.template_id
@@ -189,7 +203,7 @@ class DeploymentValidator:
             else:
                 results.append(ValidationResult(
                     valid=False,
-                    message=f"VM '{vm.hostname}': No template or snapshot specified",
+                    message=f"VM '{vm.hostname}': No image source specified (base_image, golden_image, snapshot, or template)",
                     severity="error",
                     vm_id=str(vm.id)
                 ))
@@ -210,6 +224,107 @@ class DeploymentValidator:
             return True
         except Exception:
             return False
+
+    def _validate_base_image_vm(self, vm: VM) -> ValidationResult:
+        """Validate a base image VM (Image Library - container or ISO)."""
+        base_image = self.db.query(BaseImage).filter(
+            BaseImage.id == vm.base_image_id
+        ).first()
+        if not base_image:
+            return ValidationResult(
+                valid=False,
+                message=f"VM '{vm.hostname}': Base image not found",
+                severity="error",
+                vm_id=str(vm.id)
+            )
+
+        if base_image.image_type == "container":
+            # Container image - check Docker cache
+            image_tag = base_image.docker_image_tag or base_image.docker_image_id
+            if image_tag and self._check_image_exists(image_tag):
+                return ValidationResult(
+                    valid=True,
+                    message=f"VM '{vm.hostname}': Docker image '{image_tag}' available",
+                    severity="info",
+                    vm_id=str(vm.id)
+                )
+            else:
+                return ValidationResult(
+                    valid=False,
+                    message=f"VM '{vm.hostname}': Docker image '{image_tag}' not found. Sync from Image Cache.",
+                    severity="error",
+                    vm_id=str(vm.id)
+                )
+        else:
+            # ISO-based image - check ISO file exists
+            iso_path = base_image.iso_path
+            if iso_path and os.path.exists(iso_path):
+                return ValidationResult(
+                    valid=True,
+                    message=f"VM '{vm.hostname}': ISO file available",
+                    severity="info",
+                    vm_id=str(vm.id)
+                )
+            else:
+                return ValidationResult(
+                    valid=False,
+                    message=f"VM '{vm.hostname}': ISO file not found at '{iso_path}'",
+                    severity="error",
+                    vm_id=str(vm.id)
+                )
+
+    def _validate_golden_image_vm(self, vm: VM) -> ValidationResult:
+        """Validate a golden image VM (Image Library - snapshot or import)."""
+        golden_image = self.db.query(GoldenImage).filter(
+            GoldenImage.id == vm.golden_image_id
+        ).first()
+        if not golden_image:
+            return ValidationResult(
+                valid=False,
+                message=f"VM '{vm.hostname}': Golden image not found",
+                severity="error",
+                vm_id=str(vm.id)
+            )
+
+        # Check Docker image or disk image
+        image_tag = golden_image.docker_image_tag or golden_image.docker_image_id
+        if image_tag:
+            if self._check_image_exists(image_tag):
+                return ValidationResult(
+                    valid=True,
+                    message=f"VM '{vm.hostname}': Golden image '{image_tag}' available",
+                    severity="info",
+                    vm_id=str(vm.id)
+                )
+            else:
+                return ValidationResult(
+                    valid=False,
+                    message=f"VM '{vm.hostname}': Golden image '{image_tag}' not found in Docker cache",
+                    severity="error",
+                    vm_id=str(vm.id)
+                )
+        elif golden_image.disk_image_path:
+            if os.path.exists(golden_image.disk_image_path):
+                return ValidationResult(
+                    valid=True,
+                    message=f"VM '{vm.hostname}': Golden image disk file available",
+                    severity="info",
+                    vm_id=str(vm.id)
+                )
+            else:
+                return ValidationResult(
+                    valid=False,
+                    message=f"VM '{vm.hostname}': Golden image disk file not found",
+                    severity="error",
+                    vm_id=str(vm.id)
+                )
+        else:
+            return ValidationResult(
+                valid=False,
+                message=f"VM '{vm.hostname}': Golden image has no Docker or disk reference",
+                severity="error",
+                vm_id=str(vm.id)
+            )
 
     def _validate_snapshot_vm(self, vm: VM) -> ValidationResult:
         """Validate a snapshot-based VM."""

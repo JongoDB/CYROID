@@ -200,8 +200,27 @@ class RangeDeploymentService:
 
         # 4. Create VMs inside DinD
         for vm in vms:
-            if not vm.template or not vm.template.base_image:
-                logger.warning(f"VM {vm.hostname} has no template/image, skipping")
+            # Determine container image from Image Library or legacy template/snapshot
+            container_image = None
+            if vm.base_image_id and vm.base_image:
+                # New Image Library: Base Image
+                if vm.base_image.image_type == "container":
+                    container_image = vm.base_image.docker_image_tag or vm.base_image.docker_image_id
+                else:
+                    logger.warning(f"VM {vm.hostname} uses ISO-based base image, not supported in DinD yet")
+                    continue
+            elif vm.golden_image_id and vm.golden_image:
+                # New Image Library: Golden Image
+                container_image = vm.golden_image.docker_image_tag or vm.golden_image.docker_image_id
+            elif vm.snapshot_id and vm.snapshot:
+                # Legacy: Snapshot
+                container_image = vm.snapshot.docker_image_tag or vm.snapshot.docker_image_id
+            elif vm.template_id and vm.template:
+                # Legacy: Template
+                container_image = vm.template.base_image
+
+            if not container_image:
+                logger.warning(f"VM {vm.hostname} has no container image, skipping")
                 continue
 
             network = db.query(Network).filter(Network.id == vm.network_id).first()
@@ -218,7 +237,7 @@ class RangeDeploymentService:
                 range_id=range_id,
                 docker_url=docker_url,
                 name=vm.hostname,
-                image=vm.template.base_image,
+                image=container_image,
                 network_name=network.name,
                 ip_address=vm.ip_address,
                 cpu_limit=vm.cpu or 2,
@@ -244,10 +263,27 @@ class RangeDeploymentService:
         vm_ports = []
         for vm in vms:
             if vm.container_id and vm.ip_address:
-                # Determine VNC port based on VM type
+                # Determine VNC port based on VM type and image
                 vnc_port = 8006  # Default for QEMU/Windows
-                if vm.template and vm.template.vm_type == VMType.CONTAINER:
+
+                # Get base image name for VNC port detection
+                base_image = ""
+                vm_type = None
+                if vm.base_image_id and vm.base_image:
+                    base_image = vm.base_image.docker_image_tag or ""
+                    vm_type = vm.base_image.vm_type
+                elif vm.golden_image_id and vm.golden_image:
+                    base_image = vm.golden_image.docker_image_tag or ""
+                    vm_type = vm.golden_image.vm_type
+                elif vm.snapshot_id and vm.snapshot:
+                    base_image = vm.snapshot.docker_image_tag or ""
+                    vm_type = vm.snapshot.vm_type
+                elif vm.template_id and vm.template:
                     base_image = vm.template.base_image or ""
+                    vm_type = vm.template.vm_type
+
+                # Check if it's a container type for VNC port detection
+                if vm_type == "container" or vm_type == VMType.CONTAINER:
                     if "kasmweb" in base_image:
                         vnc_port = 6901
                     elif "linuxserver/" in base_image or "lscr.io/linuxserver" in base_image:

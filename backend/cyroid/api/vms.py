@@ -12,6 +12,8 @@ from cyroid.models.range import Range, RangeStatus
 from cyroid.models.network import Network
 from cyroid.models.template import VMTemplate, OSType, VMType
 from cyroid.models.snapshot import Snapshot
+from cyroid.models.base_image import BaseImage
+from cyroid.models.golden_image import GoldenImage
 from cyroid.models.event_log import EventType
 from cyroid.schemas.vm import VMCreate, VMUpdate, VMResponse
 from cyroid.services.event_service import EventService
@@ -363,26 +365,55 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
                 detail="Network not provisioned",
             )
 
-        # Get source configuration (template OR snapshot)
+        # Get source configuration (base_image, golden_image, snapshot, or template)
         template = None
         snapshot = None
-        base_image = None
+        base_image_record = None
+        golden_image_record = None
+        base_image = None  # Docker image name or ISO reference
         os_type = None
         vm_type = None
         config_script = None
 
-        if vm.template_id:
-            template = db.query(VMTemplate).filter(VMTemplate.id == vm.template_id).first()
-            if not template:
+        if vm.base_image_id:
+            # New Image Library: Base Image (container or ISO)
+            base_image_record = db.query(BaseImage).filter(BaseImage.id == vm.base_image_id).first()
+            if not base_image_record:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
-                    detail="VM's template not found",
+                    detail="VM's base image not found",
                 )
-            base_image = template.base_image
-            os_type = template.os_type
-            vm_type = template.vm_type
-            config_script = template.config_script
+            # For containers, use docker_image_tag; for ISOs, use iso_path
+            if base_image_record.image_type == "container":
+                base_image = base_image_record.docker_image_tag or base_image_record.docker_image_id
+            else:
+                # ISO-based VM
+                base_image = f"iso:{base_image_record.iso_path}"
+            os_type = OSType(base_image_record.os_type) if base_image_record.os_type else OSType.LINUX
+            vm_type = VMType(base_image_record.vm_type) if base_image_record.vm_type else VMType.CONTAINER
+            config_script = None
+        elif vm.golden_image_id:
+            # New Image Library: Golden Image (pre-configured snapshot or import)
+            golden_image_record = db.query(GoldenImage).filter(GoldenImage.id == vm.golden_image_id).first()
+            if not golden_image_record:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="VM's golden image not found",
+                )
+            # Use docker_image_tag if available, otherwise docker_image_id or disk_image_path
+            base_image = golden_image_record.docker_image_tag or golden_image_record.docker_image_id
+            if not base_image and golden_image_record.disk_image_path:
+                base_image = f"disk:{golden_image_record.disk_image_path}"
+            if not base_image:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Golden image has no Docker image or disk reference",
+                )
+            os_type = OSType(golden_image_record.os_type) if golden_image_record.os_type else OSType.LINUX
+            vm_type = VMType(golden_image_record.vm_type) if golden_image_record.vm_type else VMType.CONTAINER
+            config_script = None
         elif vm.snapshot_id:
+            # Legacy: Snapshot
             snapshot = db.query(Snapshot).filter(Snapshot.id == vm.snapshot_id).first()
             if not snapshot:
                 raise HTTPException(
@@ -399,10 +430,22 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
             os_type = OSType(snapshot.os_type) if snapshot.os_type else OSType.LINUX
             vm_type = VMType(snapshot.vm_type) if snapshot.vm_type else VMType.CONTAINER
             config_script = None  # Snapshots don't have config scripts
+        elif vm.template_id:
+            # Legacy: Template
+            template = db.query(VMTemplate).filter(VMTemplate.id == vm.template_id).first()
+            if not template:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="VM's template not found",
+                )
+            base_image = template.base_image
+            os_type = template.os_type
+            vm_type = template.vm_type
+            config_script = template.config_script
         else:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="VM has no template or snapshot",
+                detail="VM has no image source (base_image, golden_image, snapshot, or template)",
             )
 
         # Container already exists - just start it
