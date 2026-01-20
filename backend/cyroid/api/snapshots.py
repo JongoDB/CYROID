@@ -76,13 +76,10 @@ def create_snapshot(
                 detail=f"Failed to create snapshot: {str(e)}",
             )
 
-        # Determine OS and VM type from template or existing VM data
+        # Determine OS and VM type from Image Library sources
         os_type = "linux"
         vm_type = "container"
-        if vm.template:
-            os_type = vm.template.os_type.value if hasattr(vm.template.os_type, 'value') else str(vm.template.os_type)
-            vm_type = vm.template.vm_type.value if hasattr(vm.template.vm_type, 'value') else str(vm.template.vm_type)
-        elif vm.base_image:
+        if vm.base_image:
             os_type = vm.base_image.os_type
             vm_type = vm.base_image.vm_type
 

@@ -17,7 +17,16 @@ class VMBase(BaseModel):
     position_y: int = Field(default=0)
 
 
-class VMCreate(VMBase):
+class VMCreate(BaseModel):
+    """Schema for creating a new VM. ip_address is optional and auto-filled if not provided."""
+    hostname: str = Field(..., min_length=1, max_length=63)
+    ip_address: Optional[str] = Field(None, pattern=r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$")  # Auto-filled from network subnet
+    cpu: int = Field(ge=1, le=32, default=2)
+    ram_mb: int = Field(ge=512, le=131072, default=4096)
+    disk_gb: int = Field(ge=10, le=1000, default=40)
+    position_x: int = Field(default=0)
+    position_y: int = Field(default=0)
+
     range_id: UUID
     network_id: UUID
 

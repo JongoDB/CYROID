@@ -18,6 +18,9 @@ from sqlalchemy.orm import Session
 from cyroid.config import get_settings
 from cyroid.models import Range, Network, VM, RangeStatus
 from cyroid.models.template import VMType
+from cyroid.models.base_image import BaseImage
+from cyroid.models.golden_image import GoldenImage
+from cyroid.models.snapshot import Snapshot
 from cyroid.services.dind_service import DinDService, get_dind_service
 from cyroid.services.docker_service import DockerService, get_docker_service
 from cyroid.services.traefik_route_service import get_traefik_route_service
@@ -185,8 +188,25 @@ class RangeDeploymentService:
         vms = db.query(VM).filter(VM.range_id == range_obj.id).all()
         unique_images = set()
         for vm in vms:
-            if vm.template and vm.template.base_image:
-                unique_images.add(vm.template.base_image)
+            # Get container image from Image Library sources
+            if vm.base_image_id:
+                base_img = db.query(BaseImage).filter(BaseImage.id == vm.base_image_id).first()
+                if base_img and base_img.image_type == "container":
+                    image_tag = base_img.docker_image_tag or base_img.docker_image_id
+                    if image_tag:
+                        unique_images.add(image_tag)
+            elif vm.golden_image_id:
+                golden_img = db.query(GoldenImage).filter(GoldenImage.id == vm.golden_image_id).first()
+                if golden_img:
+                    image_tag = golden_img.docker_image_tag or golden_img.docker_image_id
+                    if image_tag:
+                        unique_images.add(image_tag)
+            elif vm.snapshot_id:
+                snapshot = db.query(Snapshot).filter(Snapshot.id == vm.snapshot_id).first()
+                if snapshot:
+                    image_tag = snapshot.docker_image_tag or snapshot.docker_image_id
+                    if image_tag:
+                        unique_images.add(image_tag)
 
         for image in unique_images:
             try:
@@ -213,11 +233,8 @@ class RangeDeploymentService:
                 # New Image Library: Golden Image
                 container_image = vm.golden_image.docker_image_tag or vm.golden_image.docker_image_id
             elif vm.snapshot_id and vm.snapshot:
-                # Legacy: Snapshot
+                # Snapshot
                 container_image = vm.snapshot.docker_image_tag or vm.snapshot.docker_image_id
-            elif vm.template_id and vm.template:
-                # Legacy: Template
-                container_image = vm.template.base_image
 
             if not container_image:
                 logger.warning(f"VM {vm.hostname} has no container image, skipping")
@@ -278,9 +295,6 @@ class RangeDeploymentService:
                 elif vm.snapshot_id and vm.snapshot:
                     base_image = vm.snapshot.docker_image_tag or ""
                     vm_type = vm.snapshot.vm_type
-                elif vm.template_id and vm.template:
-                    base_image = vm.template.base_image or ""
-                    vm_type = vm.template.vm_type
 
                 # Check if it's a container type for VNC port detection
                 if vm_type == "container" or vm_type == VMType.CONTAINER:

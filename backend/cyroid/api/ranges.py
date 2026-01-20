@@ -986,7 +986,9 @@ def clone_range(
         cloned_vm = VM(
             range_id=cloned_range.id,
             network_id=old_to_new_network.get(vm.network_id),
-            template_id=vm.template_id,
+            base_image_id=vm.base_image_id,
+            golden_image_id=vm.golden_image_id,
+            snapshot_id=vm.snapshot_id,
             hostname=vm.hostname,
             ip_address=vm.ip_address,
             cpu=vm.cpu,

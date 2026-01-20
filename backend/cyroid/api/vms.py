@@ -1,4 +1,5 @@
 # backend/cyroid/api/vms.py
+import ipaddress
 from typing import List, Optional, Tuple
 from uuid import UUID
 import logging
@@ -27,6 +28,87 @@ router = APIRouter(prefix="/vms", tags=["VMs"])
 
 # Linux distros that have native ARM64 support
 ARM64_NATIVE_DISTROS = {'ubuntu', 'debian', 'fedora', 'alpine', 'rocky', 'alma', 'kali'}
+
+
+def get_next_available_ip(network: Network, db: Session, skip_gateway: bool = True) -> Optional[str]:
+    """
+    Calculate the next available IP address in a network subnet.
+
+    Args:
+        network: The network model with subnet info
+        db: Database session for querying existing VMs
+        skip_gateway: Whether to skip the gateway IP (default: True)
+
+    Returns:
+        The next available IP address as a string, or None if all IPs are taken
+    """
+    try:
+        net = ipaddress.ip_network(network.subnet, strict=False)
+    except ValueError:
+        logger.warning(f"Invalid subnet format: {network.subnet}")
+        return None
+
+    # Get all existing IPs in this network
+    existing_ips = db.query(VM.ip_address).filter(VM.network_id == network.id).all()
+    used_ips = {ip[0] for ip in existing_ips}
+
+    # Also exclude the gateway
+    if skip_gateway and network.gateway:
+        used_ips.add(network.gateway)
+
+    # Iterate through hosts in the subnet, starting from .10 to leave room for infrastructure
+    # Skip network address (.0) and broadcast address (.255 for /24)
+    start_offset = 10  # Start from .10 for user VMs
+    for host in net.hosts():
+        host_str = str(host)
+        # Check if this is at least .10 in the last octet
+        last_octet = int(host_str.split('.')[-1])
+        if last_octet < start_offset:
+            continue
+        if host_str not in used_ips:
+            return host_str
+
+    return None
+
+
+def get_available_ips_in_range(network: Network, db: Session, limit: int = 20) -> List[str]:
+    """
+    Get a list of available IP addresses in a network subnet.
+
+    Args:
+        network: The network model with subnet info
+        db: Database session for querying existing VMs
+        limit: Maximum number of IPs to return
+
+    Returns:
+        List of available IP addresses
+    """
+    try:
+        net = ipaddress.ip_network(network.subnet, strict=False)
+    except ValueError:
+        return []
+
+    # Get all existing IPs in this network
+    existing_ips = db.query(VM.ip_address).filter(VM.network_id == network.id).all()
+    used_ips = {ip[0] for ip in existing_ips}
+
+    # Also exclude the gateway
+    if network.gateway:
+        used_ips.add(network.gateway)
+
+    available = []
+    start_offset = 10  # Start from .10 for user VMs
+    for host in net.hosts():
+        host_str = str(host)
+        last_octet = int(host_str.split('.')[-1])
+        if last_octet < start_offset:
+            continue
+        if host_str not in used_ips:
+            available.append(host_str)
+            if len(available) >= limit:
+                break
+
+    return available
 
 
 def compute_emulation_status(
@@ -233,6 +315,17 @@ def create_vm(vm_data: VMCreate, db: DBSession, current_user: CurrentUser):
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Network does not belong to this range",
         )
+
+    # Auto-fill IP address if not provided
+    if vm_data.ip_address is None:
+        next_ip = get_next_available_ip(network, db)
+        if next_ip is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No available IP addresses in this network",
+            )
+        vm_data.ip_address = next_ip
+        logger.info(f"Auto-assigned IP {next_ip} to VM {vm_data.hostname}")
 
     # Validate source (base_image, golden_image, OR snapshot)
     base_image = None
@@ -942,6 +1035,38 @@ def get_vm_networks(vm_id: UUID, db: DBSession, current_user: CurrentUser):
             "status": vm.status.value,
             "interfaces": []
         }
+
+
+@router.get("/network/{network_id}/available-ips")
+def get_network_available_ips(
+    network_id: UUID,
+    db: DBSession,
+    current_user: CurrentUser,
+    limit: int = Query(default=20, ge=1, le=100, description="Max IPs to return"),
+):
+    """
+    Get a list of available IP addresses in a network subnet.
+
+    Returns the next available IPs starting from .10 in the subnet,
+    excluding the gateway and any IPs already assigned to VMs.
+    """
+    network = db.query(Network).filter(Network.id == network_id).first()
+    if not network:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Network not found",
+        )
+
+    available_ips = get_available_ips_in_range(network, db, limit=limit)
+
+    return {
+        "network_id": str(network_id),
+        "network_name": network.name,
+        "subnet": network.subnet,
+        "gateway": network.gateway,
+        "available_ips": available_ips,
+        "count": len(available_ips),
+    }
 
 
 @router.get("/range/{range_id}/networks")

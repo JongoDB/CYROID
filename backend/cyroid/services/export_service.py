@@ -261,7 +261,8 @@ class ExportService:
             .where(Range.id == range_id)
             .options(
                 selectinload(Range.networks),
-                selectinload(Range.vms).selectinload(VM.template),
+                selectinload(Range.vms).selectinload(VM.base_image),
+                selectinload(Range.vms).selectinload(VM.golden_image),
                 selectinload(Range.vms).selectinload(VM.snapshots),
                 selectinload(Range.vms).selectinload(VM.artifact_placements).selectinload(ArtifactPlacement.artifact),
                 selectinload(Range.msel).selectinload(MSEL.injects),
@@ -332,7 +333,8 @@ class ExportService:
             .where(Range.id == range_id)
             .options(
                 selectinload(Range.networks),
-                selectinload(Range.vms).selectinload(VM.template),
+                selectinload(Range.vms).selectinload(VM.base_image),
+                selectinload(Range.vms).selectinload(VM.golden_image),
                 selectinload(Range.vms).selectinload(VM.snapshots),
                 selectinload(Range.vms).selectinload(VM.artifact_placements).selectinload(ArtifactPlacement.artifact),
                 selectinload(Range.msel).selectinload(MSEL.injects),
