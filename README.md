@@ -1,7 +1,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Status-Active%20Development-brightgreen" alt="Status">
   <img src="https://img.shields.io/badge/Phase-5%20of%207-blue" alt="Phase">
-  <img src="https://img.shields.io/badge/Version-0.12.0--alpha-orange" alt="Version">
+  <img src="https://img.shields.io/badge/Version-0.13.17--alpha-orange" alt="Version">
   <img src="https://img.shields.io/badge/License-Proprietary-red" alt="License">
 </p>
 
@@ -38,37 +38,28 @@
 
 ---
 
-## What's New in v0.12.0
+## What's New in v0.13.x
 
-### Simplified Architecture
+### Cross-Platform Support (v0.13.17)
 
-This release simplifies the range architecture by removing unnecessary components:
+CYROID now runs on both **Linux** and **macOS** (Docker Desktop):
+
+- **Platform-aware storage paths**: Automatically uses `~/.cyroid/` on macOS, `/data/cyroid/` on Linux
+- **Auto-directory creation**: Storage directories are created automatically on first range deployment
+- **ISO Cache sharing**: Downloaded ISOs are automatically available to all range VMs
+
+### Image Cache Enhancements (v0.13.x)
+
+- **Linux ISO downloads**: Direct download support for Ubuntu, Debian, Kali, Fedora, and more
+- **Windows ISO downloads**: Windows 10/11 Pro, Enterprise, Server editions
+- **Custom ISO uploads**: Upload your own ISOs for specialized VMs
+- **QEMU VM support**: Full support for ISO-based Linux and Windows VMs via qemux/qemu and dockur/windows
+
+### Previous: Simplified Architecture (v0.12.0)
 
 - **VyOS Now Optional**: Ranges deploy without VyOS by default. DinD handles routing via iptables
 - **Native VNC Routing**: Replaced nginx proxy with iptables DNAT for VNC console access
-- **Removed Promote-to-Library**: Snapshots are now created only from live VM instances
 - **Inter-Network Routing**: DinD can route between networks using iptables FORWARD rules
-
-### Streamlined VNC Console Access
-
-```
-Before (v0.11.0):
-  Traefik → DinD:15900 → nginx (inside DinD) → VM:8006
-
-After (v0.12.0):
-  Traefik → DinD:15900 → iptables DNAT → VM:8006
-```
-
-This eliminates the nginx container inside DinD, reducing complexity and resource usage.
-
-### DinD as Router (VyOS Optional)
-
-For simple ranges, DinD handles all routing:
-- Network isolation via iptables FORWARD rules
-- NAT/MASQUERADE for internet access
-- Inter-network routing when needed
-
-VyOS remains available for advanced scenarios (DHCP server, complex routing policies).
 
 ---
 
@@ -327,9 +318,9 @@ Each range runs inside a DinD container with iptables-based routing (VyOS option
 
 ### Prerequisites
 
-- Docker Engine 24.0+
+- Docker Engine 24.0+ (or Docker Desktop on macOS)
 - Docker Compose 2.20+
-- KVM support (for Windows VMs): `lsmod | grep kvm`
+- KVM support (for Windows VMs on Linux): `lsmod | grep kvm`
 - Minimum resources: 16 CPU cores, 32GB RAM, 500GB disk
 
 ### Installation
@@ -342,8 +333,11 @@ cd CYROID
 # Copy environment template
 cp .env.example .env
 
-# Generate secure secrets
+# Generate secure secrets (Linux)
 sed -i "s/your-secret-key-here/$(openssl rand -hex 32)/" .env
+
+# macOS: Generate secure secrets
+sed -i '' "s/your-secret-key-here/$(openssl rand -hex 32)/" .env
 
 # Initialize CYROID networks
 ./scripts/init-networks.sh
@@ -357,6 +351,22 @@ docker-compose ps
 # Check API health
 curl http://localhost/api/v1/version
 ```
+
+### macOS Setup (Docker Desktop)
+
+On macOS, you **must** configure the data directory to a path Docker Desktop can access:
+
+```bash
+# Edit .env and add (replace 'yourname' with your username):
+CYROID_DATA_DIR=/Users/yourname/.cyroid
+
+# Or use your home directory shorthand:
+echo "CYROID_DATA_DIR=$HOME/.cyroid" >> .env
+
+# The directories will be created automatically on first range deployment
+```
+
+> **Why?** Docker Desktop for Mac only shares files from `/Users`, `/Volumes`, `/private`, `/tmp`, and `/var/folders` by default. The Linux default of `/data/cyroid` won't work.
 
 ### Network Initialization
 
@@ -660,10 +670,15 @@ JWT_SECRET_KEY=<generate-with-openssl-rand-hex-32>
 JWT_ALGORITHM=HS256
 JWT_EXPIRE_MINUTES=60
 
-# Storage Paths
-ISO_CACHE_DIR=/data/cyroid/iso-cache
-TEMPLATE_STORAGE_DIR=/data/cyroid/template-storage
-VM_STORAGE_DIR=/data/cyroid/vm-storage
+# Data Directory (REQUIRED on macOS - must be under /Users)
+# macOS: CYROID_DATA_DIR=/Users/yourname/.cyroid
+# Linux: CYROID_DATA_DIR=/data/cyroid (default)
+CYROID_DATA_DIR=/data/cyroid
+
+# Storage Paths (derived from CYROID_DATA_DIR)
+ISO_CACHE_DIR=${CYROID_DATA_DIR}/iso-cache
+TEMPLATE_STORAGE_DIR=${CYROID_DATA_DIR}/template-storage
+VM_STORAGE_DIR=${CYROID_DATA_DIR}/vm-storage
 
 # DinD Configuration
 DIND_IMAGE=docker:24-dind
@@ -865,6 +880,8 @@ Proprietary - All Rights Reserved
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| 0.13.17 | 2026-01-20 | Cross-platform support (macOS Docker Desktop), auto-directory creation, ISO cache sharing with DinD |
+| 0.13.x | 2026-01-20 | Image cache enhancements, Linux/Windows ISO downloads, QEMU VM support, VNC improvements |
 | 0.12.0 | 2026-01-20 | Simplified architecture: VyOS optional, iptables VNC routing, removed promote-to-library |
 | 0.11.0 | 2026-01-19 | DinD isolation for all ranges, simplified deployment |
 | 0.10.1 | 2026-01-16 | Bug fixes, dropdown overlay fix |
