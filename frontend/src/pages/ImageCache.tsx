@@ -37,6 +37,7 @@ import {
   Terminal,
   Hammer,
   FolderEdit,
+  Library,
 } from 'lucide-react'
 import clsx from 'clsx'
 import { ConfirmDialog } from '../components/common/ConfirmDialog'
@@ -97,6 +98,23 @@ export default function ImageCache() {
     id?: string
     isLoading: boolean
   }>({ type: null, name: '', isLoading: false })
+
+  // Promote to Library modal state
+  const [promoteModal, setPromoteModal] = useState<{
+    show: boolean
+    imageName: string
+    imageTag: string
+  }>({ show: false, imageName: '', imageTag: '' })
+  const [promoteForm, setPromoteForm] = useState({
+    name: '',
+    description: '',
+    os_type: 'linux',
+    vm_type: 'container',
+    default_cpu: 2,
+    default_ram_mb: 4096,
+    default_disk_gb: 40,
+    tags: '',
+  })
 
   const loadData = async () => {
     setLoading(true)
@@ -914,6 +932,56 @@ export default function ImageCache() {
     }
   }
 
+  // Promote to Library handlers
+  const handleOpenPromoteModal = (imageName: string, imageTag: string) => {
+    // Generate a default name from the image tag
+    const defaultName = imageTag.split(':')[0].split('/').pop() || imageTag
+    setPromoteForm({
+      name: defaultName,
+      description: '',
+      os_type: 'linux',
+      vm_type: 'container',
+      default_cpu: 2,
+      default_ram_mb: 4096,
+      default_disk_gb: 40,
+      tags: '',
+    })
+    setPromoteModal({ show: true, imageName, imageTag })
+  }
+
+  const handleClosePromoteModal = () => {
+    setPromoteModal({ show: false, imageName: '', imageTag: '' })
+  }
+
+  const handlePromoteToLibrary = async () => {
+    if (!promoteForm.name) {
+      toast.error('Please enter a name for the VM Library entry')
+      return
+    }
+
+    setActionLoading('promote')
+    try {
+      await cacheApi.promoteToLibrary({
+        image_name: promoteModal.imageName,
+        name: promoteForm.name,
+        description: promoteForm.description || undefined,
+        os_type: promoteForm.os_type,
+        vm_type: promoteForm.vm_type,
+        default_cpu: promoteForm.default_cpu,
+        default_ram_mb: promoteForm.default_ram_mb,
+        default_disk_gb: promoteForm.default_disk_gb,
+        tags: promoteForm.tags ? promoteForm.tags.split(',').map(t => t.trim()).filter(Boolean) : [],
+      })
+      toast.success(`Added "${promoteForm.name}" to VM Library`)
+      handleClosePromoteModal()
+      await loadData()
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || 'Failed to promote to library')
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
   const tabs = [
     { id: 'overview' as const, name: 'Overview', icon: HardDrive },
     { id: 'docker' as const, name: 'Docker Images', icon: Server },
@@ -1160,6 +1228,7 @@ export default function ImageCache() {
             onPull={handlePullDockerImage}
             onRemove={handleRemoveImage}
             onCancel={handleCancelDockerPull}
+            onPromote={handleOpenPromoteModal}
             pullStatus={dockerPullStatus}
             actionLoading={actionLoading}
             isAdmin={isAdmin}
@@ -1176,6 +1245,7 @@ export default function ImageCache() {
             onPull={handlePullDockerImage}
             onRemove={handleRemoveImage}
             onCancel={handleCancelDockerPull}
+            onPromote={handleOpenPromoteModal}
             pullStatus={dockerPullStatus}
             actionLoading={actionLoading}
             isAdmin={isAdmin}
@@ -1192,6 +1262,7 @@ export default function ImageCache() {
             onPull={handlePullDockerImage}
             onRemove={handleRemoveImage}
             onCancel={handleCancelDockerPull}
+            onPromote={handleOpenPromoteModal}
             pullStatus={dockerPullStatus}
             actionLoading={actionLoading}
             isAdmin={isAdmin}
@@ -1207,7 +1278,7 @@ export default function ImageCache() {
                 </h4>
                 <p className="text-xs text-gray-600 mt-1">Additional cached images not in recommended list</p>
               </div>
-              <ImageTable images={categorizedImages.other} onRemove={handleRemoveImage} actionLoading={actionLoading} isAdmin={isAdmin} />
+              <ImageTable images={categorizedImages.other} onRemove={handleRemoveImage} onPromote={handleOpenPromoteModal} actionLoading={actionLoading} isAdmin={isAdmin} />
             </div>
           )}
         </div>
@@ -2180,6 +2251,162 @@ export default function ImageCache() {
         </div>
       )}
 
+      {/* Promote to Library Modal */}
+      {promoteModal.show && (
+        <div className="fixed inset-0 z-50 overflow-y-auto">
+          <div className="flex items-center justify-center min-h-screen px-4">
+            <div className="fixed inset-0 bg-gray-500 bg-opacity-75" onClick={handleClosePromoteModal} />
+            <div className="relative bg-white rounded-lg shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto">
+              <div className="px-6 py-4 border-b border-gray-200">
+                <h3 className="text-lg font-medium text-gray-900 flex items-center">
+                  <Library className="h-5 w-5 mr-2 text-green-600" />
+                  Promote to VM Library
+                </h3>
+                <p className="mt-1 text-sm text-gray-500">
+                  Add this Docker image to the VM Library for use when creating VMs
+                </p>
+              </div>
+              <div className="px-6 py-4 space-y-4">
+                {/* Image info */}
+                <div className="bg-gray-50 rounded-lg p-3">
+                  <p className="text-xs text-gray-500">Docker Image</p>
+                  <p className="font-mono text-sm text-gray-900">{promoteModal.imageTag}</p>
+                </div>
+
+                {/* Name */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Name <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={promoteForm.name}
+                    onChange={(e) => setPromoteForm(prev => ({ ...prev, name: e.target.value }))}
+                    placeholder="e.g., Ubuntu 22.04 Desktop"
+                    className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-green-500 focus:border-green-500"
+                  />
+                </div>
+
+                {/* Description */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                  <textarea
+                    value={promoteForm.description}
+                    onChange={(e) => setPromoteForm(prev => ({ ...prev, description: e.target.value }))}
+                    placeholder="Optional description..."
+                    rows={2}
+                    className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-green-500 focus:border-green-500"
+                  />
+                </div>
+
+                {/* OS Type and VM Type */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">OS Type</label>
+                    <select
+                      value={promoteForm.os_type}
+                      onChange={(e) => setPromoteForm(prev => ({ ...prev, os_type: e.target.value }))}
+                      className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-green-500 focus:border-green-500"
+                    >
+                      <option value="linux">Linux</option>
+                      <option value="windows">Windows</option>
+                      <option value="custom">Custom</option>
+                      <option value="network">Network</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">VM Type</label>
+                    <select
+                      value={promoteForm.vm_type}
+                      onChange={(e) => setPromoteForm(prev => ({ ...prev, vm_type: e.target.value }))}
+                      className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-green-500 focus:border-green-500"
+                    >
+                      <option value="container">Container</option>
+                      <option value="vm">Linux VM (QEMU)</option>
+                      <option value="windows">Windows VM</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Default specs */}
+                <div className="grid grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Default CPU</label>
+                    <input
+                      type="number"
+                      value={promoteForm.default_cpu}
+                      onChange={(e) => setPromoteForm(prev => ({ ...prev, default_cpu: parseInt(e.target.value) || 2 }))}
+                      min={1}
+                      max={16}
+                      className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-green-500 focus:border-green-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">RAM (MB)</label>
+                    <input
+                      type="number"
+                      value={promoteForm.default_ram_mb}
+                      onChange={(e) => setPromoteForm(prev => ({ ...prev, default_ram_mb: parseInt(e.target.value) || 4096 }))}
+                      min={512}
+                      step={512}
+                      className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-green-500 focus:border-green-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Disk (GB)</label>
+                    <input
+                      type="number"
+                      value={promoteForm.default_disk_gb}
+                      onChange={(e) => setPromoteForm(prev => ({ ...prev, default_disk_gb: parseInt(e.target.value) || 40 }))}
+                      min={10}
+                      className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-green-500 focus:border-green-500"
+                    />
+                  </div>
+                </div>
+
+                {/* Tags */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Tags</label>
+                  <input
+                    type="text"
+                    value={promoteForm.tags}
+                    onChange={(e) => setPromoteForm(prev => ({ ...prev, tags: e.target.value }))}
+                    placeholder="e.g., desktop, ubuntu, attack (comma-separated)"
+                    className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-green-500 focus:border-green-500"
+                  />
+                  <p className="mt-1 text-xs text-gray-500">Comma-separated list of tags for categorization</p>
+                </div>
+              </div>
+              <div className="px-6 py-4 border-t border-gray-200 flex justify-end space-x-3">
+                <button
+                  onClick={handleClosePromoteModal}
+                  className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handlePromoteToLibrary}
+                  disabled={actionLoading === 'promote' || !promoteForm.name}
+                  className="px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-md hover:bg-green-700 disabled:opacity-50 flex items-center"
+                >
+                  {actionLoading === 'promote' ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Adding...
+                    </>
+                  ) : (
+                    <>
+                      <Library className="h-4 w-4 mr-2" />
+                      Add to Library
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Delete Confirmation Dialog */}
       <ConfirmDialog
         isOpen={deleteConfirm.type !== null}
@@ -2203,7 +2430,7 @@ export default function ImageCache() {
 
 // Helper Components
 
-function DockerImageSection({ title, description, images, cachedImages, icon: Icon, colorClass, onPull, onRemove, onCancel, pullStatus, actionLoading, isAdmin }: {
+function DockerImageSection({ title, description, images, cachedImages, icon: Icon, colorClass, onPull, onRemove, onCancel, onPromote, pullStatus, actionLoading, isAdmin }: {
   title: string
   description: string
   images: RecommendedImage[]
@@ -2213,6 +2440,7 @@ function DockerImageSection({ title, description, images, cachedImages, icon: Ic
   onPull: (image: string) => void
   onRemove: (id: string, tag: string) => void
   onCancel: (imageKey: string) => void
+  onPromote: (imageName: string, imageTag: string) => void
   pullStatus: Record<string, DockerPullStatus>
   actionLoading: string | null
   isAdmin: boolean
@@ -2274,18 +2502,27 @@ function DockerImageSection({ title, description, images, cachedImages, icon: Ic
                         Cached
                       </span>
                       {isAdmin && (
-                        <button
-                          onClick={() => onRemove(cached.id, cached.tags[0] || cached.id)}
-                          disabled={actionLoading === cached.id}
-                          className="text-red-600 hover:text-red-900 disabled:opacity-50 p-1"
-                          title="Remove cached image"
-                        >
-                          {actionLoading === cached.id ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <Trash2 className="h-4 w-4" />
-                          )}
-                        </button>
+                        <>
+                          <button
+                            onClick={() => onPromote(cached.tags[0] || cached.id, cached.tags[0] || cached.id)}
+                            className="text-green-600 hover:text-green-800 p-1"
+                            title="Promote to VM Library"
+                          >
+                            <Library className="h-4 w-4" />
+                          </button>
+                          <button
+                            onClick={() => onRemove(cached.id, cached.tags[0] || cached.id)}
+                            disabled={actionLoading === cached.id}
+                            className="text-red-600 hover:text-red-900 disabled:opacity-50 p-1"
+                            title="Remove cached image"
+                          >
+                            {actionLoading === cached.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Trash2 className="h-4 w-4" />
+                            )}
+                          </button>
+                        </>
                       )}
                     </>
                   ) : isAdmin ? (
@@ -2352,9 +2589,10 @@ function DockerImageSection({ title, description, images, cachedImages, icon: Ic
   )
 }
 
-function ImageTable({ images, onRemove, actionLoading, isAdmin }: {
+function ImageTable({ images, onRemove, onPromote, actionLoading, isAdmin }: {
   images: CachedImage[]
   onRemove: (id: string, tag: string) => void
+  onPromote: (imageName: string, imageTag: string) => void
   actionLoading: string | null
   isAdmin: boolean
 }) {
@@ -2380,13 +2618,21 @@ function ImageTable({ images, onRemove, actionLoading, isAdmin }: {
               {image.created ? new Date(image.created).toLocaleDateString() : 'Unknown'}
             </td>
             {isAdmin && (
-              <td className="px-6 py-4 whitespace-nowrap text-right">
+              <td className="px-6 py-4 whitespace-nowrap text-right space-x-2">
+                <button
+                  onClick={() => onPromote(image.tags[0] || image.id, image.tags[0] || image.id)}
+                  className="text-green-600 hover:text-green-800"
+                  title="Promote to VM Library"
+                >
+                  <Library className="h-4 w-4 inline" />
+                </button>
                 <button
                   onClick={() => onRemove(image.id, image.tags[0] || image.id)}
                   disabled={actionLoading === image.id}
                   className="text-red-600 hover:text-red-900 disabled:opacity-50"
+                  title="Remove image"
                 >
-                  {actionLoading === image.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                  {actionLoading === image.id ? <Loader2 className="h-4 w-4 animate-spin inline" /> : <Trash2 className="h-4 w-4 inline" />}
                 </button>
               </td>
             )}

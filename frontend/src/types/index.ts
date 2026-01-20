@@ -401,6 +401,22 @@ export interface SnapshotResponse {
   type: 'windows' | 'docker'
 }
 
+export interface PromoteToLibraryResponse {
+  id: string
+  name: string
+  description?: string
+  docker_image_id?: string
+  docker_image_tag?: string
+  os_type?: string
+  vm_type?: string
+  default_cpu: number
+  default_ram_mb: number
+  default_disk_gb: number
+  is_global: boolean
+  tags: string[]
+  created_at: string
+}
+
 export interface CacheStats {
   docker_images: {
     count: number
