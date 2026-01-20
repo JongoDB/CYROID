@@ -49,17 +49,15 @@ def get_library_stats(
     current_user: CurrentUser,
 ):
     """Get statistics about the Image Library."""
+    from sqlalchemy import func
+
     base_count = db.query(BaseImage).count()
     golden_count = db.query(GoldenImage).count()
     snapshot_count = db.query(Snapshot).filter(Snapshot.is_global == True).count()
 
-    # Calculate total size
-    base_size = db.query(BaseImage).with_entities(
-        db.query(BaseImage.size_bytes).filter(BaseImage.size_bytes.isnot(None))
-    ).scalar() or 0
-    golden_size = db.query(GoldenImage).with_entities(
-        db.query(GoldenImage.size_bytes).filter(GoldenImage.size_bytes.isnot(None))
-    ).scalar() or 0
+    # Calculate total size using func.sum
+    base_size = db.query(func.coalesce(func.sum(BaseImage.size_bytes), 0)).scalar() or 0
+    golden_size = db.query(func.coalesce(func.sum(GoldenImage.size_bytes), 0)).scalar() or 0
 
     return LibraryStats(
         base_images_count=base_count,
