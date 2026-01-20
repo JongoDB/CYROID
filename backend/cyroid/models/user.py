@@ -57,6 +57,9 @@ class User(Base, UUIDMixin, TimestampMixin):
     templates = relationship("VMTemplate", back_populates="created_by_user")
     ranges = relationship("Range", back_populates="created_by_user")
     artifacts = relationship("Artifact", back_populates="uploaded_by_user")
+    # Image Library relationships
+    base_images = relationship("BaseImage", back_populates="created_by_user")
+    golden_images = relationship("GoldenImage", back_populates="created_by_user")
 
     @property
     def roles(self) -> List[str]:

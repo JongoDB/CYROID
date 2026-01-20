@@ -87,7 +87,29 @@ export interface VM {
   id: string
   range_id: string
   network_id: string
-  template_id: string
+  // Image Library source fields (one of these will be set)
+  base_image_id?: string | null
+  golden_image_id?: string | null
+  template_id?: string | null  // Legacy, deprecated
+  // Image Library relationships
+  base_image?: {
+    id: string
+    name: string
+    image_type: 'container' | 'iso'
+    os_type: string
+  } | null
+  golden_image?: {
+    id: string
+    name: string
+    source: 'snapshot' | 'import'
+    os_type: string
+  } | null
+  template?: {
+    id: string
+    name: string
+    os_type: string
+    os_variant?: string
+  } | null  // Legacy, deprecated
   hostname: string
   ip_address: string
   cpu: number
@@ -799,4 +821,193 @@ export interface ApplyScenarioResponse {
   msel_id: string
   inject_count: number
   status: string
+}
+
+// ============================================================================
+// Image Library Types
+// ============================================================================
+
+export type ImageLibraryImageType = 'container' | 'iso'
+export type GoldenImageSource = 'snapshot' | 'import'
+
+/**
+ * Base Image - Foundation layer of the Image Library.
+ * Contains container images (from Docker pulls) and cached ISOs.
+ */
+export interface BaseImage {
+  id: string
+  name: string
+  description: string | null
+  image_type: ImageLibraryImageType
+  // Container-specific
+  docker_image_id: string | null
+  docker_image_tag: string | null
+  // ISO-specific
+  iso_path: string | null
+  iso_source: string | null
+  iso_version: string | null
+  // Metadata
+  os_type: 'windows' | 'linux' | 'network' | 'custom'
+  vm_type: 'container' | 'linux_vm' | 'windows_vm'
+  native_arch: string
+  // Resource defaults
+  default_cpu: number
+  default_ram_mb: number
+  default_disk_gb: number
+  // Size and visibility
+  size_bytes: number | null
+  is_global: boolean
+  created_by: string | null
+  tags: string[]
+  created_at: string
+  updated_at: string
+}
+
+export interface BaseImageCreate {
+  name: string
+  description?: string | null
+  image_type: ImageLibraryImageType
+  docker_image_id?: string | null
+  docker_image_tag?: string | null
+  iso_path?: string | null
+  iso_source?: string | null
+  iso_version?: string | null
+  os_type: 'windows' | 'linux' | 'network' | 'custom'
+  vm_type: 'container' | 'linux_vm' | 'windows_vm'
+  native_arch?: string
+  default_cpu?: number
+  default_ram_mb?: number
+  default_disk_gb?: number
+  size_bytes?: number | null
+  tags?: string[]
+}
+
+export interface BaseImageBrief {
+  id: string
+  name: string
+  image_type: ImageLibraryImageType
+  os_type: string
+}
+
+/**
+ * Golden Image - Second tier of the Image Library.
+ * Created from first snapshot of a VM OR imported from OVA/QCOW2/VMDK.
+ * Tracks lineage back to base image.
+ */
+export interface GoldenImageLibrary {
+  id: string
+  name: string
+  description: string | null
+  // Source tracking (lineage)
+  source: GoldenImageSource
+  base_image_id: string | null
+  base_image: BaseImageBrief | null  // Populated for lineage display
+  source_vm_id: string | null
+  // Storage
+  docker_image_id: string | null
+  docker_image_tag: string | null
+  disk_image_path: string | null
+  import_format: string | null  // ova, qcow2, vmdk
+  // Metadata
+  os_type: 'windows' | 'linux' | 'network' | 'custom'
+  vm_type: 'container' | 'linux_vm' | 'windows_vm'
+  native_arch: string
+  // Resource defaults
+  default_cpu: number
+  default_ram_mb: number
+  default_disk_gb: number
+  // Display/console settings
+  display_type: 'desktop' | 'server' | 'headless' | null
+  vnc_port: number | null
+  // Size and visibility
+  size_bytes: number | null
+  is_global: boolean
+  created_by: string | null
+  tags: string[]
+  created_at: string
+  updated_at: string
+}
+
+export interface GoldenImageCreate {
+  name: string
+  description?: string | null
+  source: GoldenImageSource
+  base_image_id?: string | null
+  os_type: 'windows' | 'linux' | 'network' | 'custom'
+  vm_type: 'container' | 'linux_vm' | 'windows_vm'
+  native_arch?: string
+  default_cpu?: number
+  default_ram_mb?: number
+  default_disk_gb?: number
+  display_type?: 'desktop' | 'server' | 'headless' | null
+  vnc_port?: number | null
+  tags?: string[]
+}
+
+export interface GoldenImageBrief {
+  id: string
+  name: string
+  source: GoldenImageSource
+  os_type: string
+}
+
+/**
+ * Snapshot with lineage - Third tier of the Image Library.
+ * Fork snapshots linked to their parent Golden Image.
+ */
+export interface SnapshotWithLineage extends Snapshot {
+  golden_image_id: string | null
+  golden_image: GoldenImageBrief | null  // Populated for lineage display
+  parent_snapshot_id: string | null
+}
+
+/**
+ * Unified view of any image in the library.
+ */
+export interface LibraryImage {
+  id: string
+  name: string
+  category: 'base' | 'golden' | 'snapshot'
+  image_type: ImageLibraryImageType | null  // For base images
+  source: GoldenImageSource | null  // For golden images
+  os_type: string
+  vm_type: string
+  native_arch: string
+  default_cpu: number
+  default_ram_mb: number
+  default_disk_gb: number
+  size_bytes: number | null
+  lineage: string | null  // e.g., "From: Ubuntu 22.04" or "Fork of: DC01 Golden"
+}
+
+/**
+ * Statistics about the Image Library.
+ */
+export interface LibraryStats {
+  base_images_count: number
+  golden_images_count: number
+  snapshots_count: number
+  total_size_bytes: number
+}
+
+/**
+ * VM Create with Image Library sources.
+ * Exactly one source must be provided.
+ */
+export interface VMCreateWithImageLibrary {
+  range_id: string
+  network_id: string
+  hostname: string
+  ip_address: string
+  cpu?: number
+  ram_mb?: number
+  disk_gb?: number
+  // Image source - exactly one required
+  base_image_id?: string | null
+  golden_image_id?: string | null
+  snapshot_id?: string | null
+  template_id?: string | null  // Deprecated, for backward compat
+  // Other VM settings
+  display_type?: 'desktop' | 'server' | 'headless' | null
+  boot_source?: 'golden_image' | 'fresh_install' | null
 }

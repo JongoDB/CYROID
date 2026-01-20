@@ -320,12 +320,51 @@ def _pull_docker_image_async(image: str):
         # Verify image was pulled
         try:
             pulled_image = client.images.get(image)
+            image_id = pulled_image.id
+            size_bytes = pulled_image.attrs.get("Size", 0)
             _active_docker_pulls[image_key].update({
                 "status": "completed",
                 "progress_percent": 100,
-                "image_id": pulled_image.id,
-                "size_bytes": pulled_image.attrs.get("Size", 0),
+                "image_id": image_id,
+                "size_bytes": size_bytes,
             })
+
+            # Auto-create BaseImage record for the Image Library
+            try:
+                from cyroid.database import get_session_local
+                from cyroid.models.base_image import BaseImage
+
+                SessionLocal = get_session_local()
+                db = SessionLocal()
+                try:
+                    # Check if BaseImage already exists for this image
+                    existing = db.query(BaseImage).filter(
+                        BaseImage.docker_image_tag == image
+                    ).first()
+
+                    if not existing:
+                        # Create new BaseImage record
+                        # Parse image name for metadata
+                        image_name = image.split("/")[-1].split(":")[0]
+                        base_image = BaseImage(
+                            name=image_name,
+                            description=f"Container image pulled from registry: {image}",
+                            image_type="container",
+                            docker_image_id=image_id,
+                            docker_image_tag=image,
+                            os_type="linux",  # Default, can be updated later
+                            vm_type="container",
+                            size_bytes=size_bytes,
+                            is_global=True,
+                        )
+                        db.add(base_image)
+                        db.commit()
+                        logger.info(f"Created BaseImage record for {image}")
+                finally:
+                    db.close()
+            except Exception as e:
+                logger.warning(f"Failed to create BaseImage record for {image}: {e}")
+
         except Exception:
             _active_docker_pulls[image_key].update({
                 "status": "completed",

@@ -20,19 +20,36 @@ class VMBase(BaseModel):
 class VMCreate(VMBase):
     range_id: UUID
     network_id: UUID
-    template_id: Optional[UUID] = None  # Optional: use template_id OR snapshot_id
-    snapshot_id: Optional[UUID] = None  # Optional: use snapshot_id OR template_id
+
+    # Image Library sources (new - preferred)
+    base_image_id: Optional[UUID] = None
+    golden_image_id: Optional[UUID] = None
+    snapshot_id: Optional[UUID] = None
+    # Deprecated (kept for backward compatibility)
+    template_id: Optional[UUID] = None
 
     @model_validator(mode='after')
     def check_source(self) -> 'VMCreate':
-        """Ensure exactly one of template_id or snapshot_id is provided."""
-        has_template = self.template_id is not None
-        has_snapshot = self.snapshot_id is not None
+        """Ensure exactly one image source is provided."""
+        sources = [
+            self.base_image_id,
+            self.golden_image_id,
+            self.snapshot_id,
+            self.template_id,
+        ]
+        set_count = sum(1 for s in sources if s is not None)
 
-        if has_template and has_snapshot:
-            raise ValueError("Cannot specify both template_id and snapshot_id")
-        if not has_template and not has_snapshot:
-            raise ValueError("Must provide either template_id or snapshot_id")
+        if set_count == 0:
+            raise ValueError(
+                "Must provide exactly one of: base_image_id, golden_image_id, "
+                "snapshot_id, or template_id (deprecated)"
+            )
+        if set_count > 1:
+            raise ValueError(
+                "Cannot specify multiple image sources. "
+                "Provide exactly one of: base_image_id, golden_image_id, "
+                "snapshot_id, or template_id"
+            )
 
         return self
 
@@ -120,8 +137,12 @@ class VMResponse(VMBase):
     id: UUID
     range_id: UUID
     network_id: UUID
-    template_id: Optional[UUID] = None  # Optional: VM can be from template OR snapshot
-    snapshot_id: Optional[UUID] = None  # Optional: VM can be from snapshot OR template
+    # Image Library sources (new)
+    base_image_id: Optional[UUID] = None
+    golden_image_id: Optional[UUID] = None
+    snapshot_id: Optional[UUID] = None
+    # Deprecated template reference
+    template_id: Optional[UUID] = None
     status: VMStatus
     error_message: Optional[str] = None
     container_id: Optional[str] = None

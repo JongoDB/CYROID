@@ -5,7 +5,7 @@ from cyroid.models.resource_tag import ResourceTag
 from cyroid.models.template import VMTemplate, OSType
 from cyroid.models.range import Range, RangeStatus
 from cyroid.models.network import Network
-from cyroid.models.vm import VM, VMStatus
+from cyroid.models.vm import VM, VMStatus, BootSource
 from cyroid.models.artifact import Artifact, ArtifactPlacement, ArtifactType, MaliciousIndicator, PlacementStatus
 from cyroid.models.snapshot import Snapshot
 from cyroid.models.event_log import EventLog, EventType
@@ -17,6 +17,9 @@ from cyroid.models.walkthrough_progress import WalkthroughProgress
 from cyroid.models.blueprint import RangeBlueprint, RangeInstance
 from cyroid.models.content import Content, ContentAsset, ContentType
 from cyroid.models.event import TrainingEvent, EventParticipant, EventStatus
+# Image Library models
+from cyroid.models.base_image import BaseImage, ImageType
+from cyroid.models.golden_image import GoldenImage, GoldenImageSource
 
 __all__ = [
     "Base",
@@ -25,7 +28,7 @@ __all__ = [
     "VMTemplate", "OSType",
     "Range", "RangeStatus",
     "Network",
-    "VM", "VMStatus",
+    "VM", "VMStatus", "BootSource",
     "Artifact", "ArtifactPlacement", "ArtifactType", "MaliciousIndicator", "PlacementStatus",
     "Snapshot",
     "EventLog", "EventType",
@@ -37,4 +40,7 @@ __all__ = [
     "RangeBlueprint", "RangeInstance",
     "Content", "ContentAsset", "ContentType",
     "TrainingEvent", "EventParticipant", "EventStatus",
+    # Image Library
+    "BaseImage", "ImageType",
+    "GoldenImage", "GoldenImageSource",
 ]

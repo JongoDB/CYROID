@@ -1,8 +1,8 @@
 // frontend/src/pages/RangeDetail.tsx
 import { useEffect, useState, useMemo, useCallback, useRef } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
-import { rangesApi, networksApi, vmsApi, templatesApi, snapshotsApi, NetworkCreate, VMCreate } from '../services/api'
-import type { Range, Network, VM, VMTemplate, RealtimeEvent, Snapshot } from '../types'
+import { rangesApi, networksApi, vmsApi, imagesApi, NetworkCreate, VMCreate } from '../services/api'
+import type { Range, Network, VM, RealtimeEvent, BaseImage, GoldenImageLibrary, SnapshotWithLineage } from '../types'
 import {
   ArrowLeft, Plus, Loader2, X, Play, Square, RotateCw, Camera,
   Network as NetworkIcon, Server, Trash2, Rocket, Activity, Monitor, Shield, Download, Pencil, Globe, Router, Wifi, Radio, Wrench, BookOpen, LayoutTemplate
@@ -41,8 +41,10 @@ export default function RangeDetail() {
   const [range, setRange] = useState<Range | null>(null)
   const [networks, setNetworks] = useState<Network[]>([])
   const [vms, setVms] = useState<VM[]>([])
-  const [templates, setTemplates] = useState<VMTemplate[]>([])
-  const [availableSnapshots, setAvailableSnapshots] = useState<Snapshot[]>([])
+  // Image Library data for VM creation
+  const [baseImages, setBaseImages] = useState<BaseImage[]>([])
+  const [goldenImages, setGoldenImages] = useState<GoldenImageLibrary[]>([])
+  const [availableSnapshots, setAvailableSnapshots] = useState<SnapshotWithLineage[]>([])
   const [loading, setLoading] = useState(true)
 
   // Tab state
@@ -60,16 +62,22 @@ export default function RangeDetail() {
 
   // VM modal state
   const [showVmModal, setShowVmModal] = useState(false)
-  const [vmSourceType, setVmSourceType] = useState<'template' | 'snapshot'>('template')
+  // Image Library source types: base (fresh container/ISO), golden (configured), snapshot (fork)
+  const [vmSourceType, setVmSourceType] = useState<'base' | 'golden' | 'snapshot'>('base')
   const [vmForm, setVmForm] = useState<Partial<VMCreate>>({
     hostname: '',
     ip_address: '',
     network_id: '',
+    // Image Library source fields (mutually exclusive)
+    base_image_id: '',
+    golden_image_id: '',
+    snapshot_id: '',
+    // Legacy template_id for backward compatibility
     template_id: '',
     cpu: 2,
     ram_mb: 2048,
     disk_gb: 20,
-    // Windows-specific (version inherited from template)
+    // Windows-specific (version inherited from image)
     windows_version: '',
     windows_username: '',
     windows_password: '',
@@ -237,57 +245,83 @@ export default function RangeDetail() {
     return count
   }, [range, vms])
 
-  // Get the currently selected template for the VM form
-  const selectedTemplate = useMemo(() => {
-    return templates.find(t => t.id === vmForm.template_id) || null
-  }, [templates, vmForm.template_id])
+  // Get the currently selected base image for the VM form
+  const selectedBaseImage = useMemo(() => {
+    return baseImages.find(img => img.id === vmForm.base_image_id) || null
+  }, [baseImages, vmForm.base_image_id])
+
+  // Get the currently selected golden image for the VM form
+  const selectedGoldenImage = useMemo(() => {
+    return goldenImages.find(img => img.id === vmForm.golden_image_id) || null
+  }, [goldenImages, vmForm.golden_image_id])
 
   // Get the currently selected snapshot for the VM form
   const selectedSnapshot = useMemo(() => {
     return availableSnapshots.find(s => s.id === vmForm.snapshot_id) || null
   }, [availableSnapshots, vmForm.snapshot_id])
 
+  // Get the currently selected image (any type) for emulation checks
+  const selectedImage = useMemo(() => {
+    if (vmSourceType === 'base') return selectedBaseImage
+    if (vmSourceType === 'golden') return selectedGoldenImage
+    if (vmSourceType === 'snapshot') return selectedSnapshot
+    return null
+  }, [vmSourceType, selectedBaseImage, selectedGoldenImage, selectedSnapshot])
+
   // Extract subnet prefix from first network for blueprint suggestion
   const suggestedPrefix = networks?.[0]?.subnet
     ? networks[0].subnet.split('.').slice(0, 2).join('.')
     : '10.100';
 
-  // Determine if selected template requires emulation on ARM host
-  const templateRequiresEmulation = useMemo(() => {
-    if (!isArmHost || !selectedTemplate) return false
+  // Determine if selected image requires emulation on ARM host
+  const imageRequiresEmulation = useMemo(() => {
+    if (!isArmHost || !selectedImage) return false
 
     // Windows always requires emulation on ARM (x86-only via QEMU)
-    if (selectedTemplate.os_type === 'windows') return true
+    if (selectedImage.os_type === 'windows') return true
 
-    // For Linux VMs (qemu-based ISO images), check if distro has ARM64 support
-    const baseImage = selectedTemplate.base_image?.toLowerCase() || ''
-    if (baseImage.startsWith('iso:')) {
-      // These distros have native ARM64 ISO support
+    // For base images, check image_type
+    if (vmSourceType === 'base' && selectedBaseImage) {
+      // ISO-based images may need emulation
+      if (selectedBaseImage.image_type === 'iso') {
+        // These distros have native ARM64 ISO support
+        const arm64Distros = ['ubuntu', 'debian', 'fedora', 'alpine', 'rocky', 'alma', 'kali']
+        const imageName = selectedBaseImage.name?.toLowerCase() || ''
+        return !arm64Distros.some(distro => imageName.includes(distro))
+      }
+      // Container images are typically multi-arch
+      return false
+    }
+
+    // For golden images and snapshots, check vm_type
+    if (selectedImage.vm_type === 'linux_vm' || selectedImage.vm_type === 'windows_vm') {
+      // QEMU-based VMs may need emulation
       const arm64Distros = ['ubuntu', 'debian', 'fedora', 'alpine', 'rocky', 'alma', 'kali']
-      const osVariant = selectedTemplate.os_variant?.toLowerCase() || ''
-      return !arm64Distros.some(distro => osVariant.includes(distro))
+      const imageName = selectedImage.name?.toLowerCase() || ''
+      return !arm64Distros.some(distro => imageName.includes(distro))
     }
 
     // Docker containers are typically multi-arch, no emulation needed
     return false
-  }, [isArmHost, selectedTemplate])
+  }, [isArmHost, selectedImage, vmSourceType, selectedBaseImage])
 
   const fetchData = async () => {
     if (!id) return
     try {
-      const [rangeRes, networksRes, vmsRes, templatesRes, snapshotsRes] = await Promise.all([
+      const [rangeRes, networksRes, vmsRes, baseImagesRes, goldenImagesRes, snapshotsRes] = await Promise.all([
         rangesApi.get(id),
         networksApi.list(id),
         vmsApi.list(id),
-        templatesApi.list(),
-        snapshotsApi.list()  // Fetch all global snapshots for VM creation
+        imagesApi.listBaseImages(),
+        imagesApi.listGoldenImages(),
+        imagesApi.listLibrarySnapshots()  // Fetch all global snapshots for VM creation
       ])
       setRange(rangeRes.data)
       setNetworks(networksRes.data)
       setVms(vmsRes.data)
-      setTemplates(templatesRes.data)
-      // Filter to only global snapshots that can be used for VM creation
-      setAvailableSnapshots(snapshotsRes.data.filter((s: Snapshot) => s.is_global))
+      setBaseImages(baseImagesRes.data)
+      setGoldenImages(goldenImagesRes.data)
+      setAvailableSnapshots(snapshotsRes.data)
     } catch (err) {
       console.error('Failed to fetch range:', err)
     } finally {
@@ -535,9 +569,11 @@ export default function RangeDetail() {
         disk_gb: vmForm.disk_gb!
       }
 
-      // Add source: either template_id OR snapshot_id (mutually exclusive)
-      if (vmSourceType === 'template') {
-        vmData.template_id = vmForm.template_id!
+      // Add image source (exactly one of base_image_id, golden_image_id, snapshot_id)
+      if (vmSourceType === 'base') {
+        vmData.base_image_id = vmForm.base_image_id!
+      } else if (vmSourceType === 'golden') {
+        vmData.golden_image_id = vmForm.golden_image_id!
       } else {
         vmData.snapshot_id = vmForm.snapshot_id!
       }
@@ -596,9 +632,10 @@ export default function RangeDetail() {
 
       await vmsApi.create(vmData)
       setShowVmModal(false)
-      setVmSourceType('template')
+      setVmSourceType('base')
       setVmForm({
-        hostname: '', ip_address: '', network_id: '', template_id: '', snapshot_id: '',
+        hostname: '', ip_address: '', network_id: '',
+        base_image_id: '', golden_image_id: '', snapshot_id: '', template_id: '',
         cpu: 2, ram_mb: 2048, disk_gb: 20,
         windows_version: '', windows_username: '', windows_password: '',
         display_type: 'desktop',
@@ -1007,7 +1044,7 @@ export default function RangeDetail() {
           <h3 className="text-lg font-medium text-gray-900">Virtual Machines</h3>
           <button
             onClick={() => setShowVmModal(true)}
-            disabled={networks.length === 0 || templates.length === 0}
+            disabled={networks.length === 0 || (baseImages.length === 0 && goldenImages.length === 0 && availableSnapshots.length === 0)}
             className="inline-flex items-center px-3 py-1.5 border border-transparent text-sm font-medium rounded-md text-primary-600 bg-primary-100 hover:bg-primary-200 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Plus className="h-4 w-4 mr-1" />
@@ -1022,8 +1059,9 @@ export default function RangeDetail() {
           ) : (
             <div className="space-y-3">
               {vms.map((vm) => {
-                const template = templates.find(t => t.id === vm.template_id)
                 const network = networks.find(n => n.id === vm.network_id)
+                // Get image source name (base image, golden image, or legacy template)
+                const imageName = vm.base_image?.name || vm.golden_image?.name || vm.template?.name || 'Unknown'
                 return (
                   <div key={vm.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                     <div className="flex items-center">
@@ -1043,7 +1081,7 @@ export default function RangeDetail() {
                           </span>
                         </div>
                         <p className="text-xs text-gray-500">
-                          {vm.ip_address} • {template?.name || 'Unknown'} • {network?.name || 'Unknown'}
+                          {vm.ip_address} • {imageName} • {network?.name || 'Unknown'}
                         </p>
                         <p className="text-xs text-gray-400">
                           {vm.cpu} CPU • {vm.ram_mb / 1024}GB RAM • {vm.disk_gb}GB
@@ -1226,23 +1264,25 @@ export default function RangeDetail() {
               <form onSubmit={handleCreateVm} className="p-4 space-y-4">
                 {error && <div className="p-3 bg-red-50 text-red-700 rounded-md text-sm">{error}</div>}
 
-                {/* Source Type Selection */}
+                {/* Image Library Source Type Selection */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">Create from</label>
-                  <div className="flex space-x-4">
+                  <div className="flex flex-wrap gap-2">
                     <label className="flex items-center">
                       <input
                         type="radio"
                         name="vmSourceType"
-                        value="template"
-                        checked={vmSourceType === 'template'}
+                        value="base"
+                        checked={vmSourceType === 'base'}
+                        disabled={baseImages.length === 0}
                         onChange={() => {
-                          setVmSourceType('template')
-                          // Clear snapshot selection and reset form values
+                          setVmSourceType('base')
                           setVmForm({
                             ...vmForm,
-                            template_id: '',
+                            base_image_id: '',
+                            golden_image_id: '',
                             snapshot_id: '',
+                            template_id: '',
                             cpu: 2,
                             ram_mb: 2048,
                             disk_gb: 20
@@ -1252,9 +1292,43 @@ export default function RangeDetail() {
                           setShowLinuxContainerOptions(false)
                           setLinuxContainerType(null)
                         }}
-                        className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300"
+                        className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 disabled:opacity-50"
                       />
-                      <span className="ml-2 text-sm text-gray-700">Base Template</span>
+                      <span className={clsx("ml-2 text-sm", baseImages.length === 0 ? "text-gray-400" : "text-gray-700")}>
+                        Base Image
+                        {baseImages.length === 0 && " (none)"}
+                      </span>
+                    </label>
+                    <label className="flex items-center">
+                      <input
+                        type="radio"
+                        name="vmSourceType"
+                        value="golden"
+                        checked={vmSourceType === 'golden'}
+                        disabled={goldenImages.length === 0}
+                        onChange={() => {
+                          setVmSourceType('golden')
+                          setVmForm({
+                            ...vmForm,
+                            base_image_id: '',
+                            golden_image_id: '',
+                            snapshot_id: '',
+                            template_id: '',
+                            cpu: 2,
+                            ram_mb: 2048,
+                            disk_gb: 20
+                          })
+                          setShowWindowsOptions(false)
+                          setShowLinuxISOOptions(false)
+                          setShowLinuxContainerOptions(false)
+                          setLinuxContainerType(null)
+                        }}
+                        className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 disabled:opacity-50"
+                      />
+                      <span className={clsx("ml-2 text-sm", goldenImages.length === 0 ? "text-gray-400" : "text-gray-700")}>
+                        Golden Image
+                        {goldenImages.length === 0 && " (none)"}
+                      </span>
                     </label>
                     <label className="flex items-center">
                       <input
@@ -1265,11 +1339,12 @@ export default function RangeDetail() {
                         disabled={availableSnapshots.length === 0}
                         onChange={() => {
                           setVmSourceType('snapshot')
-                          // Clear template selection and reset form values
                           setVmForm({
                             ...vmForm,
-                            template_id: '',
+                            base_image_id: '',
+                            golden_image_id: '',
                             snapshot_id: '',
+                            template_id: '',
                             cpu: 2,
                             ram_mb: 2048,
                             disk_gb: 20
@@ -1282,43 +1357,49 @@ export default function RangeDetail() {
                         className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 disabled:opacity-50"
                       />
                       <span className={clsx("ml-2 text-sm", availableSnapshots.length === 0 ? "text-gray-400" : "text-gray-700")}>
-                        Library Snapshot
-                        {availableSnapshots.length === 0 && " (none available)"}
+                        Snapshot
+                        {availableSnapshots.length === 0 && " (none)"}
                       </span>
                     </label>
                   </div>
+                  <p className="mt-1 text-xs text-gray-500">
+                    {vmSourceType === 'base' && "Fresh container or ISO install"}
+                    {vmSourceType === 'golden' && "Pre-configured image from snapshot or import"}
+                    {vmSourceType === 'snapshot' && "Point-in-time fork of a golden image"}
+                  </p>
                 </div>
 
-                {/* Template Selector (shown when vmSourceType is 'template') */}
-                {vmSourceType === 'template' && (
+                {/* Base Image Selector */}
+                {vmSourceType === 'base' && (
                   <div>
-                    <label className="block text-sm font-medium text-gray-700">Template</label>
+                    <label className="block text-sm font-medium text-gray-700">Base Image</label>
                     <select
                       required
-                      value={vmForm.template_id}
+                      value={vmForm.base_image_id}
                       onChange={(e) => {
-                        const template = templates.find(t => t.id === e.target.value)
-                        const isWindows = template?.os_type === 'windows'
-                        const isLinuxISO = template?.os_type === 'linux' && template?.base_image?.startsWith('iso:')
+                        const baseImage = baseImages.find(img => img.id === e.target.value)
+                        const isWindows = baseImage?.os_type === 'windows'
+                        const isLinuxISO = baseImage?.os_type === 'linux' && baseImage?.image_type === 'iso'
                         // Detect KasmVNC and LinuxServer containers
-                        const baseImage = template?.base_image?.toLowerCase() || ''
-                        const isKasmVNC = baseImage.includes('kasmweb/')
-                        const isLinuxServer = baseImage.includes('linuxserver/') || baseImage.includes('lscr.io/linuxserver')
-                        const isLinuxContainer = (isKasmVNC || isLinuxServer) && !isLinuxISO
+                        const dockerTag = baseImage?.docker_image_tag?.toLowerCase() || ''
+                        const isKasmVNC = dockerTag.includes('kasmweb/')
+                        const isLinuxServer = dockerTag.includes('linuxserver/') || dockerTag.includes('lscr.io/linuxserver')
+                        const isLinuxContainer = baseImage?.image_type === 'container' && (isKasmVNC || isLinuxServer)
                         setShowWindowsOptions(isWindows)
                         setShowLinuxISOOptions(isLinuxISO)
                         setShowLinuxContainerOptions(isLinuxContainer)
                         setLinuxContainerType(isKasmVNC ? 'kasmvnc' : isLinuxServer ? 'linuxserver' : null)
                         setVmForm({
                           ...vmForm,
-                          template_id: e.target.value,
+                          base_image_id: e.target.value,
+                          golden_image_id: '',
                           snapshot_id: '',
-                          cpu: template?.default_cpu || (isWindows ? 4 : 2),
-                          ram_mb: template?.default_ram_mb || (isWindows ? 8192 : 2048),
-                          disk_gb: template?.default_disk_gb || (isWindows ? 64 : 20),
-                          windows_version: isWindows ? template?.os_variant || '11' : '',
+                          template_id: '',
+                          cpu: baseImage?.default_cpu || (isWindows ? 4 : 2),
+                          ram_mb: baseImage?.default_ram_mb || (isWindows ? 8192 : 2048),
+                          disk_gb: baseImage?.default_disk_gb || (isWindows ? 64 : 20),
+                          windows_version: isWindows ? '11' : '',
                           display_type: 'desktop',
-                          // Reset Linux user config
                           linux_username: '',
                           linux_password: '',
                           linux_user_sudo: true
@@ -1326,30 +1407,89 @@ export default function RangeDetail() {
                       }}
                       className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
                     >
-                      <option value="">Select a template</option>
-                      {templates.map(t => (
-                        <option key={t.id} value={t.id}>{t.name} ({t.os_type === 'windows' ? 'Windows' : 'Linux'} - {t.os_variant})</option>
+                      <option value="">Select a base image</option>
+                      {baseImages.map(img => (
+                        <option key={img.id} value={img.id}>
+                          {img.name} ({img.image_type === 'container' ? 'Container' : 'ISO'} - {img.os_type})
+                        </option>
                       ))}
                     </select>
+                    {selectedBaseImage && (
+                      <p className="mt-1 text-xs text-gray-500">
+                        Defaults: {selectedBaseImage.default_cpu} CPU, {(selectedBaseImage.default_ram_mb / 1024).toFixed(1)}GB RAM, {selectedBaseImage.default_disk_gb}GB disk
+                      </p>
+                    )}
                   </div>
                 )}
 
-                {/* Snapshot Selector (shown when vmSourceType is 'snapshot') */}
+                {/* Golden Image Selector */}
+                {vmSourceType === 'golden' && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Golden Image</label>
+                    <select
+                      required
+                      value={vmForm.golden_image_id}
+                      onChange={(e) => {
+                        const goldenImage = goldenImages.find(img => img.id === e.target.value)
+                        const isWindows = goldenImage?.os_type === 'windows'
+                        const isLinuxVM = goldenImage?.vm_type === 'linux_vm'
+                        setShowWindowsOptions(isWindows)
+                        setShowLinuxISOOptions(isLinuxVM)
+                        setShowLinuxContainerOptions(goldenImage?.vm_type === 'container' && !isWindows)
+                        setLinuxContainerType(null)
+                        // Filter display_type to only valid VMCreate values (headless not supported)
+                        const displayType = goldenImage?.display_type === 'desktop' || goldenImage?.display_type === 'server'
+                          ? goldenImage.display_type : 'desktop'
+                        setVmForm({
+                          ...vmForm,
+                          base_image_id: '',
+                          golden_image_id: e.target.value,
+                          snapshot_id: '',
+                          template_id: '',
+                          cpu: goldenImage?.default_cpu || 2,
+                          ram_mb: goldenImage?.default_ram_mb || 4096,
+                          disk_gb: goldenImage?.default_disk_gb || 40,
+                          windows_version: isWindows ? '11' : '',
+                          display_type: displayType
+                        })
+                      }}
+                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                    >
+                      <option value="">Select a golden image</option>
+                      {goldenImages.map(img => (
+                        <option key={img.id} value={img.id}>
+                          {img.name} ({img.source === 'snapshot' ? 'Snapshot' : 'Imported'} - {img.os_type})
+                          {img.base_image && ` ← ${img.base_image.name}`}
+                        </option>
+                      ))}
+                    </select>
+                    {selectedGoldenImage && (
+                      <p className="mt-1 text-xs text-gray-500">
+                        Defaults: {selectedGoldenImage.default_cpu} CPU, {(selectedGoldenImage.default_ram_mb / 1024).toFixed(1)}GB RAM, {selectedGoldenImage.default_disk_gb}GB disk
+                        {selectedGoldenImage.base_image && ` • From: ${selectedGoldenImage.base_image.name}`}
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {/* Snapshot Selector */}
                 {vmSourceType === 'snapshot' && (
                   <div>
-                    <label className="block text-sm font-medium text-gray-700">Library Snapshot</label>
+                    <label className="block text-sm font-medium text-gray-700">Snapshot</label>
                     <select
                       required
                       value={vmForm.snapshot_id}
                       onChange={(e) => {
                         const snapshot = availableSnapshots.find(s => s.id === e.target.value)
-                        // For snapshots, we use the stored defaults - snapshots are pre-configured
-                        setShowWindowsOptions(false)
-                        setShowLinuxISOOptions(false)
-                        setShowLinuxContainerOptions(false)
+                        const isWindows = snapshot?.os_type === 'windows'
+                        setShowWindowsOptions(isWindows)
+                        setShowLinuxISOOptions(snapshot?.vm_type === 'linux_vm')
+                        setShowLinuxContainerOptions(snapshot?.vm_type === 'container' && !isWindows)
                         setLinuxContainerType(null)
                         setVmForm({
                           ...vmForm,
+                          base_image_id: '',
+                          golden_image_id: '',
                           snapshot_id: e.target.value,
                           template_id: '',
                           cpu: snapshot?.default_cpu || 2,
@@ -1364,18 +1504,20 @@ export default function RangeDetail() {
                       {availableSnapshots.map(s => (
                         <option key={s.id} value={s.id}>
                           {s.name} ({s.os_type || 'unknown'})
+                          {s.golden_image && ` ← ${s.golden_image.name}`}
                         </option>
                       ))}
                     </select>
                     {selectedSnapshot && (
                       <p className="mt-1 text-xs text-gray-500">
                         Defaults: {selectedSnapshot.default_cpu} CPU, {(selectedSnapshot.default_ram_mb / 1024).toFixed(1)}GB RAM, {selectedSnapshot.default_disk_gb}GB disk
+                        {selectedSnapshot.golden_image && ` • Fork of: ${selectedSnapshot.golden_image.name}`}
                       </p>
                     )}
                   </div>
                 )}
 
-                {templateRequiresEmulation && vmSourceType === 'template' && (
+                {imageRequiresEmulation && (
                   <EmulationWarning className="mt-2" />
                 )}
                 <div>

@@ -10,6 +10,15 @@ from cyroid.schemas.blueprint import (
     BlueprintCreate, BlueprintUpdate, BlueprintResponse, BlueprintDetailResponse,
     InstanceDeploy, InstanceResponse, BlueprintConfig, NetworkConfig, VMConfig
 )
+from cyroid.schemas.snapshot import SnapshotBase, SnapshotCreate, SnapshotUpdate, SnapshotResponse, SnapshotBrief
+# Image Library schemas
+from cyroid.schemas.base_image import (
+    BaseImageBase, BaseImageCreate, BaseImageUpdate, BaseImageResponse, BaseImageBrief
+)
+from cyroid.schemas.golden_image import (
+    GoldenImageBase, GoldenImageCreate, GoldenImageUpdate, GoldenImageResponse,
+    GoldenImageBrief, GoldenImageImportRequest
+)
 
 __all__ = [
     "UserBase", "UserCreate", "UserUpdate", "UserResponse",
@@ -21,4 +30,9 @@ __all__ = [
     "EventLogCreate", "EventLogResponse", "EventLogList",
     "BlueprintCreate", "BlueprintUpdate", "BlueprintResponse", "BlueprintDetailResponse",
     "InstanceDeploy", "InstanceResponse", "BlueprintConfig", "NetworkConfig", "VMConfig",
+    "SnapshotBase", "SnapshotCreate", "SnapshotUpdate", "SnapshotResponse", "SnapshotBrief",
+    # Image Library
+    "BaseImageBase", "BaseImageCreate", "BaseImageUpdate", "BaseImageResponse", "BaseImageBrief",
+    "GoldenImageBase", "GoldenImageCreate", "GoldenImageUpdate", "GoldenImageResponse",
+    "GoldenImageBrief", "GoldenImageImportRequest",
 ]

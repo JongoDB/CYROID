@@ -1,6 +1,11 @@
 # cyroid/api/snapshots.py
-"""API endpoints for VM snapshot management."""
-from typing import List
+"""API endpoints for VM snapshot management.
+
+Implements the three-tier Image Library logic:
+- First snapshot of a VM → creates GoldenImage (with lineage to BaseImage)
+- Follow-on snapshots → creates Snapshot (fork, with lineage to GoldenImage)
+"""
+from typing import List, Union
 from uuid import UUID
 import logging
 
@@ -8,8 +13,10 @@ from fastapi import APIRouter, HTTPException, status
 
 from cyroid.api.deps import DBSession, CurrentUser
 from cyroid.models.snapshot import Snapshot
+from cyroid.models.golden_image import GoldenImage
 from cyroid.models.vm import VM, VMStatus
 from cyroid.schemas.snapshot import SnapshotCreate, SnapshotResponse
+from cyroid.schemas.golden_image import GoldenImageResponse
 
 logger = logging.getLogger(__name__)
 
@@ -22,13 +29,20 @@ def get_docker_service():
     return _get_docker()
 
 
-@router.post("", response_model=SnapshotResponse, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=Union[GoldenImageResponse, SnapshotResponse], status_code=status.HTTP_201_CREATED)
 def create_snapshot(
     snapshot_data: SnapshotCreate,
     db: DBSession,
     current_user: CurrentUser,
 ):
-    """Create a snapshot of a VM."""
+    """Create a snapshot of a VM.
+
+    Implements Image Library logic:
+    - First snapshot → creates GoldenImage (linked to VM's base_image_id if set)
+    - Follow-on snapshots → creates Snapshot fork (linked to the GoldenImage)
+
+    Returns either GoldenImageResponse or SnapshotResponse depending on which was created.
+    """
     vm = db.query(VM).filter(VM.id == snapshot_data.vm_id).first()
     if not vm:
         raise HTTPException(
@@ -43,28 +57,91 @@ def create_snapshot(
         )
 
     docker = get_docker_service()
-    image_name = f"cyroid-snapshot-{vm.id}-{snapshot_data.name}".lower().replace(" ", "-")
 
-    try:
-        image_id = docker.create_snapshot(vm.container_id, image_name)
-    except Exception as e:
-        logger.error(f"Failed to create snapshot: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create snapshot: {str(e)}",
+    # Check if this VM already has a GoldenImage
+    existing_golden = db.query(GoldenImage).filter(
+        GoldenImage.source_vm_id == vm.id
+    ).first()
+
+    if existing_golden is None:
+        # First snapshot → create GoldenImage
+        image_name = f"cyroid-golden-{vm.id}-{snapshot_data.name}".lower().replace(" ", "-")
+
+        try:
+            image_id = docker.create_snapshot(vm.container_id, image_name)
+        except Exception as e:
+            logger.error(f"Failed to create golden image snapshot: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to create snapshot: {str(e)}",
+            )
+
+        # Determine OS and VM type from template or existing VM data
+        os_type = "linux"
+        vm_type = "container"
+        if vm.template:
+            os_type = vm.template.os_type.value if hasattr(vm.template.os_type, 'value') else str(vm.template.os_type)
+            vm_type = vm.template.vm_type.value if hasattr(vm.template.vm_type, 'value') else str(vm.template.vm_type)
+        elif vm.base_image:
+            os_type = vm.base_image.os_type
+            vm_type = vm.base_image.vm_type
+
+        golden = GoldenImage(
+            name=snapshot_data.name,
+            description=snapshot_data.description,
+            source="snapshot",
+            base_image_id=vm.base_image_id,  # Link to base image if set
+            source_vm_id=vm.id,
+            docker_image_id=image_id,
+            docker_image_tag=image_name,
+            os_type=os_type,
+            vm_type=vm_type,
+            default_cpu=vm.cpu,
+            default_ram_mb=vm.ram_mb,
+            default_disk_gb=vm.disk_gb,
+            is_global=True,
+            created_by=current_user.id,
         )
+        db.add(golden)
+        db.commit()
+        db.refresh(golden)
 
-    snapshot = Snapshot(
-        vm_id=snapshot_data.vm_id,
-        name=snapshot_data.name,
-        description=snapshot_data.description,
-        docker_image_id=image_id,
-    )
-    db.add(snapshot)
-    db.commit()
-    db.refresh(snapshot)
+        logger.info(f"Created GoldenImage '{golden.name}' from VM {vm.hostname}")
+        return golden
 
-    return snapshot
+    else:
+        # Follow-on snapshot → create Snapshot (fork)
+        image_name = f"cyroid-snapshot-{vm.id}-{snapshot_data.name}".lower().replace(" ", "-")
+
+        try:
+            image_id = docker.create_snapshot(vm.container_id, image_name)
+        except Exception as e:
+            logger.error(f"Failed to create snapshot: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to create snapshot: {str(e)}",
+            )
+
+        snapshot = Snapshot(
+            vm_id=snapshot_data.vm_id,
+            name=snapshot_data.name,
+            description=snapshot_data.description,
+            docker_image_id=image_id,
+            docker_image_tag=image_name,
+            golden_image_id=existing_golden.id,  # Link to parent golden image
+            os_type=existing_golden.os_type,
+            vm_type=existing_golden.vm_type,
+            default_cpu=vm.cpu,
+            default_ram_mb=vm.ram_mb,
+            default_disk_gb=vm.disk_gb,
+            is_global=True,
+        )
+        db.add(snapshot)
+        db.commit()
+        db.refresh(snapshot)
+
+        logger.info(f"Created Snapshot fork '{snapshot.name}' linked to GoldenImage '{existing_golden.name}'")
+        return snapshot
 
 
 @router.get("", response_model=List[SnapshotResponse])

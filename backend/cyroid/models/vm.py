@@ -1,11 +1,15 @@
 # backend/cyroid/models/vm.py
 from enum import Enum
-from typing import Optional, List
+from typing import Optional, List, TYPE_CHECKING
 from uuid import UUID
 from sqlalchemy import String, Integer, ForeignKey, JSON, Boolean
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from cyroid.models.base import Base, TimestampMixin, UUIDMixin
+
+if TYPE_CHECKING:
+    from cyroid.models.base_image import BaseImage
+    from cyroid.models.golden_image import GoldenImage
 
 
 class VMStatus(str, Enum):
@@ -28,12 +32,20 @@ class VM(Base, UUIDMixin, TimestampMixin):
     range_id: Mapped[UUID] = mapped_column(ForeignKey("ranges.id", ondelete="CASCADE"))
     network_id: Mapped[UUID] = mapped_column(ForeignKey("networks.id"))
 
-    # Source: either template OR snapshot (mutually exclusive)
-    template_id: Mapped[Optional[UUID]] = mapped_column(
-        ForeignKey("vm_templates.id"), nullable=True
+    # Image source: exactly one of base_image_id, golden_image_id, snapshot_id, or template_id
+    # New Image Library fields (preferred)
+    base_image_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey("base_images.id", ondelete="SET NULL"), nullable=True
+    )
+    golden_image_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey("golden_images.id", ondelete="SET NULL"), nullable=True
     )
     snapshot_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey("snapshots.id"), nullable=True
+    )
+    # Deprecated: template_id (kept for backward compatibility)
+    template_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey("vm_templates.id"), nullable=True
     )
 
     hostname: Mapped[str] = mapped_column(String(63))
@@ -106,6 +118,14 @@ class VM(Base, UUIDMixin, TimestampMixin):
     # Relationships
     range = relationship("Range", back_populates="vms")
     network = relationship("Network", back_populates="vms")
+    # Image Library relationships
+    base_image: Mapped[Optional["BaseImage"]] = relationship(
+        "BaseImage", back_populates="vms", foreign_keys=[base_image_id]
+    )
+    golden_image: Mapped[Optional["GoldenImage"]] = relationship(
+        "GoldenImage", back_populates="vms", foreign_keys=[golden_image_id]
+    )
+    # Deprecated template relationship
     template = relationship("VMTemplate", back_populates="vms")
     snapshots: Mapped[List["Snapshot"]] = relationship(
         "Snapshot", back_populates="vm", foreign_keys="[Snapshot.vm_id]"

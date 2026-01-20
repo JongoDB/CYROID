@@ -315,8 +315,11 @@ export const networksApi = {
 export interface VMCreate {
   range_id: string
   network_id: string
-  template_id?: string  // Optional: use template_id OR snapshot_id
-  snapshot_id?: string  // Optional: use snapshot_id OR template_id
+  // Image Library source fields (exactly one required)
+  base_image_id?: string    // Fresh container or ISO install
+  golden_image_id?: string  // Pre-configured image from snapshot or import
+  snapshot_id?: string      // Point-in-time fork of a golden image
+  template_id?: string      // Legacy: deprecated, use base_image_id instead
   hostname: string
   ip_address: string
   cpu: number
@@ -657,7 +660,7 @@ export const walkthroughApi = {
 }
 
 // Snapshots API (for creating snapshots from VMs)
-import type { Snapshot } from '../types'
+import type { Snapshot, BaseImage, GoldenImageLibrary, SnapshotWithLineage, LibraryImage, LibraryStats } from '../types'
 
 export interface SnapshotCreate {
   vm_id: string
@@ -680,6 +683,139 @@ export const snapshotsApi = {
 
   delete: (id: string) =>
     api.delete(`/snapshots/${id}`),
+}
+
+// ============ Image Library API ============
+// Three-tier image management: Base Images → Golden Images → Snapshots
+
+export interface BaseImageCreate {
+  name: string
+  description?: string
+  image_type: 'container' | 'iso'
+  docker_image_id?: string
+  docker_image_tag?: string
+  iso_path?: string
+  iso_source?: string
+  iso_version?: string
+  os_type: 'windows' | 'linux' | 'network' | 'custom'
+  vm_type: 'container' | 'linux_vm' | 'windows_vm'
+  native_arch?: string
+  default_cpu?: number
+  default_ram_mb?: number
+  default_disk_gb?: number
+  size_bytes?: number
+  tags?: string[]
+}
+
+export interface BaseImageUpdate {
+  name?: string
+  description?: string
+  default_cpu?: number
+  default_ram_mb?: number
+  default_disk_gb?: number
+  tags?: string[]
+}
+
+export interface GoldenImageCreate {
+  name: string
+  description?: string
+  source: 'snapshot' | 'import'
+  base_image_id?: string
+  os_type: 'windows' | 'linux' | 'network' | 'custom'
+  vm_type: 'container' | 'linux_vm' | 'windows_vm'
+  native_arch?: string
+  default_cpu?: number
+  default_ram_mb?: number
+  default_disk_gb?: number
+  display_type?: 'desktop' | 'server' | 'headless'
+  vnc_port?: number
+  tags?: string[]
+}
+
+export interface GoldenImageUpdate {
+  name?: string
+  description?: string
+  default_cpu?: number
+  default_ram_mb?: number
+  default_disk_gb?: number
+  display_type?: 'desktop' | 'server' | 'headless'
+  vnc_port?: number
+  tags?: string[]
+}
+
+export const imagesApi = {
+  // Library Statistics
+  getLibraryStats: () =>
+    api.get<LibraryStats>('/images/library/stats'),
+
+  // Unified Library View
+  listLibrary: (params?: { category?: 'base' | 'golden' | 'snapshot'; os_type?: string }) =>
+    api.get<LibraryImage[]>('/images/library', { params }),
+
+  // Base Images
+  listBaseImages: (params?: { image_type?: string; os_type?: string }) =>
+    api.get<BaseImage[]>('/images/base', { params }),
+
+  getBaseImage: (id: string) =>
+    api.get<BaseImage>(`/images/base/${id}`),
+
+  createBaseImage: (data: BaseImageCreate) =>
+    api.post<BaseImage>('/images/base', data),
+
+  updateBaseImage: (id: string, data: BaseImageUpdate) =>
+    api.patch<BaseImage>(`/images/base/${id}`, data),
+
+  deleteBaseImage: (id: string) =>
+    api.delete(`/images/base/${id}`),
+
+  // Golden Images
+  listGoldenImages: (params?: { source?: string; os_type?: string }) =>
+    api.get<GoldenImageLibrary[]>('/images/golden', { params }),
+
+  getGoldenImage: (id: string) =>
+    api.get<GoldenImageLibrary>(`/images/golden/${id}`),
+
+  createGoldenImage: (data: GoldenImageCreate) =>
+    api.post<GoldenImageLibrary>('/images/golden', data),
+
+  updateGoldenImage: (id: string, data: GoldenImageUpdate) =>
+    api.patch<GoldenImageLibrary>(`/images/golden/${id}`, data),
+
+  deleteGoldenImage: (id: string) =>
+    api.delete(`/images/golden/${id}`),
+
+  // Golden Image Import (OVA/QCOW2/VMDK)
+  importGoldenImage: (
+    file: File,
+    metadata: {
+      name: string
+      description?: string
+      os_type: string
+      vm_type: string
+      native_arch?: string
+      default_cpu?: number
+      default_ram_mb?: number
+      default_disk_gb?: number
+    }
+  ) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('name', metadata.name)
+    if (metadata.description) formData.append('description', metadata.description)
+    formData.append('os_type', metadata.os_type)
+    formData.append('vm_type', metadata.vm_type)
+    if (metadata.native_arch) formData.append('native_arch', metadata.native_arch)
+    if (metadata.default_cpu) formData.append('default_cpu', String(metadata.default_cpu))
+    if (metadata.default_ram_mb) formData.append('default_ram_mb', String(metadata.default_ram_mb))
+    if (metadata.default_disk_gb) formData.append('default_disk_gb', String(metadata.default_disk_gb))
+    return api.post<GoldenImageLibrary>('/images/golden/import', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  },
+
+  // Library Snapshots (global snapshots only)
+  listLibrarySnapshots: (params?: { os_type?: string }) =>
+    api.get<SnapshotWithLineage[]>('/images/snapshots', { params }),
 }
 
 // ============ Blueprint Types ============

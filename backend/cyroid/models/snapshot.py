@@ -1,23 +1,48 @@
 # backend/cyroid/models/snapshot.py
-from typing import Optional, List
+"""Snapshot model - represents point-in-time forks in the Image Library.
+
+In the three-tier image system:
+- Base Images: Pulled container images or cached ISOs
+- Golden Images: First snapshots or imported VMs
+- Snapshots: Follow-on snapshots (forks) - this model
+
+Snapshots track lineage to their parent GoldenImage.
+"""
+from typing import Optional, List, TYPE_CHECKING
 from uuid import UUID
 from sqlalchemy import String, Text, ForeignKey, Integer, Boolean, JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from cyroid.models.base import Base, TimestampMixin, UUIDMixin
 
+if TYPE_CHECKING:
+    from cyroid.models.golden_image import GoldenImage
+
 
 class Snapshot(Base, UUIDMixin, TimestampMixin):
-    """Snapshot model - represents a committed Docker image from a VM state.
+    """Snapshot (fork) in the Image Library.
 
-    Snapshots can be used as sources for creating new VMs (VM Library feature).
-    When is_global=True, the snapshot is visible to all users for VM creation.
+    Snapshots are created after a VM already has a GoldenImage. They represent
+    point-in-time forks that can be used to create new VMs.
+
+    Tracks lineage to the parent GoldenImage and optionally to a parent Snapshot
+    for fork chains.
     """
     __tablename__ = "snapshots"
 
     # Source VM (optional - snapshots can exist independently for imported images)
     vm_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey("vms.id", ondelete="SET NULL"), nullable=True
+    )
+
+    # Lineage tracking - link to parent golden image
+    golden_image_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey("golden_images.id", ondelete="SET NULL"), nullable=True
+    )
+
+    # Fork chain - link to parent snapshot (for nested forks)
+    parent_snapshot_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey("snapshots.id", ondelete="SET NULL"), nullable=True
     )
 
     # Basic info
@@ -55,4 +80,12 @@ class Snapshot(Base, UUIDMixin, TimestampMixin):
         "VM",
         back_populates="source_snapshot",
         foreign_keys="[VM.snapshot_id]"
+    )
+    # Lineage relationship to parent golden image
+    golden_image: Mapped[Optional["GoldenImage"]] = relationship(
+        "GoldenImage", back_populates="snapshots"
+    )
+    # Self-referential relationship for fork chains
+    parent_snapshot: Mapped[Optional["Snapshot"]] = relationship(
+        "Snapshot", remote_side="Snapshot.id", backref="child_snapshots"
     )
