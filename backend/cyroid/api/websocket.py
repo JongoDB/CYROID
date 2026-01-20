@@ -258,8 +258,38 @@ async def vm_vnc_console(
             vnc_host = proxy_info.get("proxy_host")
             vnc_port = proxy_info.get("proxy_port", VNC_WEBSOCKET_PORT)
             logger.debug(f"Using DinD VNC proxy for VM {vm_id}: {vnc_host}:{vnc_port}")
+        elif range_obj.dind_docker_url:
+            # DinD deployment but no proxy mapping - get container IP from DinD
+            dind_client = get_dind_docker_client(range_obj)
+            if dind_client:
+                try:
+                    container = dind_client.containers.get(vm.container_id)
+                    # Get IP from the first network the container is attached to
+                    networks = container.attrs.get("NetworkSettings", {}).get("Networks", {})
+                    for network_name, network_config in networks.items():
+                        vnc_host = network_config.get("IPAddress")
+                        if vnc_host:
+                            break
+
+                    # Determine VNC port based on image type
+                    image_tags = container.image.tags if container.image.tags else []
+                    image_name = image_tags[0] if image_tags else ""
+                    if "kasmweb" in image_name:
+                        vnc_port = 6901
+                    elif "linuxserver/" in image_name or "lscr.io/linuxserver" in image_name:
+                        vnc_port = 3000
+                    elif "dockur" in image_name or "qemux" in image_name:
+                        vnc_port = 8006
+                    else:
+                        vnc_port = 3000  # Default for containers
+
+                    logger.debug(f"Using DinD container IP for VM {vm_id}: {vnc_host}:{vnc_port}")
+                except Exception as e:
+                    logger.error(f"Failed to get container info from DinD for VM {vm_id}: {e}")
+                    await websocket.close(code=4000, reason="Container not found in DinD")
+                    return
         else:
-            # Non-DinD (legacy) or no proxy mapping - get container IP directly
+            # Non-DinD (legacy) - get container IP from host Docker
             from cyroid.services.docker_service import get_docker_service
             docker = get_docker_service()
 

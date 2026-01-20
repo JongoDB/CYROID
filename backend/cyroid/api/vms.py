@@ -922,6 +922,52 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
         db.commit()
         db.refresh(vm)
 
+        # Set up VNC port forwarding for DinD ranges (for VMs created after deployment)
+        if use_dind and vm.container_id and vm.ip_address:
+            try:
+                from cyroid.services.dind_service import get_dind_service
+                from cyroid.services.traefik_route_service import get_traefik_route_service
+
+                dind_service = get_dind_service()
+                traefik_service = get_traefik_route_service()
+
+                # Determine VNC port based on image type
+                vnc_port = 8006  # Default for QEMU/Windows
+                if os_type == OSType.LINUX or vm_type == VMType.CONTAINER:
+                    if "kasmweb" in (image_ref or ""):
+                        vnc_port = 6901
+                    elif "linuxserver/" in (image_ref or "") or "lscr.io/linuxserver" in (image_ref or ""):
+                        vnc_port = 3000
+                    else:
+                        vnc_port = 3000  # Default for containers
+
+                vm_ports = [{
+                    "vm_id": str(vm.id),
+                    "hostname": vm.hostname,
+                    "vnc_port": vnc_port,
+                    "ip_address": vm.ip_address,
+                }]
+
+                port_mappings = asyncio.run(dind_service.setup_vnc_port_forwarding(
+                    range_id=str(vm.range_id),
+                    vm_ports=vm_ports,
+                ))
+
+                # Merge new port mappings with existing ones
+                existing_mappings = range_obj.vnc_proxy_mappings or {}
+                existing_mappings.update(port_mappings)
+                range_obj.vnc_proxy_mappings = existing_mappings
+                db.commit()
+
+                # Generate Traefik routes for VNC console access
+                route_file = traefik_service.generate_vnc_routes(str(vm.range_id), existing_mappings)
+                if route_file:
+                    logger.info(f"Set up VNC forwarding for VM {vm.hostname}")
+
+            except Exception as e:
+                logger.warning(f"Failed to set up VNC forwarding for VM {vm.hostname}: {e}")
+                # Don't fail the VM start if VNC forwarding fails
+
         # Log event
         event_service = EventService(db)
         event_service.log_event(
@@ -933,7 +979,8 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
 
         # Update range status to RUNNING if any VM is running
         # This makes the execution console accessible
-        range_obj = db.query(Range).filter(Range.id == vm.range_id).first()
+        if not range_obj:
+            range_obj = db.query(Range).filter(Range.id == vm.range_id).first()
         if range_obj and range_obj.status in (RangeStatus.STOPPED, RangeStatus.DRAFT):
             range_obj.status = RangeStatus.RUNNING
             db.commit()
