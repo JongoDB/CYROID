@@ -615,12 +615,15 @@ class RangeDeploymentService:
         if created_vms:
             traefik_service = get_traefik_route_service()
             try:
+                # Get existing mappings to calculate next available port
+                existing_mappings = range_obj.vnc_proxy_mappings or {}
+
                 port_mappings = await self.dind_service.setup_vnc_port_forwarding(
                     range_id=range_id_str,
                     vm_ports=created_vms,
+                    existing_mappings=existing_mappings,
                 )
                 # Merge new port mappings with existing ones
-                existing_mappings = range_obj.vnc_proxy_mappings or {}
                 existing_mappings.update(port_mappings)
                 range_obj.vnc_proxy_mappings = existing_mappings
                 db.commit()

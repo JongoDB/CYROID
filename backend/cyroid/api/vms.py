@@ -442,13 +442,48 @@ def delete_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
             detail="VM not found",
         )
 
+    # Get range for DinD mode check
+    range_obj = db.query(Range).filter(Range.id == vm.range_id).first()
+    use_dind = bool(range_obj and range_obj.dind_docker_url)
+
+    # Remove VNC port forwarding for DinD ranges
+    if use_dind and range_obj.vnc_proxy_mappings:
+        vm_id_str = str(vm_id)
+        proxy_info = range_obj.vnc_proxy_mappings.get(vm_id_str)
+        if proxy_info:
+            try:
+                from cyroid.services.dind_service import get_dind_service
+                from cyroid.services.traefik_route_service import get_traefik_route_service
+
+                dind_service = get_dind_service()
+                traefik_service = get_traefik_route_service()
+
+                # Remove iptables DNAT rule
+                asyncio.run(dind_service.remove_vnc_port_forwarding(
+                    range_id=str(vm.range_id),
+                    vm_id=vm_id_str,
+                    proxy_info=proxy_info,
+                ))
+
+                # Update database - remove this VM's mapping
+                updated_mappings = {k: v for k, v in range_obj.vnc_proxy_mappings.items() if k != vm_id_str}
+                range_obj.vnc_proxy_mappings = updated_mappings if updated_mappings else None
+                db.commit()
+
+                # Regenerate Traefik routes without this VM
+                if updated_mappings:
+                    traefik_service.generate_vnc_routes(str(vm.range_id), updated_mappings)
+                else:
+                    traefik_service.remove_vnc_routes(str(vm.range_id))
+
+                logger.info(f"Removed VNC forwarding for VM {vm.hostname}")
+            except Exception as e:
+                logger.warning(f"Failed to remove VNC forwarding for VM {vm_id}: {e}")
+
     # Remove container if it exists
     if vm.container_id:
         try:
             docker = get_docker_service()
-            # Check for DinD mode
-            range_obj = db.query(Range).filter(Range.id == vm.range_id).first()
-            use_dind = bool(range_obj and range_obj.dind_docker_url)
 
             if use_dind:
                 asyncio.run(docker.remove_range_container_dind(
@@ -948,13 +983,16 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
                     "ip_address": vm.ip_address,
                 }]
 
+                # Get existing mappings to calculate next available port
+                existing_mappings = range_obj.vnc_proxy_mappings or {}
+
                 port_mappings = asyncio.run(dind_service.setup_vnc_port_forwarding(
                     range_id=str(vm.range_id),
                     vm_ports=vm_ports,
+                    existing_mappings=existing_mappings,
                 ))
 
                 # Merge new port mappings with existing ones
-                existing_mappings = range_obj.vnc_proxy_mappings or {}
                 existing_mappings.update(port_mappings)
                 range_obj.vnc_proxy_mappings = existing_mappings
                 db.commit()

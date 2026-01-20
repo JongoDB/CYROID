@@ -642,6 +642,7 @@ class DinDService:
         self,
         range_id: str,
         vm_ports: List[dict],
+        existing_mappings: Optional[dict] = None,
     ) -> dict[str, dict]:
         """
         Set up iptables DNAT rules for VNC port forwarding inside DinD.
@@ -659,6 +660,8 @@ class DinDService:
                 - hostname: VM hostname
                 - vnc_port: VNC port inside the VM container (e.g., 8006, 6901)
                 - ip_address: IP address of the VM container inside DinD
+            existing_mappings: Optional dict of existing vm_id -> proxy_info mappings
+                              Used to calculate next available port
 
         Returns:
             dict mapping vm_id to proxy info:
@@ -683,6 +686,13 @@ class DinDService:
         if not dind_mgmt_ip:
             raise ValueError(f"Cannot get management IP for DinD container (range {range_id})")
 
+        # Calculate next available port based on existing mappings
+        next_port = VNC_PROXY_BASE_PORT
+        if existing_mappings:
+            used_ports = [m.get("proxy_port", 0) for m in existing_mappings.values()]
+            if used_ports:
+                next_port = max(used_ports) + 1
+
         port_mappings = {}
 
         # Build iptables rules for each VM
@@ -690,7 +700,7 @@ class DinDService:
             vm_id = vm_info["vm_id"]
             vm_ip = vm_info["ip_address"]
             vnc_port = vm_info["vnc_port"]
-            external_port = VNC_PROXY_BASE_PORT + idx
+            external_port = next_port + idx
 
             # Record port mapping
             port_mappings[vm_id] = {
@@ -730,10 +740,73 @@ class DinDService:
 
         logger.info(
             f"Set up VNC port forwarding for range {range_id}: "
-            f"{len(port_mappings)} ports via iptables DNAT"
+            f"{len(port_mappings)} ports via iptables DNAT (ports {next_port}-{next_port + len(port_mappings) - 1})"
         )
 
         return port_mappings
+
+    async def remove_vnc_port_forwarding(
+        self,
+        range_id: str,
+        vm_id: str,
+        proxy_info: dict,
+    ) -> bool:
+        """
+        Remove VNC port forwarding iptables rule for a specific VM.
+
+        Args:
+            range_id: Range identifier
+            vm_id: VM identifier
+            proxy_info: Dict with proxy_port, proxy_host, original_port
+
+        Returns:
+            True if rule was removed, False otherwise
+        """
+        dind_container = self._find_container_by_range_id(range_id)
+        if not dind_container:
+            logger.warning(f"Cannot find DinD container for range {range_id} - rule may already be removed")
+            return False
+
+        proxy_port = proxy_info.get("proxy_port")
+        proxy_host = proxy_info.get("proxy_host")
+
+        if not proxy_port or not proxy_host:
+            logger.warning(f"Invalid proxy info for VM {vm_id}: {proxy_info}")
+            return False
+
+        # Delete the DNAT rule by matching the port
+        # Note: We delete by --dport since we don't know the destination anymore
+        delete_rule = (
+            f"iptables -t nat -D PREROUTING -p tcp "
+            f"-d {proxy_host} --dport {proxy_port} -j DNAT"
+        )
+
+        try:
+            # First, list rules to find the exact rule
+            exit_code, output = dind_container.exec_run(
+                f"iptables -t nat -S PREROUTING",
+                privileged=True
+            )
+            if exit_code == 0:
+                rules = output.decode() if isinstance(output, bytes) else str(output)
+                # Find and delete rules matching our port
+                for line in rules.split('\n'):
+                    if f"--dport {proxy_port}" in line and f"-d {proxy_host}" in line:
+                        # Extract the full rule and delete it
+                        rule_to_delete = line.replace('-A ', '-D ')
+                        exit_code, _ = dind_container.exec_run(
+                            f"iptables -t nat {rule_to_delete}",
+                            privileged=True
+                        )
+                        if exit_code == 0:
+                            logger.info(f"Removed VNC DNAT rule for VM {vm_id} (port {proxy_port})")
+                            return True
+
+            logger.warning(f"Could not find DNAT rule for VM {vm_id} (port {proxy_port})")
+            return False
+        except Exception as e:
+            logger.warning(f"Error removing VNC DNAT rule for VM {vm_id}: {e}")
+            return False
 
     async def teardown_vnc_port_forwarding(
         self,
