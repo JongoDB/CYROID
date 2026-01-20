@@ -115,6 +115,8 @@ export interface VM {
   // Linux user configuration
   linux_username: string | null
   linux_user_sudo: boolean
+  // Boot source for QEMU VMs (Windows/Linux via dockur/qemux)
+  boot_source: 'golden_image' | 'fresh_install' | null
   position_x: number
   position_y: number
   created_at: string

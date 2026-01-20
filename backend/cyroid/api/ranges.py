@@ -407,6 +407,7 @@ async def validate_range_deployment(
 def deploy_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
     """Deploy a range using DinD isolation - creates isolated Docker environment with networks and VMs"""
     from cyroid.services.range_deployment_service import get_range_deployment_service
+    from cyroid.services.deployment_validator import DeploymentValidator
     import asyncio
 
     range_obj = db.query(Range).filter(Range.id == range_id).first()
@@ -420,6 +421,23 @@ def deploy_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Cannot deploy range in {range_obj.status} status",
+        )
+
+    # Enforce strict image validation before deployment
+    # All container images must be pre-cached, QEMU VMs must have boot_source configured
+    docker = get_docker_service()
+    validator = DeploymentValidator(db, docker)
+    validation_result = asyncio.run(validator.validate_range(range_id))
+
+    if not validation_result.valid:
+        error_messages = [e.message for e in validation_result.errors]
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "message": "Deployment validation failed. All images must be cached before deployment.",
+                "errors": error_messages,
+                "hint": "Use the Image Cache page to pre-pull container images or configure golden images for QEMU VMs."
+            }
         )
 
     range_obj.status = RangeStatus.DEPLOYING

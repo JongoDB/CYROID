@@ -53,3 +53,6 @@ test-results/
 
 # Certificates
 certs/
+
+# Traefik dynamic VNC routes (generated at runtime)
+traefik/dynamic/range-*.yml

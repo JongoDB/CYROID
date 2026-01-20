@@ -9,6 +9,7 @@ potential issues early:
 """
 
 import logging
+import os
 import platform
 import shutil
 from typing import List, Optional
@@ -19,10 +20,12 @@ from sqlalchemy.orm import Session
 
 from cyroid.models import Range, VMTemplate
 from cyroid.models.vm import VM
+from cyroid.models.template import VMType
 from cyroid.models.network import Network
 from cyroid.models.snapshot import Snapshot
 from cyroid.services.docker_service import DockerService
 from cyroid.utils.arch import HOST_ARCH, requires_emulation
+from cyroid.config import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -123,10 +126,11 @@ class DeploymentValidator:
         return DeploymentValidation(valid=valid, results=results)
 
     async def _validate_images_exist(self, vms: List[VM]) -> List[ValidationResult]:
-        """Check that Docker images exist for all VMs.
+        """Strictly validate that all required images/ISOs exist before deployment.
 
-        For template-based VMs: checks the template's base_image
-        For snapshot-based VMs: checks the snapshot's docker_image_tag
+        For container VMs: Docker image must be in local cache
+        For QEMU VMs (Windows/Linux): boot_source must be set and resources must exist
+        For snapshot VMs: Snapshot Docker image must exist
 
         Args:
             vms: List of VMs to validate
@@ -135,6 +139,7 @@ class DeploymentValidator:
             List of validation results
         """
         results = []
+        settings = get_settings()
 
         if not vms:
             results.append(ValidationResult(
@@ -145,36 +150,18 @@ class DeploymentValidator:
             return results
 
         for vm in vms:
-            # Determine the image to check
-            image_to_check = None
-            image_source = None
-
+            # Snapshot-based VM
             if vm.snapshot_id:
-                # Snapshot-based VM
-                snapshot = self.db.query(Snapshot).filter(
-                    Snapshot.id == vm.snapshot_id
-                ).first()
-                if snapshot:
-                    image_to_check = snapshot.docker_image_tag or snapshot.docker_image_id
-                    image_source = f"snapshot '{snapshot.name}'"
-                else:
-                    results.append(ValidationResult(
-                        valid=False,
-                        message=f"VM '{vm.hostname}': Snapshot not found",
-                        severity="error",
-                        vm_id=str(vm.id)
-                    ))
-                    continue
+                result = self._validate_snapshot_vm(vm)
+                results.append(result)
+                continue
 
-            elif vm.template_id:
-                # Template-based VM
+            # Template-based VM
+            if vm.template_id:
                 template = self.db.query(VMTemplate).filter(
                     VMTemplate.id == vm.template_id
                 ).first()
-                if template:
-                    image_to_check = template.base_image
-                    image_source = f"template '{template.name}'"
-                else:
+                if not template:
                     results.append(ValidationResult(
                         valid=False,
                         message=f"VM '{vm.hostname}': Template not found",
@@ -182,6 +169,23 @@ class DeploymentValidator:
                         vm_id=str(vm.id)
                     ))
                     continue
+
+                # Validate based on VM type
+                vm_type = template.vm_type
+                if vm_type == VMType.CONTAINER:
+                    result = self._validate_container_vm(vm, template)
+                elif vm_type == VMType.WINDOWS_VM:
+                    result = self._validate_windows_vm(vm, template, settings)
+                elif vm_type == VMType.LINUX_VM:
+                    result = self._validate_linux_vm(vm, template, settings)
+                else:
+                    result = ValidationResult(
+                        valid=False,
+                        message=f"VM '{vm.hostname}': Unknown VM type '{vm_type}'",
+                        severity="error",
+                        vm_id=str(vm.id)
+                    )
+                results.append(result)
             else:
                 results.append(ValidationResult(
                     valid=False,
@@ -189,35 +193,6 @@ class DeploymentValidator:
                     severity="error",
                     vm_id=str(vm.id)
                 ))
-                continue
-
-            # Check if the image exists
-            if image_to_check:
-                image_exists = self._check_image_exists(image_to_check)
-                if image_exists:
-                    results.append(ValidationResult(
-                        valid=True,
-                        message=f"VM '{vm.hostname}': Image '{image_to_check}' available",
-                        severity="info",
-                        vm_id=str(vm.id)
-                    ))
-                else:
-                    # Check if this is a special image type that gets pulled on demand
-                    if self._is_auto_download_image(image_to_check, vm):
-                        results.append(ValidationResult(
-                            valid=True,
-                            message=f"VM '{vm.hostname}': Image '{image_to_check}' will be pulled on demand from {image_source}",
-                            severity="info",
-                            vm_id=str(vm.id),
-                            details={"auto_download": True}
-                        ))
-                    else:
-                        results.append(ValidationResult(
-                            valid=False,
-                            message=f"VM '{vm.hostname}': Image '{image_to_check}' not found (from {image_source})",
-                            severity="error",
-                            vm_id=str(vm.id)
-                        ))
 
         return results
 
@@ -236,41 +211,236 @@ class DeploymentValidator:
         except Exception:
             return False
 
-    def _is_auto_download_image(self, image: str, vm: VM) -> bool:
-        """Check if an image is auto-downloadable.
+    def _validate_snapshot_vm(self, vm: VM) -> ValidationResult:
+        """Validate a snapshot-based VM."""
+        snapshot = self.db.query(Snapshot).filter(
+            Snapshot.id == vm.snapshot_id
+        ).first()
+        if not snapshot:
+            return ValidationResult(
+                valid=False,
+                message=f"VM '{vm.hostname}': Snapshot not found",
+                severity="error",
+                vm_id=str(vm.id)
+            )
 
-        Some images (like qemux/qemu and dockur/windows) auto-download
-        OS images at runtime. For these, we don't require the final
-        image to exist beforehand.
+        image_tag = snapshot.docker_image_tag or snapshot.docker_image_id
+        if image_tag and self._check_image_exists(image_tag):
+            return ValidationResult(
+                valid=True,
+                message=f"VM '{vm.hostname}': Snapshot image '{image_tag}' available",
+                severity="info",
+                vm_id=str(vm.id)
+            )
+        else:
+            return ValidationResult(
+                valid=False,
+                message=f"VM '{vm.hostname}': Snapshot image '{image_tag}' not found in Docker cache",
+                severity="error",
+                vm_id=str(vm.id)
+            )
 
-        Args:
-            image: Docker image name
-            vm: VM model with additional info
+    def _validate_container_vm(self, vm: VM, template: VMTemplate) -> ValidationResult:
+        """Validate a container-based VM (must have Docker image cached)."""
+        base_image = template.base_image
+        if not base_image:
+            return ValidationResult(
+                valid=False,
+                message=f"VM '{vm.hostname}': Template has no base_image configured",
+                severity="error",
+                vm_id=str(vm.id)
+            )
 
-        Returns:
-            True if image will be auto-downloaded
-        """
-        # qemux/qemu and dockur/windows images pull OS at runtime
-        auto_download_images = [
-            "qemux/qemu",
-            "dockur/windows",
-            "linuxserver/",  # LinuxServer images
-            "kasmweb/",  # KasmVNC images
-        ]
+        if self._check_image_exists(base_image):
+            return ValidationResult(
+                valid=True,
+                message=f"VM '{vm.hostname}': Docker image '{base_image}' available",
+                severity="info",
+                vm_id=str(vm.id)
+            )
+        else:
+            return ValidationResult(
+                valid=False,
+                message=f"VM '{vm.hostname}': Docker image '{base_image}' not found. Pre-pull via Image Cache page.",
+                severity="error",
+                vm_id=str(vm.id)
+            )
 
-        for prefix in auto_download_images:
-            if prefix in image.lower():
-                return True
+    def _validate_windows_vm(self, vm: VM, template: VMTemplate, settings) -> ValidationResult:
+        """Validate Windows VM has required resources based on boot_source."""
+        windows_version = vm.windows_version or template.base_image or "11"
+        # Extract version if base_image is like "dockur/windows:2022"
+        if ":" in windows_version:
+            windows_version = windows_version.split(":")[-1]
+        if "/" in windows_version:
+            windows_version = "11"  # Default if can't parse
 
-        # Also check if it's a standard Linux distro for QEMU
-        if vm.linux_distro:
-            return True
+        boot_source = vm.boot_source
 
-        # Or a Windows version for dockur
-        if vm.windows_version:
-            return True
+        # Check what's available
+        golden_path = template.golden_image_path
+        has_golden = golden_path and os.path.exists(golden_path)
 
-        return False
+        iso_path = os.path.join(settings.iso_cache_dir, "windows-isos", f"windows-{windows_version}.iso")
+        has_custom_iso = vm.iso_path and os.path.isfile(vm.iso_path)
+        has_cached_iso = os.path.isfile(iso_path)
+        has_iso = has_custom_iso or has_cached_iso
+
+        # If boot_source not specified, return error with suggestions
+        if not boot_source:
+            available = []
+            if has_golden:
+                available.append("golden_image")
+            if has_iso:
+                available.append("fresh_install")
+
+            if available:
+                return ValidationResult(
+                    valid=False,
+                    message=f"VM '{vm.hostname}': boot_source not specified. Select from: {', '.join(available)}",
+                    severity="error",
+                    vm_id=str(vm.id),
+                    details={"available": available, "vm_type": "windows"}
+                )
+            else:
+                return ValidationResult(
+                    valid=False,
+                    message=f"VM '{vm.hostname}': No golden image or ISO found for Windows {windows_version}. Cache via Image Cache page.",
+                    severity="error",
+                    vm_id=str(vm.id),
+                    details={"available": [], "vm_type": "windows"}
+                )
+
+        if boot_source == "golden_image":
+            if has_golden:
+                return ValidationResult(
+                    valid=True,
+                    message=f"VM '{vm.hostname}': Golden image available at {golden_path}",
+                    severity="info",
+                    vm_id=str(vm.id)
+                )
+            else:
+                return ValidationResult(
+                    valid=False,
+                    message=f"VM '{vm.hostname}': Golden image not found. Create via Image Cache > Snapshots.",
+                    severity="error",
+                    vm_id=str(vm.id)
+                )
+
+        elif boot_source == "fresh_install":
+            if has_custom_iso:
+                return ValidationResult(
+                    valid=True,
+                    message=f"VM '{vm.hostname}': Custom ISO available at {vm.iso_path}",
+                    severity="info",
+                    vm_id=str(vm.id)
+                )
+            elif has_cached_iso:
+                return ValidationResult(
+                    valid=True,
+                    message=f"VM '{vm.hostname}': Cached ISO available for Windows {windows_version}",
+                    severity="info",
+                    vm_id=str(vm.id)
+                )
+            else:
+                return ValidationResult(
+                    valid=False,
+                    message=f"VM '{vm.hostname}': ISO not found for Windows {windows_version}. Download via Image Cache > Windows ISOs.",
+                    severity="error",
+                    vm_id=str(vm.id)
+                )
+
+        return ValidationResult(
+            valid=False,
+            message=f"VM '{vm.hostname}': Invalid boot_source '{boot_source}'",
+            severity="error",
+            vm_id=str(vm.id)
+        )
+
+    def _validate_linux_vm(self, vm: VM, template: VMTemplate, settings) -> ValidationResult:
+        """Validate Linux VM (qemux/qemu) has required resources based on boot_source."""
+        linux_distro = vm.linux_distro or template.linux_distro or "ubuntu"
+        boot_source = vm.boot_source
+
+        # Check what's available
+        golden_path = template.golden_image_path
+        has_golden = golden_path and os.path.exists(golden_path)
+
+        iso_path = os.path.join(settings.iso_cache_dir, "linux-isos", f"{linux_distro}.iso")
+        has_custom_iso = vm.iso_path and os.path.isfile(vm.iso_path)
+        has_cached_iso = os.path.isfile(iso_path)
+        has_iso = has_custom_iso or has_cached_iso
+
+        # If boot_source not specified, return error with suggestions
+        if not boot_source:
+            available = []
+            if has_golden:
+                available.append("golden_image")
+            if has_iso:
+                available.append("fresh_install")
+
+            if available:
+                return ValidationResult(
+                    valid=False,
+                    message=f"VM '{vm.hostname}': boot_source not specified. Select from: {', '.join(available)}",
+                    severity="error",
+                    vm_id=str(vm.id),
+                    details={"available": available, "vm_type": "linux"}
+                )
+            else:
+                return ValidationResult(
+                    valid=False,
+                    message=f"VM '{vm.hostname}': No golden image or ISO found for Linux {linux_distro}. Cache via Image Cache page.",
+                    severity="error",
+                    vm_id=str(vm.id),
+                    details={"available": [], "vm_type": "linux"}
+                )
+
+        if boot_source == "golden_image":
+            if has_golden:
+                return ValidationResult(
+                    valid=True,
+                    message=f"VM '{vm.hostname}': Golden image available at {golden_path}",
+                    severity="info",
+                    vm_id=str(vm.id)
+                )
+            else:
+                return ValidationResult(
+                    valid=False,
+                    message=f"VM '{vm.hostname}': Golden image not found for {linux_distro}. Create via Image Cache > Snapshots.",
+                    severity="error",
+                    vm_id=str(vm.id)
+                )
+
+        elif boot_source == "fresh_install":
+            if has_custom_iso:
+                return ValidationResult(
+                    valid=True,
+                    message=f"VM '{vm.hostname}': Custom ISO available at {vm.iso_path}",
+                    severity="info",
+                    vm_id=str(vm.id)
+                )
+            elif has_cached_iso:
+                return ValidationResult(
+                    valid=True,
+                    message=f"VM '{vm.hostname}': Cached ISO available for {linux_distro}",
+                    severity="info",
+                    vm_id=str(vm.id)
+                )
+            else:
+                return ValidationResult(
+                    valid=False,
+                    message=f"VM '{vm.hostname}': ISO not found for {linux_distro}. Download via Image Cache > Linux ISOs.",
+                    severity="error",
+                    vm_id=str(vm.id)
+                )
+
+        return ValidationResult(
+            valid=False,
+            message=f"VM '{vm.hostname}': Invalid boot_source '{boot_source}'",
+            severity="error",
+            vm_id=str(vm.id)
+        )
 
     def _validate_architecture(self, vms: List[VM]) -> List[ValidationResult]:
         """Check architecture compatibility for VMs.

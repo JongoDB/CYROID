@@ -16,6 +16,12 @@ class VMStatus(str, Enum):
     ERROR = "error"
 
 
+class BootSource(str, Enum):
+    """Boot source for QEMU-based VMs (Windows via dockur, Linux via qemux)."""
+    GOLDEN_IMAGE = "golden_image"  # Boot from pre-configured golden image (fast)
+    FRESH_INSTALL = "fresh_install"  # Boot from cached ISO (requires manual/auto install)
+
+
 class VM(Base, UUIDMixin, TimestampMixin):
     __tablename__ = "vms"
 
@@ -88,6 +94,10 @@ class VM(Base, UUIDMixin, TimestampMixin):
     linux_username: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     linux_password: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     linux_user_sudo: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    # Boot source for QEMU VMs (golden_image = fast clone, fresh_install = boot from ISO)
+    # Only used for Windows/Linux VM types (not container-based VMs)
+    boot_source: Mapped[Optional[str]] = mapped_column(String(20), nullable=True, default=None)
 
     # Position in visual builder (for UI)
     position_x: Mapped[int] = mapped_column(Integer, default=0)

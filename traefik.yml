@@ -1,0 +1,27 @@
+# Traefik Static Configuration
+# See: https://doc.traefik.io/traefik/reference/static-configuration/file/
+
+api:
+  insecure: true
+  dashboard: true
+
+entryPoints:
+  web:
+    address: ":80"
+  websecure:
+    address: ":443"
+
+providers:
+  # Docker provider for container labels
+  docker:
+    exposedByDefault: false
+
+  # File provider watching directory for dynamic config
+  # Contains: base.yml (TLS, serversTransport) + vnc-*.yml (VNC routes)
+  file:
+    directory: /etc/traefik/dynamic
+    watch: true
+
+# Logging (uncomment for debugging)
+# log:
+#   level: DEBUG

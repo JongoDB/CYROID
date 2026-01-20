@@ -20,6 +20,7 @@ from cyroid.models import Range, Network, VM, RangeStatus
 from cyroid.models.template import VMType
 from cyroid.services.dind_service import DinDService, get_dind_service
 from cyroid.services.docker_service import DockerService, get_docker_service
+from cyroid.services.traefik_route_service import get_traefik_route_service
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -270,6 +271,15 @@ class RangeDeploymentService:
                 range_obj.vnc_proxy_mappings = port_mappings
                 db.commit()
                 logger.info(f"Set up VNC port forwarding for range {range_id} with {len(vm_ports)} ports")
+
+                # Generate Traefik routes for VNC console access
+                traefik_service = get_traefik_route_service()
+                route_file = traefik_service.generate_vnc_routes(range_id, port_mappings)
+                if route_file:
+                    logger.info(f"Generated Traefik VNC routes for range {range_id}: {route_file}")
+                else:
+                    logger.warning(f"Could not generate Traefik VNC routes for range {range_id}")
+
             except Exception as e:
                 logger.warning(f"Failed to set up VNC port forwarding for range {range_id}: {e}")
                 # Don't fail the deployment if VNC forwarding fails - console will be unavailable
@@ -301,6 +311,10 @@ class RangeDeploymentService:
             raise ValueError(f"Range {range_id} not found")
 
         range_id_str = str(range_id)
+
+        # Remove Traefik VNC routes first
+        traefik_service = get_traefik_route_service()
+        traefik_service.remove_vnc_routes(range_id_str)
 
         # Delete the DinD container (cleans up everything inside)
         logger.info(f"Destroying range {range_id_str} DinD container")

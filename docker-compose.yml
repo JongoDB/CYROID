@@ -82,6 +82,8 @@ services:
       CYROID_MGMT_SUBNET: 172.30.0.0/24
       CYROID_RANGES_NETWORK: cyroid-ranges
       CYROID_RANGES_SUBNET: 172.30.1.0/24
+      # Traefik dynamic config directory (shared with Traefik for DinD VNC routing)
+      TRAEFIK_VNC_ROUTES_DIR: /app/traefik/dynamic
     volumes:
       - ./backend:/app
       # Mount Docker socket to manage DinD containers on host
@@ -99,6 +101,8 @@ services:
       - ./data/scenarios:/data/scenarios
       # Buildable Docker images with Dockerfiles
       - ./data/images:/data/images
+      # Shared directory for Traefik dynamic config (VNC routes)
+      - ./traefik/dynamic:/app/traefik/dynamic
     expose:
       - "8000"
     networks:
@@ -208,27 +212,17 @@ services:
 
   traefik:
     image: traefik:v2.11
-    command:
-      - "--api.insecure=true"
-      - "--providers.docker=true"
-      - "--providers.docker.exposedbydefault=false"
-      # HTTP entrypoint
-      - "--entrypoints.web.address=:80"
-      # HTTPS entrypoint
-      - "--entrypoints.websecure.address=:443"
-      # File provider for dynamic config (serversTransport, default certs)
-      - "--providers.file.filename=/etc/traefik/dynamic.yml"
-      - "--providers.file.watch=true"
-      # Enable debug logging (optional, remove in production)
-      # - "--log.level=DEBUG"
+    # Use static config file instead of command line args
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./traefik.yml:/etc/traefik/traefik.yml:ro
+      # Dynamic config directory (base.yml + VNC routes written by API)
+      - ./traefik/dynamic:/etc/traefik/dynamic
+      - ./certs:/etc/traefik/certs:ro
     ports:
       - "80:80"
       - "443:443"
       - "8080:8080"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./traefik-dynamic.yml:/etc/traefik/dynamic.yml:ro
-      - ./certs:/etc/traefik/certs:ro
     networks:
       cyroid-mgmt:
         ipv4_address: 172.30.0.14

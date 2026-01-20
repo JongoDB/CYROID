@@ -349,6 +349,8 @@ export interface VMCreate {
   linux_username?: string
   linux_password?: string
   linux_user_sudo?: boolean
+  // Boot source for QEMU VMs (Windows/Linux via dockur/qemux)
+  boot_source?: 'golden_image' | 'fresh_install'
 }
 
 // Network interface types

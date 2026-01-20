@@ -1,6 +1,6 @@
 # backend/cyroid/schemas/vm.py
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Literal
 from uuid import UUID
 from pydantic import BaseModel, Field, computed_field, field_serializer, model_validator
 
@@ -71,6 +71,14 @@ class VMCreate(VMBase):
     linux_password: Optional[str] = Field(None, max_length=128, description="Linux password")
     linux_user_sudo: bool = Field(default=True, description="Grant sudo/admin privileges to the user")
 
+    # Boot source for QEMU-based VMs (Windows via dockur, Linux via qemux)
+    # golden_image = boot from pre-configured snapshot (fast)
+    # fresh_install = boot from cached ISO (requires install)
+    boot_source: Optional[Literal["golden_image", "fresh_install"]] = Field(
+        None,
+        description="Boot source for QEMU VMs: 'golden_image' (pre-configured) or 'fresh_install' (from ISO)"
+    )
+
 
 class VMUpdate(BaseModel):
     hostname: Optional[str] = Field(None, min_length=1, max_length=63)
@@ -104,6 +112,8 @@ class VMUpdate(BaseModel):
     linux_username: Optional[str] = Field(None, max_length=64)
     linux_password: Optional[str] = Field(None, max_length=128)
     linux_user_sudo: Optional[bool] = None
+    # Boot source for QEMU VMs
+    boot_source: Optional[Literal["golden_image", "fresh_install"]] = None
 
 
 class VMResponse(VMBase):
@@ -138,6 +148,8 @@ class VMResponse(VMBase):
     # Linux user configuration (password excluded for security)
     linux_username: Optional[str] = None
     linux_user_sudo: bool = True
+    # Boot source for QEMU VMs
+    boot_source: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 

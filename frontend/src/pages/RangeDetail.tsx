@@ -90,7 +90,9 @@ export default function RangeDetail() {
     // Linux user configuration
     linux_username: '',
     linux_password: '',
-    linux_user_sudo: true
+    linux_user_sudo: true,
+    // Boot source for QEMU VMs (Windows/Linux)
+    boot_source: undefined
   })
   const [showWindowsOptions, setShowWindowsOptions] = useState(false)
   const [showLinuxISOOptions, setShowLinuxISOOptions] = useState(false)
@@ -314,7 +316,15 @@ export default function RangeDetail() {
       await rangesApi.deploy(id)
       fetchData()
     } catch (err: any) {
-      alert(err.response?.data?.detail || 'Failed to deploy range')
+      const detail = err.response?.data?.detail
+      // Check if this is a validation error with structured detail
+      if (detail && typeof detail === 'object' && detail.errors) {
+        // Display validation errors clearly
+        const errorList = detail.errors.map((e: string) => `• ${e}`).join('\n')
+        alert(`${detail.message || 'Deployment validation failed'}\n\n${errorList}\n\n${detail.hint || ''}`)
+      } else {
+        alert(typeof detail === 'string' ? detail : 'Failed to deploy range')
+      }
     }
   }
 
@@ -538,6 +548,8 @@ export default function RangeDetail() {
         if (vmForm.windows_username) vmData.windows_username = vmForm.windows_username
         if (vmForm.windows_password) vmData.windows_password = vmForm.windows_password
         vmData.display_type = vmForm.display_type || 'desktop'
+        // Boot source for QEMU VMs
+        if (vmForm.boot_source) vmData.boot_source = vmForm.boot_source
         // Network configuration
         vmData.use_dhcp = vmForm.use_dhcp || false
         if (!vmForm.use_dhcp) {
@@ -558,6 +570,8 @@ export default function RangeDetail() {
       // Add Linux ISO-specific settings
       if (showLinuxISOOptions) {
         vmData.display_type = vmForm.display_type || 'desktop'
+        // Boot source for QEMU VMs
+        if (vmForm.boot_source) vmData.boot_source = vmForm.boot_source
         // Network configuration (static IP only for Linux)
         if (vmForm.gateway) vmData.gateway = vmForm.gateway
         if (vmForm.dns_servers) vmData.dns_servers = vmForm.dns_servers
@@ -595,7 +609,9 @@ export default function RangeDetail() {
         enable_shared_folder: false, enable_global_shared: false,
         language: null, keyboard: null, region: null, manual_install: false,
         // Linux user configuration reset
-        linux_username: '', linux_password: '', linux_user_sudo: true
+        linux_username: '', linux_password: '', linux_user_sudo: true,
+        // Boot source reset
+        boot_source: undefined
       })
       setShowWindowsOptions(false)
       setShowLinuxISOOptions(false)
@@ -1444,6 +1460,41 @@ export default function RangeDetail() {
                       <Server className="h-4 w-4 mr-2 text-purple-500" />
                       Windows Settings
                     </h4>
+                    {/* Boot Source Selection - Required for QEMU VMs */}
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                      <label className="block text-sm font-medium text-gray-900 mb-2">Boot Source (Required)</label>
+                      <div className="space-y-2">
+                        <label className="flex items-center">
+                          <input
+                            type="radio"
+                            name="boot_source"
+                            value="golden_image"
+                            checked={vmForm.boot_source === 'golden_image'}
+                            onChange={() => setVmForm({ ...vmForm, boot_source: 'golden_image' })}
+                            className="mr-2 text-primary-600"
+                          />
+                          <span className="text-sm">Golden Image (Pre-configured, fast)</span>
+                        </label>
+                        <label className="flex items-center">
+                          <input
+                            type="radio"
+                            name="boot_source"
+                            value="fresh_install"
+                            checked={vmForm.boot_source === 'fresh_install'}
+                            onChange={() => setVmForm({ ...vmForm, boot_source: 'fresh_install' })}
+                            className="mr-2 text-primary-600"
+                          />
+                          <span className="text-sm">Fresh Install (From cached ISO)</span>
+                        </label>
+                      </div>
+                      <p className="mt-2 text-xs text-blue-700">
+                        {vmForm.boot_source === 'golden_image'
+                          ? 'Golden images deploy in seconds from pre-configured snapshots.'
+                          : vmForm.boot_source === 'fresh_install'
+                          ? 'Fresh installs boot from cached ISOs and require initial setup.'
+                          : 'Select a boot source. Images must be cached before deployment.'}
+                      </p>
+                    </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700">Environment Type</label>
                       <select
@@ -1683,6 +1734,41 @@ export default function RangeDetail() {
                       <Server className="h-4 w-4 mr-2 text-orange-500" />
                       Linux VM Settings
                     </h4>
+                    {/* Boot Source Selection - Required for QEMU VMs */}
+                    <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
+                      <label className="block text-sm font-medium text-gray-900 mb-2">Boot Source (Required)</label>
+                      <div className="space-y-2">
+                        <label className="flex items-center">
+                          <input
+                            type="radio"
+                            name="linux_boot_source"
+                            value="golden_image"
+                            checked={vmForm.boot_source === 'golden_image'}
+                            onChange={() => setVmForm({ ...vmForm, boot_source: 'golden_image' })}
+                            className="mr-2 text-orange-600"
+                          />
+                          <span className="text-sm">Golden Image (Pre-configured, fast)</span>
+                        </label>
+                        <label className="flex items-center">
+                          <input
+                            type="radio"
+                            name="linux_boot_source"
+                            value="fresh_install"
+                            checked={vmForm.boot_source === 'fresh_install'}
+                            onChange={() => setVmForm({ ...vmForm, boot_source: 'fresh_install' })}
+                            className="mr-2 text-orange-600"
+                          />
+                          <span className="text-sm">Fresh Install (From cached ISO)</span>
+                        </label>
+                      </div>
+                      <p className="mt-2 text-xs text-orange-700">
+                        {vmForm.boot_source === 'golden_image'
+                          ? 'Golden images deploy in seconds from pre-configured snapshots.'
+                          : vmForm.boot_source === 'fresh_install'
+                          ? 'Fresh installs boot from cached ISOs and require initial setup.'
+                          : 'Select a boot source. Images must be cached before deployment.'}
+                      </p>
+                    </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700">Environment Type</label>
                       <select
