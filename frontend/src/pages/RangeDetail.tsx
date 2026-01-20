@@ -542,15 +542,13 @@ export default function RangeDetail() {
       alert('Network must be provisioned first (deploy the range)')
       return
     }
-    if (!network.vyos_interface) {
-      alert('VyOS router not connected to this network. Redeploy the range.')
-      return
-    }
+    // Note: With DinD deployment, internet access is set via iptables at deploy time
+    // Dynamic toggling requires range redeployment
     try {
       await networksApi.toggleInternet(network.id)
       fetchData()
     } catch (err: any) {
-      alert(err.response?.data?.detail || 'Failed to toggle internet access')
+      alert(err.response?.data?.detail || 'Failed to toggle internet access. With DinD, you may need to redeploy.')
     }
   }
 
@@ -559,15 +557,12 @@ export default function RangeDetail() {
       alert('Network must be provisioned first (deploy the range)')
       return
     }
-    if (!network.vyos_interface) {
-      alert('VyOS router not connected to this network. Redeploy the range.')
-      return
-    }
+    // Note: DHCP is not currently supported with DinD deployments
     try {
       await networksApi.toggleDhcp(network.id)
       fetchData()
     } catch (err: any) {
-      alert(err.response?.data?.detail || 'Failed to toggle DHCP')
+      alert(err.response?.data?.detail || 'Failed to toggle DHCP. DHCP may not be available with DinD deployment.')
     }
   }
 
@@ -824,11 +819,11 @@ export default function RangeDetail() {
                   range.router.status === 'error' ? 'bg-red-100 text-red-800' :
                   'bg-gray-100 text-gray-800'
                 )}
-                title={range.router.error_message || `VyOS Router: ${range.router.status}`}
+                title={range.router.error_message || `DinD Container: ${range.router.status}`}
                 >
                   <Router className="h-3 w-3" />
-                  {range.router.status === 'running' ? 'Router Up' :
-                   range.router.status === 'error' ? 'Router Error' :
+                  {range.router.status === 'running' ? 'DinD Up' :
+                   range.router.status === 'error' ? 'DinD Error' :
                    range.router.status}
                 </span>
               )}

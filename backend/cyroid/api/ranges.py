@@ -73,8 +73,8 @@ def compute_deployment_status(range_obj, events: list) -> DeploymentStatusRespon
     # Track timestamps for duration calculation
     resource_start_times = {}
 
-    # Initialize router status
-    router_status = ResourceStatus(name="gateway", status="pending")
+    # Initialize DinD container status (handles routing via iptables)
+    router_status = ResourceStatus(name="dind-container", status="pending")
 
     # Initialize network statuses
     network_statuses = {}
@@ -95,10 +95,10 @@ def compute_deployment_status(range_obj, events: list) -> DeploymentStatusRespon
     for event in events:
         event_type = event.event_type
 
-        # Router events
+        # DinD container events (router events map to DinD container)
         if event_type == EventType.ROUTER_CREATING:
             router_status.status = "creating"
-            router_status.status_detail = "Creating VyOS router..."
+            router_status.status_detail = "Creating DinD container..."
             resource_start_times["router"] = event.created_at
         elif event_type == EventType.ROUTER_CREATED:
             router_status.status = "running"

@@ -157,12 +157,12 @@ export function DeploymentProgress({
 
       {/* Resource Sections */}
       <div>
-        {/* Router */}
+        {/* DinD Container */}
         {status.router && (
-          <ResourceSection title="Router" completed={routerCompleted} total={1}>
+          <ResourceSection title="DinD Container" completed={routerCompleted} total={1}>
             <ResourceRow
               name={status.router.name}
-              detail="VyOS 1.4"
+              detail="Docker-in-Docker"
               status={status.router.status}
               statusDetail={status.router.statusDetail}
               durationMs={status.router.durationMs}

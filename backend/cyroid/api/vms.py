@@ -1,4 +1,5 @@
 # backend/cyroid/api/vms.py
+import asyncio
 import ipaddress
 from typing import List, Optional, Tuple
 from uuid import UUID
@@ -445,7 +446,18 @@ def delete_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
     if vm.container_id:
         try:
             docker = get_docker_service()
-            docker.remove_container(vm.container_id, force=True)
+            # Check for DinD mode
+            range_obj = db.query(Range).filter(Range.id == vm.range_id).first()
+            use_dind = bool(range_obj and range_obj.dind_docker_url)
+
+            if use_dind:
+                asyncio.run(docker.remove_range_container_dind(
+                    range_id=str(vm.range_id),
+                    docker_url=range_obj.dind_docker_url,
+                    container_id=vm.container_id,
+                ))
+            else:
+                docker.remove_container(vm.container_id, force=True)
         except Exception as e:
             logger.warning(f"Failed to remove container for VM {vm_id}: {e}")
 
@@ -478,7 +490,18 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
         # Get network info
         network = db.query(Network).filter(Network.id == vm.network_id).first()
 
-        if not network or not network.docker_network_id:
+        if not network:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Network not found",
+            )
+
+        # Get range to check for DinD mode
+        range_obj = db.query(Range).filter(Range.id == vm.range_id).first()
+        use_dind = bool(range_obj and range_obj.dind_docker_url)
+
+        # Validate network is provisioned
+        if not use_dind and not network.docker_network_id:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Network not provisioned",
@@ -552,7 +575,15 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
 
         # Container already exists - just start it
         if vm.container_id:
-            docker.start_container(vm.container_id)
+            if use_dind:
+                # Start container inside DinD
+                asyncio.run(docker.start_range_container_dind(
+                    range_id=str(vm.range_id),
+                    docker_url=range_obj.dind_docker_url,
+                    container_id=vm.container_id,
+                ))
+            else:
+                docker.start_container(vm.container_id)
         else:
             # Create new container
             vm_id_short = str(vm.id)[:8]
@@ -677,38 +708,80 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
                         "shared"
                     )
 
-                container_id = docker.create_windows_container(
-                    name=f"cyroid-{vm.hostname}-{str(vm.id)[:8]}",
-                    network_id=network.docker_network_id,
-                    ip_address=vm.ip_address,
-                    cpu_limit=vm.cpu,
-                    memory_limit_mb=vm.ram_mb,
-                    disk_size_gb=vm.disk_gb,
-                    windows_version=windows_version,
-                    labels=labels,
-                    iso_path=iso_path,
-                    iso_url=vm.iso_url,
-                    storage_path=vm_storage_path,
-                    clone_from=clone_from,
-                    username=vm.windows_username,
-                    password=vm.windows_password,
-                    display_type=vm.display_type or "desktop",
-                    # Network configuration
-                    use_dhcp=vm.use_dhcp,
-                    gateway=vm.gateway,
-                    dns_servers=vm.dns_servers,
-                    # Extended dockur/windows configuration
-                    disk2_gb=vm.disk2_gb,
-                    disk3_gb=vm.disk3_gb,
-                    enable_shared_folder=vm.enable_shared_folder,
-                    shared_folder_path=shared_folder_path,
-                    enable_global_shared=vm.enable_global_shared,
-                    global_shared_path=settings.global_shared_dir,
-                    language=vm.language,
-                    keyboard=vm.keyboard,
-                    region=vm.region,
-                    manual_install=vm.manual_install,
-                )
+                if use_dind:
+                    # Create Windows VM inside DinD with basic configuration
+                    # Note: Volume mounts for storage/ISOs not available in DinD mode
+                    windows_env = {
+                        "VERSION": windows_version,
+                        "DISK_SIZE": f"{vm.disk_gb or 64}G",
+                        "CPU_CORES": str(vm.cpu or 4),
+                        "RAM_SIZE": f"{vm.ram_mb or 8192}M",
+                        "DISPLAY": "web" if (vm.display_type or "desktop") == "desktop" else "none",
+                        "KVM": "N",  # DinD typically doesn't have KVM access
+                    }
+                    if vm.windows_username:
+                        windows_env["USERNAME"] = vm.windows_username
+                    if vm.windows_password:
+                        windows_env["PASSWORD"] = vm.windows_password
+                    if vm.use_dhcp:
+                        windows_env["DHCP"] = "Y"
+                    else:
+                        if vm.gateway:
+                            windows_env["GATEWAY"] = vm.gateway
+                        if vm.dns_servers:
+                            windows_env["DNS"] = vm.dns_servers
+                    if vm.iso_url:
+                        windows_env["BOOT"] = vm.iso_url
+
+                    container_id = asyncio.run(docker.create_range_container_dind(
+                        range_id=str(vm.range_id),
+                        docker_url=range_obj.dind_docker_url,
+                        name=vm.hostname,
+                        image="dockurr/windows",
+                        network_name=network.name,
+                        ip_address=vm.ip_address,
+                        cpu_limit=vm.cpu or 4,
+                        memory_limit_mb=vm.ram_mb or 8192,
+                        hostname=vm.hostname,
+                        labels=labels,
+                        environment=windows_env,
+                        privileged=True,
+                        dns_servers=network.dns_servers,
+                        dns_search=network.dns_search,
+                    ))
+                else:
+                    container_id = docker.create_windows_container(
+                        name=f"cyroid-{vm.hostname}-{str(vm.id)[:8]}",
+                        network_id=network.docker_network_id,
+                        ip_address=vm.ip_address,
+                        cpu_limit=vm.cpu,
+                        memory_limit_mb=vm.ram_mb,
+                        disk_size_gb=vm.disk_gb,
+                        windows_version=windows_version,
+                        labels=labels,
+                        iso_path=iso_path,
+                        iso_url=vm.iso_url,
+                        storage_path=vm_storage_path,
+                        clone_from=clone_from,
+                        username=vm.windows_username,
+                        password=vm.windows_password,
+                        display_type=vm.display_type or "desktop",
+                        # Network configuration
+                        use_dhcp=vm.use_dhcp,
+                        gateway=vm.gateway,
+                        dns_servers=vm.dns_servers,
+                        # Extended dockur/windows configuration
+                        disk2_gb=vm.disk2_gb,
+                        disk3_gb=vm.disk3_gb,
+                        enable_shared_folder=vm.enable_shared_folder,
+                        shared_folder_path=shared_folder_path,
+                        enable_global_shared=vm.enable_global_shared,
+                        global_shared_path=settings.global_shared_dir,
+                        language=vm.language,
+                        keyboard=vm.keyboard,
+                        region=vm.region,
+                        manual_install=vm.manual_install,
+                    )
             elif os_type == OSType.CUSTOM:
                 # Custom ISO VMs use qemux/qemu with the custom ISO
                 settings = get_settings()
@@ -726,52 +799,114 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
                 if not iso_path and base_image_record and base_image_record.iso_path:
                     iso_path = base_image_record.iso_path
 
-                container_id = docker.create_linux_vm_container(
-                    name=f"cyroid-{vm.hostname}-{str(vm.id)[:8]}",
-                    network_id=network.docker_network_id,
-                    ip_address=vm.ip_address,
-                    cpu_limit=vm.cpu,
-                    memory_limit_mb=vm.ram_mb,
-                    disk_size_gb=vm.disk_gb,
-                    linux_distro="custom",  # Will be overridden by iso_path
-                    labels=labels,
-                    iso_path=iso_path,
-                    storage_path=vm_storage_path,
-                    display_type=vm.display_type or "desktop",
-                    # Extended configuration
-                    disk2_gb=vm.disk2_gb,
-                    disk3_gb=vm.disk3_gb,
-                    # Linux user configuration (cloud-init)
-                    linux_username=vm.linux_username,
-                    linux_password=vm.linux_password,
-                    linux_user_sudo=vm.linux_user_sudo if vm.linux_user_sudo is not None else True,
-                    # Network DNS configuration
-                    gateway=network.gateway,
-                    dns_servers=network.dns_servers,
-                    dns_search=network.dns_search,
-                )
+                if use_dind:
+                    # Create custom ISO VM inside DinD
+                    # Note: Local ISO mounts not available in DinD mode - use ISO URL if available
+                    custom_env = {
+                        "DISK_SIZE": f"{vm.disk_gb or 40}G",
+                        "CPU_CORES": str(vm.cpu or 2),
+                        "RAM_SIZE": f"{vm.ram_mb or 4096}M",
+                        "KVM": "N",  # DinD typically doesn't have KVM access
+                    }
+                    if vm.iso_url:
+                        custom_env["BOOT"] = vm.iso_url
+
+                    container_id = asyncio.run(docker.create_range_container_dind(
+                        range_id=str(vm.range_id),
+                        docker_url=range_obj.dind_docker_url,
+                        name=vm.hostname,
+                        image="qemux/qemu-docker",
+                        network_name=network.name,
+                        ip_address=vm.ip_address,
+                        cpu_limit=vm.cpu or 2,
+                        memory_limit_mb=vm.ram_mb or 4096,
+                        hostname=vm.hostname,
+                        labels=labels,
+                        environment=custom_env,
+                        privileged=True,
+                        dns_servers=network.dns_servers,
+                        dns_search=network.dns_search,
+                    ))
+                else:
+                    container_id = docker.create_linux_vm_container(
+                        name=f"cyroid-{vm.hostname}-{str(vm.id)[:8]}",
+                        network_id=network.docker_network_id,
+                        ip_address=vm.ip_address,
+                        cpu_limit=vm.cpu,
+                        memory_limit_mb=vm.ram_mb,
+                        disk_size_gb=vm.disk_gb,
+                        linux_distro="custom",  # Will be overridden by iso_path
+                        labels=labels,
+                        iso_path=iso_path,
+                        storage_path=vm_storage_path,
+                        display_type=vm.display_type or "desktop",
+                        # Extended configuration
+                        disk2_gb=vm.disk2_gb,
+                        disk3_gb=vm.disk3_gb,
+                        # Linux user configuration (cloud-init)
+                        linux_username=vm.linux_username,
+                        linux_password=vm.linux_password,
+                        linux_user_sudo=vm.linux_user_sudo if vm.linux_user_sudo is not None else True,
+                        # Network DNS configuration
+                        gateway=network.gateway,
+                        dns_servers=network.dns_servers,
+                        dns_search=network.dns_search,
+                    )
             else:
                 # Container (standard Docker container) or snapshot-based VM
-                container_id = docker.create_container(
-                    name=f"cyroid-{vm.hostname}-{str(vm.id)[:8]}",
-                    image=image_ref,
-                    network_id=network.docker_network_id,
-                    ip_address=vm.ip_address,
-                    cpu_limit=vm.cpu,
-                    memory_limit_mb=vm.ram_mb,
-                    hostname=vm.hostname,
-                    labels=labels,
-                    # Linux user configuration (KasmVNC/LinuxServer env vars)
-                    linux_username=vm.linux_username,
-                    linux_password=vm.linux_password,
-                    linux_user_sudo=vm.linux_user_sudo if vm.linux_user_sudo is not None else True,
-                    # Network DNS configuration
-                    dns_servers=network.dns_servers,
-                    dns_search=network.dns_search,
-                )
+                if use_dind:
+                    # Build environment for LinuxServer/KasmVNC containers
+                    environment = {}
+                    if vm.linux_username:
+                        environment["CUSTOM_USER"] = vm.linux_username
+                        environment["PUID"] = "1000"
+                        environment["PGID"] = "1000"
+                    if vm.linux_password:
+                        environment["PASSWORD"] = vm.linux_password
+
+                    container_id = asyncio.run(docker.create_range_container_dind(
+                        range_id=str(vm.range_id),
+                        docker_url=range_obj.dind_docker_url,
+                        name=vm.hostname,
+                        image=image_ref,
+                        network_name=network.name,
+                        ip_address=vm.ip_address,
+                        cpu_limit=vm.cpu or 2,
+                        memory_limit_mb=vm.ram_mb or 2048,
+                        hostname=vm.hostname,
+                        labels=labels,
+                        environment=environment if environment else None,
+                        dns_servers=network.dns_servers,
+                        dns_search=network.dns_search,
+                    ))
+                else:
+                    container_id = docker.create_container(
+                        name=f"cyroid-{vm.hostname}-{str(vm.id)[:8]}",
+                        image=image_ref,
+                        network_id=network.docker_network_id,
+                        ip_address=vm.ip_address,
+                        cpu_limit=vm.cpu,
+                        memory_limit_mb=vm.ram_mb,
+                        hostname=vm.hostname,
+                        labels=labels,
+                        # Linux user configuration (KasmVNC/LinuxServer env vars)
+                        linux_username=vm.linux_username,
+                        linux_password=vm.linux_password,
+                        linux_user_sudo=vm.linux_user_sudo if vm.linux_user_sudo is not None else True,
+                        # Network DNS configuration
+                        dns_servers=network.dns_servers,
+                        dns_search=network.dns_search,
+                    )
 
             vm.container_id = container_id
-            docker.start_container(container_id)
+            if use_dind:
+                asyncio.run(docker.start_range_container_dind(
+                    range_id=str(vm.range_id),
+                    docker_url=range_obj.dind_docker_url,
+                    container_id=container_id,
+                ))
+            else:
+                docker.start_container(container_id)
 
             # Configure Linux user for KasmVNC containers
             image_for_check = image_ref or ""
@@ -848,7 +983,18 @@ def stop_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
     try:
         if vm.container_id:
             docker = get_docker_service()
-            docker.stop_container(vm.container_id)
+            # Check for DinD mode
+            range_obj = db.query(Range).filter(Range.id == vm.range_id).first()
+            use_dind = bool(range_obj and range_obj.dind_docker_url)
+
+            if use_dind:
+                asyncio.run(docker.stop_range_container_dind(
+                    range_id=str(vm.range_id),
+                    docker_url=range_obj.dind_docker_url,
+                    container_id=vm.container_id,
+                ))
+            else:
+                docker.stop_container(vm.container_id)
 
         vm.status = VMStatus.STOPPED
         db.commit()
@@ -864,7 +1010,8 @@ def stop_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
         )
 
         # Update range status to STOPPED if all VMs are stopped
-        range_obj = db.query(Range).filter(Range.id == vm.range_id).first()
+        if not range_obj:
+            range_obj = db.query(Range).filter(Range.id == vm.range_id).first()
         if range_obj and range_obj.status == RangeStatus.RUNNING:
             all_vms = db.query(VM).filter(VM.range_id == vm.range_id).all()
             all_stopped = all(v.status == VMStatus.STOPPED for v in all_vms)
@@ -1279,7 +1426,24 @@ def restart_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
     try:
         if vm.container_id:
             docker = get_docker_service()
-            docker.restart_container(vm.container_id)
+            # Check for DinD mode
+            range_obj = db.query(Range).filter(Range.id == vm.range_id).first()
+            use_dind = bool(range_obj and range_obj.dind_docker_url)
+
+            if use_dind:
+                # Restart via stop + start for DinD
+                asyncio.run(docker.stop_range_container_dind(
+                    range_id=str(vm.range_id),
+                    docker_url=range_obj.dind_docker_url,
+                    container_id=vm.container_id,
+                ))
+                asyncio.run(docker.start_range_container_dind(
+                    range_id=str(vm.range_id),
+                    docker_url=range_obj.dind_docker_url,
+                    container_id=vm.container_id,
+                ))
+            else:
+                docker.restart_container(vm.container_id)
 
         vm.status = VMStatus.RUNNING
         db.commit()
