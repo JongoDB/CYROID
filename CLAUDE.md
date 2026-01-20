@@ -9,8 +9,8 @@
 - **Name**: CYROID (Cyber Range Orchestrator In Docker)
 - **Type**: Web-based cyber range orchestration platform
 - **Domain**: Military/government cyber training, educational institutions
-- **Current Version**: 0.4.2-alpha
-- **Repository**: /home/ubuntu/Desktop/CYROID
+- **Current Version**: 0.5.0-alpha
+- **Repository**: /Users/JonWFH/jondev/CYROID
 
 ---
 
@@ -18,9 +18,12 @@
 
 CYROID automates Docker-based cyber training environments with:
 - Multi-OS VM support (Linux containers, Linux VMs via QEMU, Windows VMs via dockur)
-- Network isolation with custom Docker networks
-- VNC console access through Traefik
+- DinD (Docker-in-Docker) isolation for range deployments (no IP conflicts between ranges)
+- VM Library with snapshot-based VM creation
+- Network isolation with custom Docker networks and iptables rules
+- VNC console access through Traefik (with DinD proxy routing)
 - MSEL (Master Scenario Events List) for scenario execution
+- Pre-deployment validation for ranges
 - Evidence collection and scoring (in development)
 
 ---
@@ -120,6 +123,10 @@ Current overall progress: **Phase 4 of 7 Complete (57%)**
 | Connection Tracking | ✅ | Monitor student activity |
 | Version Display | ✅ | API endpoint + UI footer |
 | Console Pop-out | ✅ | Default new window, Shift+click for inline |
+| DinD Range Isolation | ✅ | Each range in separate Docker-in-Docker container |
+| VM Library | ✅ | Snapshot-based VM creation, renamed from Templates |
+| Pre-deployment Validation | ✅ | Image, architecture, disk space checks |
+| Promote to Library | ✅ | Promote cached images to VM Library |
 | Evidence Submission | 🟡 | In development |
 | Evidence Validation | 🟡 | In development |
 | Scoring Engine | 🟡 | In development |
@@ -173,12 +180,19 @@ Use semantic prefixes:
 - `backend/cyroid/config.py` - Environment configuration
 - `backend/cyroid/api/ranges.py` - Range endpoints
 - `backend/cyroid/api/vms.py` - VM endpoints
+- `backend/cyroid/api/cache.py` - Image cache and promote-to-library
 - `backend/cyroid/services/docker_service.py` - Docker orchestration
+- `backend/cyroid/services/dind_service.py` - DinD container management
+- `backend/cyroid/services/vnc_proxy_service.py` - VNC proxy for DinD console access
+- `backend/cyroid/services/deployment_validator.py` - Pre-deployment validation
+- `backend/cyroid/services/range_deployment_service.py` - Range lifecycle
 - `backend/cyroid/models/` - SQLAlchemy models
 
 ### Frontend
 - `frontend/src/App.tsx` - Route configuration
-- `frontend/src/pages/RangeDetail.tsx` - Range builder
+- `frontend/src/pages/RangeDetail.tsx` - Range builder (with snapshot selection)
+- `frontend/src/pages/VMLibrary.tsx` - VM Library (snapshots + base images)
+- `frontend/src/pages/ImageCache.tsx` - Docker image cache with promote feature
 - `frontend/src/pages/ExecutionConsole.tsx` - Live console
 - `frontend/src/services/api.ts` - API client
 
@@ -239,8 +253,9 @@ At bottom of README, update:
 | 0.4.0 | 2026-01-15 | 4 | Execution console, MSEL, monitoring |
 | 0.4.1 | 2026-01-16 | 4 | Version display, console pop-out default |
 | 0.4.2 | 2026-01-16 | 4 | Multi-architecture support (x86_64 + ARM64) |
-| 0.5.0 | TBD | 5 | Evidence submission, scoring |
-| 0.6.0 | TBD | 6 | Automation, CAC auth, offline mode |
+| 0.5.0 | 2026-01-19 | 4 | DinD isolation, VM Library, pre-deployment validation |
+| 0.6.0 | TBD | 5 | Evidence submission, scoring |
+| 0.7.0 | TBD | 6 | Automation, CAC auth, offline mode |
 | 1.0.0 | TBD | 7 | Production release |
 
 ---
@@ -305,5 +320,5 @@ Phase 5: Evidence & Scoring system
 
 ---
 
-*Last Updated: 2026-01-16*
+*Last Updated: 2026-01-19*
 *Update this file whenever significant progress is made or context changes*
