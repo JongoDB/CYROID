@@ -70,6 +70,7 @@ class TraefikRouteService:
         for vm_id, proxy_info in port_mappings.items():
             proxy_host = proxy_info.get("proxy_host")
             proxy_port = proxy_info.get("proxy_port")
+            original_port = proxy_info.get("original_port")
 
             if not proxy_host or not proxy_port:
                 logger.warning(f"Invalid proxy info for VM {vm_id}: {proxy_info}")
@@ -79,14 +80,29 @@ class TraefikRouteService:
             vm_id_short = vm_id[:12].replace("-", "")
             router_name = f"vnc-dind-{vm_id_short}"
 
+            # Determine if backend requires SSL (KasmVNC on port 6901 uses SSL)
+            # linuxserver/webtop on port 3000 uses HTTP
+            # dockur/windows on port 8006 uses HTTP
+            requires_ssl = original_port == 6901
+
             # Service pointing to DinD proxy port
-            services[router_name] = {
-                "loadBalancer": {
-                    "servers": [
-                        {"url": f"http://{proxy_host}:{proxy_port}"}
-                    ]
+            if requires_ssl:
+                services[router_name] = {
+                    "loadBalancer": {
+                        "serversTransport": "insecure-transport",
+                        "servers": [
+                            {"url": f"https://{proxy_host}:{proxy_port}"}
+                        ]
+                    }
                 }
-            }
+            else:
+                services[router_name] = {
+                    "loadBalancer": {
+                        "servers": [
+                            {"url": f"http://{proxy_host}:{proxy_port}"}
+                        ]
+                    }
+                }
 
             # Middleware to strip /vnc/{vm_id} prefix
             middleware_name = f"vnc-strip-{vm_id_short}"
