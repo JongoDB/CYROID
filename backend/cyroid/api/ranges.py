@@ -338,6 +338,71 @@ def get_deployment_status(
     return compute_deployment_status(range_obj, events)
 
 
+@router.get("/{range_id}/validate")
+async def validate_range_deployment(
+    range_id: UUID,
+    db: DBSession,
+    current_user: CurrentUser,
+):
+    """
+    Validate range configuration before deployment.
+
+    Performs the following checks:
+    - Image availability: Verifies Docker images exist for all VMs
+    - Architecture compatibility: Checks for cross-architecture emulation needs
+    - Disk space: Verifies sufficient disk space for deployment
+    - Network configuration: Validates no duplicate IPs within networks
+
+    Returns:
+        Validation result with errors and warnings
+    """
+    from cyroid.services.deployment_validator import DeploymentValidator
+
+    # Check if range exists
+    range_obj = db.query(Range).filter(Range.id == range_id).first()
+    if not range_obj:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Range not found",
+        )
+
+    # Check access
+    check_resource_access('range', range_id, current_user, db, range_obj.created_by)
+
+    # Create validator and run validation
+    docker = get_docker_service()
+    validator = DeploymentValidator(db, docker)
+    result = await validator.validate_range(range_id)
+
+    return {
+        "valid": result.valid,
+        "errors": [
+            {
+                "message": r.message,
+                "vm_id": r.vm_id,
+                "details": r.details
+            }
+            for r in result.errors
+        ],
+        "warnings": [
+            {
+                "message": r.message,
+                "vm_id": r.vm_id,
+                "details": r.details
+            }
+            for r in result.warnings
+        ],
+        "info": [
+            {
+                "message": r.message,
+                "vm_id": r.vm_id,
+                "details": r.details
+            }
+            for r in result.info
+        ],
+    }
+
+
 @router.post("/{range_id}/deploy", response_model=RangeResponse)
 def deploy_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
     """Deploy a range using DinD isolation - creates isolated Docker environment with networks and VMs"""
