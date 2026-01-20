@@ -32,8 +32,7 @@ class VM(Base, UUIDMixin, TimestampMixin):
     range_id: Mapped[UUID] = mapped_column(ForeignKey("ranges.id", ondelete="CASCADE"))
     network_id: Mapped[UUID] = mapped_column(ForeignKey("networks.id"))
 
-    # Image source: exactly one of base_image_id, golden_image_id, snapshot_id, or template_id
-    # New Image Library fields (preferred)
+    # Image source: exactly one of base_image_id, golden_image_id, or snapshot_id
     base_image_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey("base_images.id", ondelete="SET NULL"), nullable=True
     )
@@ -42,10 +41,6 @@ class VM(Base, UUIDMixin, TimestampMixin):
     )
     snapshot_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey("snapshots.id"), nullable=True
-    )
-    # Deprecated: template_id (kept for backward compatibility)
-    template_id: Mapped[Optional[UUID]] = mapped_column(
-        ForeignKey("vm_templates.id"), nullable=True
     )
 
     hostname: Mapped[str] = mapped_column(String(63))
@@ -125,8 +120,6 @@ class VM(Base, UUIDMixin, TimestampMixin):
     golden_image: Mapped[Optional["GoldenImage"]] = relationship(
         "GoldenImage", back_populates="vms", foreign_keys=[golden_image_id]
     )
-    # Deprecated template relationship
-    template = relationship("VMTemplate", back_populates="vms")
     snapshots: Mapped[List["Snapshot"]] = relationship(
         "Snapshot", back_populates="vm", foreign_keys="[Snapshot.vm_id]"
     )

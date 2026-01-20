@@ -8,7 +8,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from cyroid.config import get_settings
 from cyroid.api.auth import router as auth_router
 from cyroid.api.users import router as users_router
-from cyroid.api.templates import router as templates_router
 from cyroid.api.ranges import router as ranges_router
 from cyroid.api.networks import router as networks_router
 from cyroid.api.vms import router as vms_router
@@ -39,19 +38,15 @@ async def lifespan(app: FastAPI):
     """Application lifespan events for startup and shutdown."""
     # Startup
     from cyroid.services.event_broadcaster import get_connection_manager, get_broadcaster
-    from cyroid.services.template_seeder import seed_all_templates
     from cyroid.services.blueprint_seeder import seed_all_blueprints
     from cyroid.services.scenario_filesystem import get_scenarios_dir
     from cyroid.database import get_session_local
 
-    # Seed built-in templates and blueprints
-    logger.info("Checking seed templates and blueprints...")
+    # Seed built-in blueprints
+    logger.info("Checking seed blueprints...")
     try:
         SessionLocal = get_session_local()
         db = SessionLocal()
-        seeded_templates = seed_all_templates(db)
-        if seeded_templates:
-            logger.info(f"Seeded {len(seeded_templates)} templates")
         seeded_blueprints = seed_all_blueprints(db)
         if seeded_blueprints:
             logger.info(f"Seeded {len(seeded_blueprints)} blueprints")
@@ -91,7 +86,7 @@ CYROID is a platform for creating and managing cyber training ranges using Docke
 - **Range**: A complete training environment containing networks and VMs
 - **Network**: An isolated network segment (e.g., 172.16.0.0/24) for VM communication
 - **VM**: A virtual machine (container or QEMU VM) running in the range
-- **Template**: A predefined VM configuration (OS, resources, base image)
+- **Image Library**: Three-tier image management (Base Images, Golden Images, Snapshots)
 
 ## Quick Start
 
@@ -125,7 +120,6 @@ app = FastAPI(
         {"name": "ranges", "description": "Range lifecycle management"},
         {"name": "networks", "description": "Network configuration"},
         {"name": "vms", "description": "Virtual machine management"},
-        {"name": "templates", "description": "VM template library"},
         {"name": "artifacts", "description": "File and artifact management"},
         {"name": "snapshots", "description": "VM snapshot management"},
         {"name": "events", "description": "Event logging and monitoring"},
@@ -149,7 +143,6 @@ app.add_middleware(
 # Include routers
 app.include_router(auth_router, prefix="/api/v1")
 app.include_router(users_router, prefix="/api/v1")
-app.include_router(templates_router, prefix="/api/v1")
 app.include_router(ranges_router, prefix="/api/v1")
 app.include_router(networks_router, prefix="/api/v1")
 app.include_router(vms_router, prefix="/api/v1")

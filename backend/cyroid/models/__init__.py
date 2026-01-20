@@ -2,7 +2,7 @@
 from cyroid.models.base import Base
 from cyroid.models.user import User, UserRole, UserAttribute, AVAILABLE_ROLES
 from cyroid.models.resource_tag import ResourceTag
-from cyroid.models.template import VMTemplate, OSType
+from cyroid.models.template import OSType, VMType, LinuxDistro
 from cyroid.models.range import Range, RangeStatus
 from cyroid.models.network import Network
 from cyroid.models.vm import VM, VMStatus, BootSource
@@ -25,7 +25,7 @@ __all__ = [
     "Base",
     "User", "UserRole", "UserAttribute", "AVAILABLE_ROLES",
     "ResourceTag",
-    "VMTemplate", "OSType",
+    "OSType", "VMType", "LinuxDistro",
     "Range", "RangeStatus",
     "Network",
     "VM", "VMStatus", "BootSource",

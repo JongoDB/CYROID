@@ -21,12 +21,10 @@ class VMCreate(VMBase):
     range_id: UUID
     network_id: UUID
 
-    # Image Library sources (new - preferred)
+    # Image Library sources - exactly one required
     base_image_id: Optional[UUID] = None
     golden_image_id: Optional[UUID] = None
     snapshot_id: Optional[UUID] = None
-    # Deprecated (kept for backward compatibility)
-    template_id: Optional[UUID] = None
 
     @model_validator(mode='after')
     def check_source(self) -> 'VMCreate':
@@ -35,20 +33,17 @@ class VMCreate(VMBase):
             self.base_image_id,
             self.golden_image_id,
             self.snapshot_id,
-            self.template_id,
         ]
         set_count = sum(1 for s in sources if s is not None)
 
         if set_count == 0:
             raise ValueError(
-                "Must provide exactly one of: base_image_id, golden_image_id, "
-                "snapshot_id, or template_id (deprecated)"
+                "Must provide exactly one of: base_image_id, golden_image_id, or snapshot_id"
             )
         if set_count > 1:
             raise ValueError(
                 "Cannot specify multiple image sources. "
-                "Provide exactly one of: base_image_id, golden_image_id, "
-                "snapshot_id, or template_id"
+                "Provide exactly one of: base_image_id, golden_image_id, or snapshot_id"
             )
 
         return self
@@ -137,12 +132,10 @@ class VMResponse(VMBase):
     id: UUID
     range_id: UUID
     network_id: UUID
-    # Image Library sources (new)
+    # Image Library sources
     base_image_id: Optional[UUID] = None
     golden_image_id: Optional[UUID] = None
     snapshot_id: Optional[UUID] = None
-    # Deprecated template reference
-    template_id: Optional[UUID] = None
     status: VMStatus
     error_message: Optional[str] = None
     container_id: Optional[str] = None
