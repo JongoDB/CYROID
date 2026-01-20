@@ -8,6 +8,7 @@ instances using the same blueprint IPs.
 
 import asyncio
 import logging
+import os
 import re
 from typing import List, Optional
 
@@ -168,6 +169,39 @@ class DinDService:
             logger.debug(f"Volume '{volume_name}' already exists")
 
         # Prepare container configuration
+        # Include bind mounts so VMs inside DinD can access host resources
+        # All paths are mounted at the same location inside DinD for consistency
+        # Only mount paths that exist (handles macOS Docker Desktop file sharing limitations)
+        volumes_config = {
+            # Docker storage for the DinD daemon (always required)
+            volume_name: {"bind": "/var/lib/docker", "mode": "rw"},
+        }
+
+        # Optional bind mounts - auto-create directories if they don't exist
+        optional_mounts = [
+            # (host_path, mode, description)
+            (settings.iso_cache_dir, "ro", "ISO cache"),
+            (settings.vm_storage_dir, "rw", "VM storage"),
+            (settings.template_storage_dir, "ro", "Template storage"),
+            (settings.global_shared_dir, "rw", "Global shared folder"),
+        ]
+
+        for host_path, mode, description in optional_mounts:
+            # Auto-create directory if it doesn't exist (cross-platform support)
+            if not os.path.exists(host_path):
+                try:
+                    os.makedirs(host_path, exist_ok=True)
+                    logger.info(f"Created {description} directory: {host_path}")
+                except OSError as e:
+                    logger.warning(f"Cannot create {description} directory {host_path}: {e}")
+                    continue
+
+            if os.path.exists(host_path):
+                volumes_config[host_path] = {"bind": host_path, "mode": mode}
+                logger.debug(f"Mounting {description}: {host_path} ({mode})")
+            else:
+                logger.warning(f"Skipping {description} mount - path does not exist: {host_path}")
+
         container_config = {
             "image": self.dind_image,
             "name": container_name,
@@ -176,7 +210,7 @@ class DinDService:
             "environment": {
                 "DOCKER_TLS_CERTDIR": "",  # Disable TLS for internal communication
             },
-            "volumes": {volume_name: {"bind": "/var/lib/docker", "mode": "rw"}},
+            "volumes": volumes_config,
             "network": self.ranges_network,
             "labels": {
                 "cyroid.range_id": str(range_id),

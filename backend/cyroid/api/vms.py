@@ -744,8 +744,7 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
                     )
 
                 if use_dind:
-                    # Create Windows VM inside DinD with basic configuration
-                    # Note: Volume mounts for storage/ISOs not available in DinD mode
+                    # Create Windows VM inside DinD with dockur/windows
                     windows_env = {
                         "VERSION": windows_version,
                         "DISK_SIZE": f"{vm.disk_gb or 64}G",
@@ -765,8 +764,19 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
                             windows_env["GATEWAY"] = vm.gateway
                         if vm.dns_servers:
                             windows_env["DNS"] = vm.dns_servers
-                    if vm.iso_url:
+
+                    # Volume mounts for ISO
+                    volumes = {}
+
+                    # Priority: local ISO path > ISO URL > version (auto-download)
+                    if iso_path and os.path.exists(iso_path):
+                        # Mount the cached ISO into the container
+                        volumes[iso_path] = {"bind": "/boot.iso", "mode": "ro"}
+                        windows_env["BOOT"] = "/boot.iso"
+                        logger.info(f"Using cached ISO for VM {vm.hostname}: {iso_path}")
+                    elif vm.iso_url:
                         windows_env["BOOT"] = vm.iso_url
+                    # If no ISO specified, dockur/windows will auto-download based on VERSION
 
                     container_id = asyncio.run(docker.create_range_container_dind(
                         range_id=str(vm.range_id),
@@ -780,6 +790,7 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
                         hostname=vm.hostname,
                         labels=labels,
                         environment=windows_env,
+                        volumes=volumes if volumes else None,
                         privileged=True,
                         dns_servers=network.dns_servers,
                         dns_search=network.dns_search,
@@ -850,7 +861,7 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
                         range_id=str(vm.range_id),
                         docker_url=range_obj.dind_docker_url,
                         name=vm.hostname,
-                        image="qemux/qemu-docker",
+                        image="qemux/qemu",
                         network_name=network.name,
                         ip_address=vm.ip_address,
                         cpu_limit=vm.cpu or 2,
@@ -871,6 +882,105 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
                         memory_limit_mb=vm.ram_mb,
                         disk_size_gb=vm.disk_gb,
                         linux_distro="custom",  # Will be overridden by iso_path
+                        labels=labels,
+                        iso_path=iso_path,
+                        storage_path=vm_storage_path,
+                        display_type=vm.display_type or "desktop",
+                        # Extended configuration
+                        disk2_gb=vm.disk2_gb,
+                        disk3_gb=vm.disk3_gb,
+                        # Linux user configuration (cloud-init)
+                        linux_username=vm.linux_username,
+                        linux_password=vm.linux_password,
+                        linux_user_sudo=vm.linux_user_sudo if vm.linux_user_sudo is not None else True,
+                        # Network DNS configuration
+                        gateway=network.gateway,
+                        dns_servers=network.dns_servers,
+                        dns_search=network.dns_search,
+                    )
+            elif vm_type == VMType.LINUX_VM:
+                # Linux VM using qemux/qemu (ISO-based Linux installation)
+                settings = get_settings()
+
+                # Setup VM-specific storage path
+                vm_storage_path = os.path.join(
+                    settings.vm_storage_dir,
+                    str(vm.range_id),
+                    str(vm.id),
+                    "storage"
+                )
+
+                # Get ISO path from VM or base_image
+                iso_path = vm.iso_path
+                if not iso_path and base_image_record and base_image_record.iso_path:
+                    iso_path = base_image_record.iso_path
+
+                # Get linux distro for auto-download (e.g., "kali", "ubuntu", "debian")
+                # Valid qemux/qemu BOOT values: ubuntu, debian, fedora, kali, alpine, etc.
+                VALID_QEMU_DISTROS = {"ubuntu", "debian", "fedora", "kali", "alpine", "mint", "centos", "rocky", "alma", "arch", "manjaro", "opensuse", "suse", "oracle", "rhel", "tinycore"}
+
+                linux_distro = vm.linux_distro
+                if not linux_distro and base_image_record:
+                    # Try to extract distro from ISO path first (more reliable)
+                    if base_image_record.iso_path:
+                        # Extract distro name from path like "/data/cyroid/iso-cache/linux-isos/linux-kali.iso"
+                        iso_filename = os.path.basename(base_image_record.iso_path)
+                        if iso_filename.startswith("linux-"):
+                            linux_distro = iso_filename.replace("linux-", "").replace(".iso", "")
+                    # Fall back to iso_source only if it's a valid distro name
+                    if not linux_distro and base_image_record.iso_source and base_image_record.iso_source.lower() in VALID_QEMU_DISTROS:
+                        linux_distro = base_image_record.iso_source
+
+                if use_dind:
+                    # Create Linux VM inside DinD with qemux/qemu
+                    linux_env = {
+                        "DISK_SIZE": f"{vm.disk_gb or 40}G",
+                        "CPU_CORES": str(vm.cpu or 2),
+                        "RAM_SIZE": f"{vm.ram_mb or 4096}M",
+                        "KVM": "N",  # DinD typically doesn't have KVM access
+                    }
+
+                    # Volume mounts for ISO
+                    volumes = {}
+
+                    # Priority: local ISO path > ISO URL > distro name (auto-download)
+                    if iso_path and os.path.exists(iso_path):
+                        # Mount the cached ISO into the container at /boot.iso
+                        # DinD container has the ISO cache mounted, so path is accessible
+                        volumes[iso_path] = {"bind": "/boot.iso", "mode": "ro"}
+                        linux_env["BOOT"] = "/boot.iso"
+                        logger.info(f"Using cached ISO for VM {vm.hostname}: {iso_path}")
+                    elif vm.iso_url:
+                        linux_env["BOOT"] = vm.iso_url
+                    elif linux_distro:
+                        linux_env["BOOT"] = linux_distro
+
+                    container_id = asyncio.run(docker.create_range_container_dind(
+                        range_id=str(vm.range_id),
+                        docker_url=range_obj.dind_docker_url,
+                        name=vm.hostname,
+                        image="qemux/qemu",
+                        network_name=network.name,
+                        ip_address=vm.ip_address,
+                        cpu_limit=vm.cpu or 2,
+                        memory_limit_mb=vm.ram_mb or 4096,
+                        hostname=vm.hostname,
+                        labels=labels,
+                        environment=linux_env,
+                        volumes=volumes if volumes else None,
+                        privileged=True,
+                        dns_servers=network.dns_servers,
+                        dns_search=network.dns_search,
+                    ))
+                else:
+                    container_id = docker.create_linux_vm_container(
+                        name=f"cyroid-{vm.hostname}-{str(vm.id)[:8]}",
+                        network_id=network.docker_network_id,
+                        ip_address=vm.ip_address,
+                        cpu_limit=vm.cpu,
+                        memory_limit_mb=vm.ram_mb,
+                        disk_size_gb=vm.disk_gb,
+                        linux_distro=linux_distro or "custom",
                         labels=labels,
                         iso_path=iso_path,
                         storage_path=vm_storage_path,
@@ -982,15 +1092,19 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
                 dind_service = get_dind_service()
                 traefik_service = get_traefik_route_service()
 
-                # Determine VNC port based on image type
-                vnc_port = 8006  # Default for QEMU/Windows
-                if os_type == OSType.LINUX or vm_type == VMType.CONTAINER:
+                # Determine VNC port based on VM type and image
+                # QEMU VMs (LINUX_VM, WINDOWS_VM) use port 8006 (noVNC)
+                # Containers use image-specific ports
+                vnc_port = 8006  # Default for QEMU VMs
+                if vm_type == VMType.CONTAINER:
+                    # Container VMs have image-specific VNC ports
                     if "kasmweb" in (image_ref or ""):
-                        vnc_port = 6901
+                        vnc_port = 6901  # KasmVNC (HTTPS)
                     elif "linuxserver/" in (image_ref or "") or "lscr.io/linuxserver" in (image_ref or ""):
-                        vnc_port = 3000
+                        vnc_port = 3000  # LinuxServer webtop (HTTP)
                     else:
-                        vnc_port = 3000  # Default for containers
+                        vnc_port = 3000  # Default for other containers
+                # LINUX_VM and WINDOWS_VM keep default 8006
 
                 vm_ports = [{
                     "vm_id": str(vm.id),

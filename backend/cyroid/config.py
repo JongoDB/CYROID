@@ -1,8 +1,23 @@
 # backend/cyroid/config.py
 import os
+import platform
 import subprocess
 from pydantic_settings import BaseSettings
 from functools import lru_cache
+
+
+def _get_default_data_dir() -> str:
+    """Get platform-appropriate data directory.
+
+    On macOS, use ~/.cyroid for Docker Desktop file sharing compatibility.
+    On Linux, use /data/cyroid for production deployments.
+    """
+    if platform.system() == "Darwin":
+        # macOS - use home directory for Docker Desktop compatibility
+        return os.path.expanduser("~/.cyroid")
+    else:
+        # Linux - use /data/cyroid (production)
+        return "/data/cyroid"
 
 
 def _get_version() -> str:
@@ -66,13 +81,13 @@ class Settings(BaseSettings):
     app_name: str = "CYROID"
     debug: bool = True
 
-    # Image/ISO Cache
-    iso_cache_dir: str = "/data/cyroid/iso-cache"
-    template_storage_dir: str = "/data/cyroid/template-storage"
+    # Image/ISO Cache (platform-aware defaults)
+    iso_cache_dir: str = os.path.join(_get_default_data_dir(), "iso-cache")
+    template_storage_dir: str = os.path.join(_get_default_data_dir(), "template-storage")
 
-    # VM Storage
-    vm_storage_dir: str = "/data/cyroid/vm-storage"
-    global_shared_dir: str = "/data/cyroid/shared"
+    # VM Storage (platform-aware defaults)
+    vm_storage_dir: str = os.path.join(_get_default_data_dir(), "vm-storage")
+    global_shared_dir: str = os.path.join(_get_default_data_dir(), "shared")
 
     # VyOS Router Configuration
     vyos_image: str = "2stacks/vyos:1.2.0-rc11"
