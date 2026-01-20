@@ -54,5 +54,5 @@ class Snapshot(Base, UUIDMixin, TimestampMixin):
     created_vms = relationship(
         "VM",
         back_populates="source_snapshot",
-        foreign_keys="VM.snapshot_id"
+        foreign_keys="[VM.snapshot_id]"
     )
