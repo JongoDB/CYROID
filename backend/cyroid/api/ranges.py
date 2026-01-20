@@ -514,6 +514,128 @@ def deploy_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
     return range_obj
 
 
+@router.post("/{range_id}/sync")
+def sync_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
+    """Sync range configuration - provision new networks/VMs into existing DinD container.
+
+    This endpoint provisions any new resources (networks, VMs) that were added after
+    initial deployment. It does NOT recreate the DinD container - only adds missing
+    resources to the existing environment.
+
+    Use this when:
+    - Range is RUNNING and you've added new networks/VMs
+    - You want to incrementally deploy resources without full redeployment
+
+    For each resource:
+    - Networks without docker_network_id → created in DinD
+    - VMs without container_id → created in DinD
+    """
+    from cyroid.services.range_deployment_service import get_range_deployment_service
+    from cyroid.services.deployment_validator import DeploymentValidator
+    import asyncio
+    import traceback
+
+    range_obj = db.query(Range).filter(Range.id == range_id).first()
+    if not range_obj:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Range not found",
+        )
+
+    # Sync only works on RUNNING ranges with DinD containers
+    if range_obj.status != RangeStatus.RUNNING:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot sync range in {range_obj.status} status. Range must be RUNNING.",
+        )
+
+    if not range_obj.dind_container_id or not range_obj.dind_docker_url:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Range is missing DinD configuration. Please deploy the range first.",
+        )
+
+    # Find unprovisioned resources
+    networks = db.query(Network).filter(Network.range_id == range_id).all()
+    vms = db.query(VM).filter(VM.range_id == range_id).all()
+
+    new_networks = [n for n in networks if not n.docker_network_id]
+    new_vms = [v for v in vms if not v.container_id]
+
+    if not new_networks and not new_vms:
+        return {
+            "status": "no_changes",
+            "message": "All resources already provisioned",
+            "networks_synced": 0,
+            "vms_synced": 0
+        }
+
+    # Validate new VMs before syncing
+    docker = get_docker_service()
+    validator = DeploymentValidator(db, docker)
+    validation_result = asyncio.run(validator.validate_range(range_id))
+
+    # Only fail on new VMs that have validation errors
+    new_vm_ids = {str(v.id) for v in new_vms}
+    new_vm_errors = [e for e in validation_result.errors if e.vm_id in new_vm_ids]
+
+    if new_vm_errors:
+        error_messages = [e.message for e in new_vm_errors]
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "message": "Validation failed for new VMs",
+                "errors": error_messages,
+                "hint": "Ensure all new VMs have cached images or configured golden images."
+            }
+        )
+
+    # Initialize event service
+    event_service = EventService(db)
+    event_service.log_event(
+        range_id=range_id,
+        event_type=EventType.DEPLOYMENT_STARTED,
+        message=f"Syncing range: provisioning {len(new_networks)} networks and {len(new_vms)} VMs",
+        user_id=current_user.id,
+        extra_data=json.dumps({
+            "action": "sync",
+            "new_networks": len(new_networks),
+            "new_vms": len(new_vms)
+        })
+    )
+
+    try:
+        deployment_service = get_range_deployment_service()
+        result = asyncio.run(deployment_service.sync_range(db, range_id))
+
+        logger.info(f"Range sync completed for {range_id}: {result}")
+
+        return {
+            "status": "synced",
+            "message": f"Synced {result.get('networks_created', 0)} networks and {result.get('vms_created', 0)} VMs",
+            "networks_synced": result.get("networks_created", 0),
+            "vms_synced": result.get("vms_created", 0),
+            "details": result
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to sync range {range_id}: {type(e).__name__}: {e}")
+        logger.error(f"Full traceback:\n{traceback.format_exc()}")
+
+        event_service.log_event(
+            range_id=range_id,
+            event_type=EventType.DEPLOYMENT_FAILED,
+            message=f"Sync failed: {str(e)[:200]}",
+            user_id=current_user.id,
+            extra_data=json.dumps({"error": str(e)})
+        )
+
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to sync range: {str(e)}",
+        )
+
+
 @router.post("/{range_id}/start", response_model=RangeResponse)
 def start_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
     """Start all VMs and router in a stopped range.

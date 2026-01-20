@@ -195,6 +195,21 @@ export interface RangeCreate {
   description?: string
 }
 
+export interface SyncRangeResponse {
+  status: 'synced' | 'no_changes'
+  message: string
+  networks_synced: number
+  vms_synced: number
+  details?: {
+    range_id: string
+    networks_created: number
+    vms_created: number
+    images_pulled: number
+    network_details: Array<{ name: string; subnet: string; docker_id: string }>
+    vm_details: Array<{ hostname: string; container_id: string; vnc_port: number }>
+  }
+}
+
 import type {
   ExportRequest,
   ExportJobStatus,
@@ -213,6 +228,7 @@ export const rangesApi = {
   start: (id: string) => api.post<Range>(`/ranges/${id}/start`),
   stop: (id: string) => api.post<Range>(`/ranges/${id}/stop`),
   teardown: (id: string) => api.post<Range>(`/ranges/${id}/teardown`),
+  sync: (id: string) => api.post<SyncRangeResponse>(`/ranges/${id}/sync`),
   getDeploymentStatus: (rangeId: string) =>
     api.get<DeploymentStatusResponse>(`/ranges/${rangeId}/deployment-status`),
 

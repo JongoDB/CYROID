@@ -435,6 +435,35 @@ export default function RangeDetail() {
     }
   }
 
+  const handleSync = async () => {
+    if (!id) return
+    try {
+      const response = await rangesApi.sync(id)
+      const result = response.data
+      if (result.status === 'no_changes') {
+        alert('All resources already provisioned')
+      } else {
+        alert(`Synced ${result.networks_synced} networks and ${result.vms_synced} VMs`)
+      }
+      fetchData()
+    } catch (err: any) {
+      const detail = err.response?.data?.detail
+      if (detail && typeof detail === 'object' && detail.errors) {
+        const errorList = detail.errors.map((e: string) => `• ${e}`).join('\n')
+        alert(`${detail.message || 'Sync validation failed'}\n\n${errorList}\n\n${detail.hint || ''}`)
+      } else {
+        alert(typeof detail === 'string' ? detail : 'Failed to sync range')
+      }
+    }
+  }
+
+  // Check if there are unprovisioned resources that need sync
+  const hasUnprovisionedResources = useMemo(() => {
+    const unprovisionedNetworks = networks.filter(n => !n.docker_network_id).length
+    const unprovisionedVms = vms.filter(v => !v.container_id).length
+    return unprovisionedNetworks > 0 || unprovisionedVms > 0
+  }, [networks, vms])
+
   // Scenario handlers
   const handleScenarioSelect = (scenario: Scenario) => {
     setSelectedScenario(scenario)
@@ -893,6 +922,16 @@ export default function RangeDetail() {
                   <Square className="h-4 w-4 mr-1" />
                   Stop
                 </button>
+                {hasUnprovisionedResources && (
+                  <button
+                    onClick={handleSync}
+                    className="inline-flex items-center px-3 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-green-600 hover:bg-green-700"
+                    title="Provision new networks and VMs to the running range"
+                  >
+                    <RotateCw className="h-4 w-4 mr-1" />
+                    Sync
+                  </button>
+                )}
               </>
             )}
             {/* Export button - available in any status */}

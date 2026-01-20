@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from cyroid.config import get_settings
 from cyroid.models import Range, Network, VM, RangeStatus
+from cyroid.models.vm import VMStatus
 from cyroid.models.template import VMType
 from cyroid.models.base_image import BaseImage
 from cyroid.models.golden_image import GoldenImage
@@ -396,6 +397,243 @@ class RangeDeploymentService:
             "range_id": range_id_str,
             "status": "destroyed",
         }
+
+    async def sync_range(
+        self,
+        db: Session,
+        range_id: UUID,
+    ) -> Dict[str, Any]:
+        """
+        Sync new networks and VMs to an existing deployed range.
+
+        This provisions resources that were added after initial deployment:
+        - Networks without docker_network_id → created in DinD
+        - VMs without container_id → created in DinD
+
+        Does NOT recreate the DinD container.
+        """
+        range_obj = db.query(Range).filter(Range.id == range_id).first()
+        if not range_obj:
+            raise ValueError(f"Range {range_id} not found")
+
+        if not range_obj.dind_container_id or not range_obj.dind_docker_url:
+            raise ValueError(f"Range {range_id} is not deployed (missing DinD container)")
+
+        range_id_str = str(range_id)
+        docker_url = range_obj.dind_docker_url
+
+        logger.info(f"Syncing range {range_id_str} - provisioning new resources to DinD")
+
+        result = {
+            "range_id": range_id_str,
+            "networks_created": 0,
+            "vms_created": 0,
+            "images_pulled": 0,
+            "network_details": [],
+            "vm_details": [],
+        }
+
+        # 1. Create any new networks
+        networks = db.query(Network).filter(Network.range_id == range_id).all()
+        new_networks = [n for n in networks if not n.docker_network_id]
+
+        for network in new_networks:
+            logger.info(f"Creating network {network.name} in DinD")
+            labels = {
+                "cyroid.range_id": range_id_str,
+                "cyroid.network_id": str(network.id),
+            }
+
+            network_docker_id = await self.docker_service.create_range_network_dind(
+                range_id=range_id_str,
+                docker_url=docker_url,
+                name=network.name,
+                subnet=network.subnet,
+                gateway=network.gateway,
+                internal=network.is_isolated,
+                labels=labels,
+            )
+
+            network.docker_network_id = network_docker_id
+            result["networks_created"] += 1
+            result["network_details"].append({
+                "name": network.name,
+                "subnet": network.subnet,
+                "docker_id": network_docker_id[:12],
+            })
+
+        db.commit()
+
+        # Update iptables if we added networks
+        if new_networks:
+            network_names = [n.name for n in networks]
+            allow_internet = [n.name for n in networks if n.internet_enabled]
+            await self.dind_service.setup_network_isolation_in_dind(
+                range_id=range_id_str,
+                docker_url=docker_url,
+                networks=network_names,
+                allow_internet=allow_internet,
+            )
+
+        # 2. Pull images for new VMs
+        vms = db.query(VM).filter(VM.range_id == range_id).all()
+        new_vms = [v for v in vms if not v.container_id]
+
+        # Collect unique images needed for new VMs
+        unique_images = set()
+        for vm in new_vms:
+            if vm.base_image_id:
+                base_img = db.query(BaseImage).filter(BaseImage.id == vm.base_image_id).first()
+                if base_img and base_img.image_type == "container":
+                    image_tag = base_img.docker_image_tag or base_img.docker_image_id
+                    if image_tag:
+                        unique_images.add(image_tag)
+            elif vm.golden_image_id:
+                golden_img = db.query(GoldenImage).filter(GoldenImage.id == vm.golden_image_id).first()
+                if golden_img:
+                    image_tag = golden_img.docker_image_tag or golden_img.docker_image_id
+                    if image_tag:
+                        unique_images.add(image_tag)
+            elif vm.snapshot_id:
+                snapshot = db.query(Snapshot).filter(Snapshot.id == vm.snapshot_id).first()
+                if snapshot:
+                    image_tag = snapshot.docker_image_tag or snapshot.docker_image_id
+                    if image_tag:
+                        unique_images.add(image_tag)
+
+        # Pull images into DinD
+        for image in unique_images:
+            logger.info(f"Pulling image {image} into DinD for sync")
+            await self.docker_service.pull_image_to_dind(range_id_str, docker_url, image)
+            result["images_pulled"] += 1
+
+        # 3. Create new VMs
+        created_vms = []  # Track successfully created VMs for VNC setup
+
+        for vm in new_vms:
+            logger.info(f"Creating VM {vm.hostname} in DinD")
+            try:
+                # Get image tag
+                image_tag = None
+                vm_type = None
+                if vm.base_image_id:
+                    base_img = db.query(BaseImage).filter(BaseImage.id == vm.base_image_id).first()
+                    if base_img:
+                        image_tag = base_img.docker_image_tag or base_img.docker_image_id
+                        vm_type = base_img.vm_type
+                elif vm.golden_image_id:
+                    golden_img = db.query(GoldenImage).filter(GoldenImage.id == vm.golden_image_id).first()
+                    if golden_img:
+                        image_tag = golden_img.docker_image_tag or golden_img.docker_image_id
+                        vm_type = golden_img.vm_type
+                elif vm.snapshot_id:
+                    snapshot = db.query(Snapshot).filter(Snapshot.id == vm.snapshot_id).first()
+                    if snapshot:
+                        image_tag = snapshot.docker_image_tag or snapshot.docker_image_id
+                        vm_type = snapshot.vm_type
+
+                if not image_tag:
+                    logger.warning(f"No image found for VM {vm.hostname}, skipping")
+                    vm.status = VMStatus.ERROR
+                    vm.error_message = "No image configured"
+                    continue
+
+                # Get network
+                vm_network = db.query(Network).filter(Network.id == vm.network_id).first()
+                if not vm_network or not vm_network.docker_network_id:
+                    logger.warning(f"Network not provisioned for VM {vm.hostname}, skipping")
+                    vm.status = VMStatus.ERROR
+                    vm.error_message = "Network not provisioned"
+                    continue
+
+                labels = {
+                    "cyroid.range_id": range_id_str,
+                    "cyroid.vm_id": str(vm.id),
+                }
+
+                # Create container (same pattern as deploy_range)
+                container_id = await self.docker_service.create_range_container_dind(
+                    range_id=range_id_str,
+                    docker_url=docker_url,
+                    name=vm.hostname,
+                    image=image_tag,
+                    network_name=vm_network.name,
+                    ip_address=vm.ip_address,
+                    cpu_limit=vm.cpu or 2,
+                    memory_limit_mb=vm.ram_mb or 2048,
+                    hostname=vm.hostname,
+                    labels=labels,
+                    dns_servers=vm_network.dns_servers,
+                    dns_search=vm_network.dns_search,
+                )
+
+                vm.container_id = container_id
+
+                # Start the container
+                await self.docker_service.start_range_container_dind(
+                    range_id=range_id_str,
+                    docker_url=docker_url,
+                    container_id=container_id,
+                )
+
+                vm.status = VMStatus.RUNNING
+
+                # Determine VNC port based on image type
+                vnc_port = 8006  # Default for QEMU/Windows
+                if vm_type == "container" or vm_type == VMType.CONTAINER:
+                    if "kasmweb" in image_tag:
+                        vnc_port = 6901
+                    elif "linuxserver/" in image_tag or "lscr.io/linuxserver" in image_tag:
+                        vnc_port = 3000
+                    else:
+                        vnc_port = 6901  # Default for containers
+
+                created_vms.append({
+                    "vm_id": str(vm.id),
+                    "hostname": vm.hostname,
+                    "vnc_port": vnc_port,
+                    "ip_address": vm.ip_address,
+                    "container_id": container_id,
+                })
+
+                result["vms_created"] += 1
+                result["vm_details"].append({
+                    "hostname": vm.hostname,
+                    "container_id": container_id[:12],
+                    "vnc_port": vnc_port,
+                })
+
+            except Exception as e:
+                logger.error(f"Failed to create VM {vm.hostname}: {e}")
+                vm.status = VMStatus.ERROR
+                vm.error_message = str(e)[:500]
+
+        db.commit()
+
+        # 4. Set up VNC port forwarding for newly created VMs
+        if created_vms:
+            traefik_service = get_traefik_route_service()
+            try:
+                port_mappings = await self.dind_service.setup_vnc_port_forwarding(
+                    range_id=range_id_str,
+                    vm_ports=created_vms,
+                )
+                # Merge new port mappings with existing ones
+                existing_mappings = range_obj.vnc_proxy_mappings or {}
+                existing_mappings.update(port_mappings)
+                range_obj.vnc_proxy_mappings = existing_mappings
+                db.commit()
+
+                # Generate Traefik routes for VNC console access
+                route_file = traefik_service.generate_vnc_routes(range_id_str, existing_mappings)
+                if route_file:
+                    logger.info(f"Updated Traefik VNC routes for range {range_id_str}")
+            except Exception as e:
+                logger.error(f"Failed to set up VNC forwarding for synced VMs: {e}")
+
+        logger.info(f"Sync complete for range {range_id_str}: {result['networks_created']} networks, {result['vms_created']} VMs")
+
+        return result
 
     async def get_range_status(
         self,
