@@ -32,6 +32,53 @@ class DinDService:
         self.host_client = docker.from_env()
         self._range_clients: dict[str, docker.DockerClient] = {}
 
+    def _sanitize_name(self, name: str) -> str:
+        """
+        Sanitize a name for use in Docker container names.
+
+        Converts to lowercase, replaces spaces/special chars with hyphens,
+        and removes any invalid characters.
+        """
+        # Replace spaces and underscores with hyphens
+        sanitized = re.sub(r'[\s_]+', '-', name)
+        # Remove any characters that aren't alphanumeric or hyphens
+        sanitized = re.sub(r'[^a-zA-Z0-9-]', '', sanitized)
+        # Remove consecutive hyphens
+        sanitized = re.sub(r'-+', '-', sanitized)
+        # Remove leading/trailing hyphens
+        sanitized = sanitized.strip('-')
+        # Limit length to 40 chars to leave room for prefix and suffix
+        return sanitized[:40] if sanitized else "range"
+
+    def _get_container_name(self, range_id: str, range_name: Optional[str] = None) -> str:
+        """
+        Get the DinD container name for a range.
+
+        Format: cyroid-range-{sanitized_name}-{first 8 of uuid}
+        Example: cyroid-range-E2E-Test-Fresh-6f372ca8
+        """
+        short_id = str(range_id).replace("-", "")[:8]
+        if range_name:
+            sanitized = self._sanitize_name(range_name)
+            return f"cyroid-range-{sanitized}-{short_id}"
+        return f"cyroid-range-{short_id}"
+
+    def _find_container_by_range_id(self, range_id: str):
+        """
+        Find a DinD container by its range_id label.
+
+        Returns the container object or None if not found.
+        """
+        try:
+            containers = self.host_client.containers.list(
+                all=True,
+                filters={"label": f"cyroid.range_id={range_id}"}
+            )
+            return containers[0] if containers else None
+        except Exception as e:
+            logger.error(f"Error finding container for range {range_id}: {e}")
+            return None
+
     @property
     def dind_image(self) -> str:
         """Get configured DinD image."""
@@ -84,6 +131,7 @@ class DinDService:
     async def create_range_container(
         self,
         range_id: str,
+        range_name: Optional[str] = None,
         memory_limit: Optional[str] = None,
         cpu_limit: Optional[float] = None,
     ) -> dict:
@@ -92,6 +140,7 @@ class DinDService:
 
         Args:
             range_id: Unique identifier for the range (UUID string)
+            range_name: Human-readable range name (used in container naming)
             memory_limit: Memory limit (e.g., "8g", "4096m")
             cpu_limit: CPU limit as float (e.g., 4.0 for 4 cores)
 
@@ -102,9 +151,9 @@ class DinDService:
         await self.ensure_dind_image()
         await self.ensure_ranges_network()
 
-        # Use first 12 chars of range_id for container name
-        short_id = str(range_id).replace("-", "")[:12]
-        container_name = f"cyroid-range-{short_id}"
+        # Generate container name: cyroid-range-{name}-{short_id}
+        container_name = self._get_container_name(range_id, range_name)
+        short_id = str(range_id).replace("-", "")[:8]
         volume_name = f"cyroid-range-{short_id}-docker"
 
         logger.info(f"Creating DinD container '{container_name}' for range {range_id}")
@@ -180,25 +229,28 @@ class DinDService:
 
     async def delete_range_container(self, range_id: str) -> None:
         """Delete DinD container and associated resources."""
-        short_id = str(range_id).replace("-", "")[:12]
-        container_name = f"cyroid-range-{short_id}"
+        short_id = str(range_id).replace("-", "")[:8]
         volume_name = f"cyroid-range-{short_id}-docker"
 
-        logger.info(f"Deleting DinD container '{container_name}' for range {range_id}")
+        logger.info(f"Deleting DinD container for range {range_id}")
 
         # Close cached client if exists
         self.close_range_client(range_id)
 
+        # Find container by label (handles both old and new naming formats)
+        container = self._find_container_by_range_id(range_id)
+
         # Stop and remove container
-        try:
-            container = self.host_client.containers.get(container_name)
-            container.stop(timeout=10)
-            container.remove(force=True)
-            logger.info(f"Deleted DinD container: {container_name}")
-        except NotFound:
-            logger.warning(f"Container not found: {container_name}")
-        except Exception as e:
-            logger.error(f"Error deleting container {container_name}: {e}")
+        if container:
+            container_name = container.name
+            try:
+                container.stop(timeout=10)
+                container.remove(force=True)
+                logger.info(f"Deleted DinD container: {container_name}")
+            except Exception as e:
+                logger.error(f"Error deleting container {container_name}: {e}")
+        else:
+            logger.warning(f"No DinD container found for range {range_id}")
 
         # Remove volume
         try:
@@ -212,11 +264,12 @@ class DinDService:
 
     async def get_container_info(self, range_id: str) -> Optional[dict]:
         """Get DinD container status and network info."""
-        short_id = str(range_id).replace("-", "")[:12]
-        container_name = f"cyroid-range-{short_id}"
+        # Find container by label (handles both old and new naming formats)
+        container = self._find_container_by_range_id(range_id)
+        if not container:
+            return None
 
         try:
-            container = self.host_client.containers.get(container_name)
             container.reload()
 
             networks = container.attrs["NetworkSettings"]["Networks"]
@@ -301,17 +354,17 @@ class DinDService:
         Returns:
             tuple of (exit_code, output)
         """
-        short_id = str(range_id).replace("-", "")[:12]
-        container_name = f"cyroid-range-{short_id}"
+        container = self._find_container_by_range_id(range_id)
+        if not container:
+            raise ValueError(f"DinD container not found for range {range_id}")
 
         try:
-            container = self.host_client.containers.get(container_name)
             result = container.exec_run(command, demux=True)
             stdout = result.output[0].decode() if result.output[0] else ""
             stderr = result.output[1].decode() if result.output[1] else ""
             return result.exit_code, stdout + stderr
         except Exception as e:
-            logger.error(f"Error executing command in {container_name}: {e}")
+            logger.error(f"Error executing command in {container.name}: {e}")
             raise
 
     async def list_range_containers(self) -> list[dict]:
@@ -340,80 +393,66 @@ class DinDService:
 
     async def start_range_container(self, range_id: str) -> dict:
         """Start a stopped DinD container."""
-        short_id = str(range_id).replace("-", "")[:12]
-        container_name = f"cyroid-range-{short_id}"
-
-        try:
-            container = self.host_client.containers.get(container_name)
-            container.start()
-            container.reload()
-
-            networks = container.attrs["NetworkSettings"]["Networks"]
-            mgmt_ip = networks.get(self.ranges_network, {}).get("IPAddress")
-            docker_url = f"tcp://{mgmt_ip}:{self.dind_docker_port}" if mgmt_ip else None
-
-            if docker_url:
-                await self._wait_for_docker_ready(docker_url)
-
-            return {
-                "container_name": container_name,
-                "container_id": container.id,
-                "status": container.status,
-                "mgmt_ip": mgmt_ip,
-                "docker_url": docker_url,
-            }
-        except NotFound:
+        container = self._find_container_by_range_id(range_id)
+        if not container:
             raise ValueError(f"DinD container not found for range {range_id}")
+
+        container.start()
+        container.reload()
+
+        networks = container.attrs["NetworkSettings"]["Networks"]
+        mgmt_ip = networks.get(self.ranges_network, {}).get("IPAddress")
+        docker_url = f"tcp://{mgmt_ip}:{self.dind_docker_port}" if mgmt_ip else None
+
+        if docker_url:
+            await self._wait_for_docker_ready(docker_url)
+
+        return {
+            "container_name": container.name,
+            "container_id": container.id,
+            "status": container.status,
+            "mgmt_ip": mgmt_ip,
+            "docker_url": docker_url,
+        }
 
     async def stop_range_container(self, range_id: str, timeout: int = 10) -> None:
         """Stop a running DinD container (keeps data)."""
-        short_id = str(range_id).replace("-", "")[:12]
-        container_name = f"cyroid-range-{short_id}"
-
         # Close cached client
         self.close_range_client(range_id)
 
-        try:
-            container = self.host_client.containers.get(container_name)
+        container = self._find_container_by_range_id(range_id)
+        if container:
             container.stop(timeout=timeout)
-            logger.info(f"Stopped DinD container: {container_name}")
-        except NotFound:
-            logger.warning(f"Container not found: {container_name}")
+            logger.info(f"Stopped DinD container: {container.name}")
+        else:
+            logger.warning(f"No DinD container found for range {range_id}")
 
     async def restart_range_container(self, range_id: str, timeout: int = 10) -> dict:
         """Restart a DinD container."""
-        short_id = str(range_id).replace("-", "")[:12]
-        container_name = f"cyroid-range-{short_id}"
-
         # Close cached client (will be recreated on next use)
         self.close_range_client(range_id)
 
-        try:
-            container = self.host_client.containers.get(container_name)
-            container.restart(timeout=timeout)
-            container.reload()
-
-            networks = container.attrs["NetworkSettings"]["Networks"]
-            mgmt_ip = networks.get(self.ranges_network, {}).get("IPAddress")
-            docker_url = f"tcp://{mgmt_ip}:{self.dind_docker_port}" if mgmt_ip else None
-
-            if docker_url:
-                await self._wait_for_docker_ready(docker_url)
-
-            return {
-                "container_name": container_name,
-                "container_id": container.id,
-                "status": container.status,
-                "mgmt_ip": mgmt_ip,
-                "docker_url": docker_url,
-            }
-        except NotFound:
+        container = self._find_container_by_range_id(range_id)
+        if not container:
             raise ValueError(f"DinD container not found for range {range_id}")
 
-    def _get_container_name(self, range_id: str) -> str:
-        """Get the DinD container name for a range."""
-        short_id = str(range_id).replace("-", "")[:12]
-        return f"cyroid-range-{short_id}"
+        container.restart(timeout=timeout)
+        container.reload()
+
+        networks = container.attrs["NetworkSettings"]["Networks"]
+        mgmt_ip = networks.get(self.ranges_network, {}).get("IPAddress")
+        docker_url = f"tcp://{mgmt_ip}:{self.dind_docker_port}" if mgmt_ip else None
+
+        if docker_url:
+            await self._wait_for_docker_ready(docker_url)
+
+        return {
+            "container_name": container.name,
+            "container_id": container.id,
+            "status": container.status,
+            "mgmt_ip": mgmt_ip,
+            "docker_url": docker_url,
+        }
 
     def _validate_network_name(self, name: str) -> bool:
         """

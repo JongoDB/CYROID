@@ -133,6 +133,7 @@ class RangeDeploymentService:
         # 1. Create DinD container
         dind_info = await self.dind_service.create_range_container(
             range_id=range_id,
+            range_name=range_obj.name,
             memory_limit=memory_limit,
             cpu_limit=cpu_limit,
         )
