@@ -660,7 +660,7 @@ export const walkthroughApi = {
 }
 
 // Snapshots API (for creating snapshots from VMs)
-import type { Snapshot, BaseImage, GoldenImageLibrary, SnapshotWithLineage, LibraryImage, LibraryStats } from '../types'
+import type { Snapshot, BaseImage, GoldenImageLibrary, SnapshotWithLineage, LibraryImage, LibraryStats, SyncResult } from '../types'
 
 export interface SnapshotCreate {
   vm_id: string
@@ -816,6 +816,10 @@ export const imagesApi = {
   // Library Snapshots (global snapshots only)
   listLibrarySnapshots: (params?: { os_type?: string }) =>
     api.get<SnapshotWithLineage[]>('/images/snapshots', { params }),
+
+  // Sync from Cache - creates BaseImage records for cached images/ISOs
+  syncFromCache: () =>
+    api.post<SyncResult>('/images/sync-from-cache'),
 }
 
 // ============ Blueprint Types ============

@@ -32,6 +32,195 @@ router = APIRouter(prefix="/images", tags=["Image Library"])
 
 
 # ============================================================================
+# Sync from Cache
+# ============================================================================
+
+class SyncResult(BaseModel):
+    """Result of syncing cache to library."""
+    docker_images_synced: int
+    windows_isos_synced: int
+    linux_isos_synced: int
+    custom_isos_synced: int
+    total_synced: int
+
+
+@router.post("/sync-from-cache", response_model=SyncResult)
+def sync_from_cache(
+    db: DBSession,
+    current_user: CurrentUser,
+):
+    """
+    Sync cached images to the Image Library.
+
+    Creates BaseImage records for all cached Docker images and ISOs
+    that don't already have corresponding records.
+    """
+    from cyroid.services.docker_service import get_docker_service
+    from cyroid.config import get_settings
+    import os
+
+    docker = get_docker_service()
+    settings = get_settings()
+
+    docker_synced = 0
+    windows_synced = 0
+    linux_synced = 0
+    custom_synced = 0
+
+    # Sync Docker images
+    cached_images = docker.list_cached_images()
+    for img in cached_images:
+        image_tag = img.get("tag") or img.get("name")
+        if not image_tag:
+            continue
+
+        # Check if BaseImage already exists
+        existing = db.query(BaseImage).filter(
+            BaseImage.docker_image_tag == image_tag
+        ).first()
+
+        if not existing:
+            # Parse image name for metadata
+            image_name = image_tag.split("/")[-1].split(":")[0]
+
+            # Determine OS type from image name
+            os_type = "linux"  # default
+            if "windows" in image_tag.lower():
+                os_type = "windows"
+            elif any(net in image_tag.lower() for net in ["openwrt", "vyos", "pfsense", "opnsense"]):
+                os_type = "network"
+
+            base_image = BaseImage(
+                name=image_name,
+                description=f"Container image: {image_tag}",
+                image_type="container",
+                docker_image_id=img.get("id"),
+                docker_image_tag=image_tag,
+                os_type=os_type,
+                vm_type="container",
+                native_arch=img.get("architecture", "amd64"),
+                default_cpu=2,
+                default_ram_mb=2048,
+                default_disk_gb=20,
+                size_bytes=img.get("size_bytes"),
+                is_global=True,
+            )
+            db.add(base_image)
+            docker_synced += 1
+
+    # Sync Windows ISOs
+    iso_cache = docker.get_windows_iso_cache_status()
+    for iso in iso_cache.get("isos", []):
+        iso_path = iso.get("path")
+        if not iso_path:
+            continue
+
+        # Check if BaseImage already exists for this ISO path
+        existing = db.query(BaseImage).filter(
+            BaseImage.iso_path == iso_path
+        ).first()
+
+        if not existing:
+            version = iso.get("version", "Unknown")
+            base_image = BaseImage(
+                name=f"Windows {version}",
+                description=f"Windows ISO: {iso.get('name', version)}",
+                image_type="iso",
+                iso_path=iso_path,
+                iso_source="windows",
+                iso_version=version,
+                os_type="windows",
+                vm_type="windows_vm",
+                native_arch="x86_64",
+                default_cpu=2,
+                default_ram_mb=4096,
+                default_disk_gb=64,
+                size_bytes=iso.get("size_bytes"),
+                is_global=True,
+            )
+            db.add(base_image)
+            windows_synced += 1
+
+    # Sync Linux ISOs
+    linux_iso_dir = getattr(settings, 'linux_iso_cache_dir', None) or os.path.join(settings.iso_cache_dir, 'linux')
+    if os.path.exists(linux_iso_dir):
+        for filename in os.listdir(linux_iso_dir):
+            if filename.endswith('.iso'):
+                iso_path = os.path.join(linux_iso_dir, filename)
+
+                # Check if BaseImage already exists
+                existing = db.query(BaseImage).filter(
+                    BaseImage.iso_path == iso_path
+                ).first()
+
+                if not existing:
+                    # Extract name from filename
+                    name = filename.replace('.iso', '').replace('-', ' ').replace('_', ' ')
+                    base_image = BaseImage(
+                        name=name,
+                        description=f"Linux ISO: {filename}",
+                        image_type="iso",
+                        iso_path=iso_path,
+                        iso_source="linux",
+                        os_type="linux",
+                        vm_type="linux_vm",
+                        native_arch="x86_64",
+                        default_cpu=2,
+                        default_ram_mb=2048,
+                        default_disk_gb=20,
+                        size_bytes=os.path.getsize(iso_path),
+                        is_global=True,
+                    )
+                    db.add(base_image)
+                    linux_synced += 1
+
+    # Sync Custom ISOs
+    custom_iso_dir = getattr(settings, 'custom_iso_cache_dir', None) or os.path.join(settings.iso_cache_dir, 'custom')
+    if os.path.exists(custom_iso_dir):
+        for filename in os.listdir(custom_iso_dir):
+            if filename.endswith('.iso'):
+                iso_path = os.path.join(custom_iso_dir, filename)
+
+                # Check if BaseImage already exists
+                existing = db.query(BaseImage).filter(
+                    BaseImage.iso_path == iso_path
+                ).first()
+
+                if not existing:
+                    name = filename.replace('.iso', '').replace('-', ' ').replace('_', ' ')
+                    base_image = BaseImage(
+                        name=name,
+                        description=f"Custom ISO: {filename}",
+                        image_type="iso",
+                        iso_path=iso_path,
+                        iso_source="custom",
+                        os_type="custom",
+                        vm_type="linux_vm",  # Default, can be updated
+                        native_arch="x86_64",
+                        default_cpu=2,
+                        default_ram_mb=2048,
+                        default_disk_gb=20,
+                        size_bytes=os.path.getsize(iso_path),
+                        is_global=True,
+                    )
+                    db.add(base_image)
+                    custom_synced += 1
+
+    db.commit()
+
+    total = docker_synced + windows_synced + linux_synced + custom_synced
+    logger.info(f"Synced {total} images from cache to library")
+
+    return SyncResult(
+        docker_images_synced=docker_synced,
+        windows_isos_synced=windows_synced,
+        linux_isos_synced=linux_synced,
+        custom_isos_synced=custom_synced,
+        total_synced=total,
+    )
+
+
+# ============================================================================
 # Library Statistics
 # ============================================================================
 

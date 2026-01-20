@@ -60,6 +60,9 @@ export default function VMLibrary() {
     isLoading: boolean
   }>({ type: null, item: null, isLoading: false })
 
+  // Sync state
+  const [syncing, setSyncing] = useState(false)
+
   const fetchStats = async () => {
     try {
       const response = await imagesApi.getLibraryStats()
@@ -96,8 +99,26 @@ export default function VMLibrary() {
     }
   }
 
-  const fetchAll = async () => {
+  const syncFromCache = async () => {
+    setSyncing(true)
+    try {
+      const response = await imagesApi.syncFromCache()
+      if (response.data.total_synced > 0) {
+        toast.success(`Synced ${response.data.total_synced} image(s) from cache`)
+      }
+    } catch (err) {
+      console.error('Failed to sync from cache:', err)
+    } finally {
+      setSyncing(false)
+    }
+  }
+
+  const fetchAll = async (doSync = true) => {
     setLoading(true)
+    // First sync cached images to library
+    if (doSync) {
+      await syncFromCache()
+    }
     await Promise.all([fetchStats(), fetchBaseImages(), fetchGoldenImages(), fetchSnapshots()])
     setLoading(false)
   }
@@ -232,8 +253,16 @@ export default function VMLibrary() {
           <Database className="mx-auto h-12 w-12 text-gray-400" />
           <h3 className="mt-4 text-lg font-medium text-gray-900">No Base Images</h3>
           <p className="mt-2 text-sm text-gray-500 max-w-md mx-auto">
-            Base images are automatically created when you pull Docker images or download ISOs from the Image Cache.
+            Base images include pulled Docker containers and downloaded ISOs. They serve as the foundation for creating VMs.
           </p>
+          <div className="mt-4 bg-gray-50 rounded-lg p-4 max-w-lg mx-auto text-left">
+            <h4 className="text-sm font-medium text-gray-700 mb-2">To add Base Images:</h4>
+            <ul className="text-sm text-gray-600 list-disc list-inside space-y-1">
+              <li>Pull Docker images from the <strong>Image Cache</strong></li>
+              <li>Download Windows or Linux ISOs</li>
+              <li>Upload custom ISO files</li>
+            </ul>
+          </div>
           <div className="mt-6">
             <Link
               to="/cache"
@@ -276,8 +305,21 @@ export default function VMLibrary() {
                 </div>
               </div>
 
+              {/* Source info (Docker tag or ISO version) */}
+              {image.docker_image_tag && (
+                <p className="mt-2 text-xs text-gray-500 font-mono truncate" title={image.docker_image_tag}>
+                  {image.docker_image_tag}
+                </p>
+              )}
+              {image.iso_source && (
+                <p className="mt-2 text-xs text-gray-500">
+                  {image.iso_source.charAt(0).toUpperCase() + image.iso_source.slice(1)} ISO
+                  {image.iso_version && ` (${image.iso_version})`}
+                </p>
+              )}
+
               {image.description && (
-                <p className="mt-3 text-sm text-gray-600 line-clamp-2">{image.description}</p>
+                <p className="mt-2 text-sm text-gray-600 line-clamp-2">{image.description}</p>
               )}
 
               <div className="mt-4 text-xs text-gray-500 space-y-1">
@@ -757,13 +799,17 @@ export default function VMLibrary() {
             </button>
           </div>
 
-          {/* Refresh */}
+          {/* Refresh & Sync */}
           <button
-            onClick={fetchAll}
-            className="p-2 text-gray-400 hover:text-gray-600"
-            title="Refresh"
+            onClick={() => fetchAll(true)}
+            disabled={syncing || loading}
+            className={clsx(
+              "p-2 text-gray-400 hover:text-gray-600 disabled:opacity-50",
+              (syncing || loading) && "animate-pulse"
+            )}
+            title={syncing ? "Syncing from cache..." : "Refresh & sync from cache"}
           >
-            <RefreshCw className="h-5 w-5" />
+            <RefreshCw className={clsx("h-5 w-5", (syncing || loading) && "animate-spin")} />
           </button>
 
           {/* Import button (Golden Images tab only) */}

@@ -991,6 +991,17 @@ export interface LibraryStats {
 }
 
 /**
+ * Result of syncing cache to Image Library.
+ */
+export interface SyncResult {
+  docker_images_synced: number
+  windows_isos_synced: number
+  linux_isos_synced: number
+  custom_isos_synced: number
+  total_synced: number
+}
+
+/**
  * VM Create with Image Library sources.
  * Exactly one source must be provided.
  */
