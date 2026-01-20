@@ -12,7 +12,10 @@ from cyroid.database import get_session_local
 from cyroid.models.range import Range, RangeStatus
 from cyroid.models.network import Network
 from cyroid.models.vm import VM, VMStatus
-from cyroid.models.template import VMTemplate, VMType
+from cyroid.models.template import VMType
+from cyroid.models.base_image import BaseImage
+from cyroid.models.golden_image import GoldenImage
+from cyroid.models.snapshot import Snapshot
 from cyroid.models.router import RangeRouter, RouterStatus
 from cyroid.config import get_settings
 
@@ -210,10 +213,30 @@ def deploy_range_task_legacy(range_id: str):
                     docker.start_container(vm.container_id)
                 else:
                     network = db.query(Network).filter(Network.id == vm.network_id).first()
-                    template = db.query(VMTemplate).filter(VMTemplate.id == vm.template_id).first()
+                    # Load image sources (base_image, golden_image, or snapshot)
+                    base_img = db.query(BaseImage).filter(BaseImage.id == vm.base_image_id).first() if vm.base_image_id else None
+                    golden_img = db.query(GoldenImage).filter(GoldenImage.id == vm.golden_image_id).first() if vm.golden_image_id else None
+                    snapshot = db.query(Snapshot).filter(Snapshot.id == vm.snapshot_id).first() if vm.snapshot_id else None
 
                     if not network or not network.docker_network_id:
                         logger.warning(f"Skipping VM {vm.id}: network not provisioned")
+                        continue
+
+                    # Determine image properties from source
+                    if base_img:
+                        image_ref = base_img.docker_image_tag or ""
+                        os_type = base_img.os_type
+                        vm_type_str = base_img.vm_type
+                    elif golden_img:
+                        image_ref = golden_img.docker_image_tag or ""
+                        os_type = golden_img.os_type
+                        vm_type_str = golden_img.vm_type
+                    elif snapshot:
+                        image_ref = snapshot.docker_image_id or ""
+                        os_type = snapshot.os_type or "linux"
+                        vm_type_str = snapshot.vm_type or "container"
+                    else:
+                        logger.warning(f"Skipping VM {vm.id}: no image source found")
                         continue
 
                     labels = {
@@ -227,18 +250,17 @@ def deploy_range_task_legacy(range_id: str):
                     display_type = vm.display_type or "desktop"
                     if display_type == "desktop":
                         vm_id_short = str(vm.id).replace("-", "")[:16]
-                        base_image = template.base_image or ""
-                        is_linuxserver = "linuxserver/" in base_image or "lscr.io/linuxserver" in base_image
-                        is_kasmweb = "kasmweb/" in base_image
+                        is_linuxserver = "linuxserver/" in image_ref or "lscr.io/linuxserver" in image_ref
+                        is_kasmweb = "kasmweb/" in image_ref
 
                         # Determine VNC port and scheme based on image type
                         # QEMU-based VMs (Linux VM, Windows, custom ISO) use port 8006
                         is_qemu_vm = (
-                            template.vm_type == VMType.LINUX_VM or
-                            template.vm_type == VMType.WINDOWS_VM or
-                            template.os_type == "windows" or
-                            template.os_type == "custom" or
-                            base_image.startswith("iso:")
+                            vm_type_str == "linux_vm" or
+                            vm_type_str == "windows_vm" or
+                            os_type == "windows" or
+                            os_type == "custom" or
+                            image_ref.startswith("iso:")
                         )
                         if is_qemu_vm:
                             vnc_port = "8006"
@@ -294,19 +316,15 @@ def deploy_range_task_legacy(range_id: str):
                         labels[f"traefik.http.routers.{router_name}.middlewares"] = ",".join(middlewares)
                         labels[f"traefik.http.routers.{router_name}-secure.middlewares"] = ",".join(middlewares)
 
-                    if template.os_type == "windows":
-                        # Resolve Windows version from VM, template, or base_image
-                        # Priority: vm.windows_version > template.os_version > base_image extraction > default
+                    if os_type == "windows":
+                        # Resolve Windows version from VM or image
                         win_version = vm.windows_version
-                        if not win_version and template.os_version:
-                            win_version = template.os_version
-                        if not win_version and template.base_image:
-                            # Extract version from base_image like "dockurr/windows:2022" or just "2022"
-                            img = template.base_image
-                            if ":" in img:
-                                win_version = img.split(":")[-1]
-                            elif img.replace(".", "").isdigit() or img in ["11", "10", "2025", "2022", "2019", "2016", "2012", "2008"]:
-                                win_version = img
+                        if not win_version and image_ref:
+                            # Extract version from image_ref like "dockurr/windows:2022" or just "2022"
+                            if ":" in image_ref:
+                                win_version = image_ref.split(":")[-1]
+                            elif image_ref.replace(".", "").isdigit() or image_ref in ["11", "10", "2025", "2022", "2019", "2016", "2012", "2008"]:
+                                win_version = image_ref
                         if not win_version:
                             win_version = "11"  # Default to Windows 11
 
@@ -324,7 +342,7 @@ def deploy_range_task_legacy(range_id: str):
                             dns_servers=network.dns_servers,
                             dns_search=network.dns_search,
                         )
-                    elif template.vm_type == VMType.LINUX_VM:
+                    elif vm_type_str == "linux_vm":
                         # Linux VM using qemux/qemu
                         settings = get_settings()
                         vm_storage_path = os.path.join(
@@ -333,10 +351,10 @@ def deploy_range_task_legacy(range_id: str):
                             str(vm.id),
                             "storage"
                         )
-                        linux_distro = template.linux_distro or "ubuntu"
-                        boot_mode = template.boot_mode or "uefi"
-                        disk_type = template.disk_type or "scsi"
-                        iso_path = template.cached_iso_path if hasattr(template, 'cached_iso_path') and template.cached_iso_path else None
+                        linux_distro = vm.linux_distro or "ubuntu"
+                        boot_mode = vm.boot_mode or "uefi"
+                        disk_type = vm.disk_type or "scsi"
+                        iso_path = base_img.iso_path if base_img and base_img.iso_path else None
 
                         logger.info(f"Creating Linux VM {vm.hostname} with distro: {linux_distro}")
                         container_id = docker.create_linux_vm_container(
@@ -357,7 +375,7 @@ def deploy_range_task_legacy(range_id: str):
                             dns_servers=network.dns_servers,
                             dns_search=network.dns_search,
                         )
-                    elif template.os_type == "custom" or (template.base_image and template.base_image.startswith("iso:")):
+                    elif os_type == "custom" or image_ref.startswith("iso:"):
                         # Custom ISO or ISO-based Linux VMs use qemux/qemu
                         settings = get_settings()
                         vm_storage_path = os.path.join(
@@ -366,11 +384,11 @@ def deploy_range_task_legacy(range_id: str):
                             str(vm.id),
                             "storage"
                         )
-                        if template.os_type == "custom":
+                        if os_type == "custom":
                             linux_distro = "custom"
-                            iso_path = template.cached_iso_path if hasattr(template, 'cached_iso_path') and template.cached_iso_path else None
+                            iso_path = base_img.iso_path if base_img and base_img.iso_path else None
                         else:
-                            linux_distro = template.base_image.replace("iso:", "")
+                            linux_distro = image_ref.replace("iso:", "")
                             iso_path = None
 
                         logger.info(f"Creating custom/ISO VM {vm.hostname} with distro: {linux_distro}")
@@ -392,10 +410,10 @@ def deploy_range_task_legacy(range_id: str):
                         )
                     else:
                         # Docker container (Samba DC, linuxserver images, etc.)
-                        needs_privileged = "samba-dc" in (template.base_image or "")
+                        needs_privileged = "samba-dc" in image_ref
                         container_id = docker.create_container(
                             name=f"cyroid-{vm.hostname}-{str(vm.id)[:8]}",
-                            image=template.base_image,
+                            image=image_ref,
                             network_id=network.docker_network_id,
                             ip_address=vm.ip_address,
                             cpu_limit=vm.cpu,
@@ -409,12 +427,6 @@ def deploy_range_task_legacy(range_id: str):
 
                     vm.container_id = container_id
                     docker.start_container(container_id)
-
-                    if template.config_script:
-                        try:
-                            docker.exec_command(container_id, template.config_script)
-                        except Exception as e:
-                            logger.warning(f"Config script failed for VM {vm.id}: {e}")
 
                 vm.status = VMStatus.RUNNING
                 db.commit()

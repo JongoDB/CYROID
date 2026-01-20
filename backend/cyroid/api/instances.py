@@ -161,7 +161,10 @@ def _recreate_range_contents(
     db: Session, range_obj: Range, config: BlueprintConfig, base_prefix: str, offset: int
 ):
     """Recreate networks and VMs in an existing range."""
-    from cyroid.models import Network, VM, VMTemplate
+    from cyroid.models import Network, VM
+    from cyroid.models.base_image import BaseImage
+    from cyroid.models.golden_image import GoldenImage
+    from cyroid.models.snapshot import Snapshot
     from cyroid.services.blueprint_service import apply_subnet_offset
 
     # Create networks
@@ -183,12 +186,23 @@ def _recreate_range_contents(
 
     # Create VMs
     for vm_config in config.vms:
-        template = db.query(VMTemplate).filter(VMTemplate.name == vm_config.template_name).first()
-        if not template:
-            continue
-
         network_id = network_lookup.get(vm_config.network_name)
         if not network_id:
+            continue
+
+        # Resolve image source from vm_config
+        base_image_id = None
+        golden_image_id = None
+        snapshot_id = None
+
+        if hasattr(vm_config, 'base_image_id') and vm_config.base_image_id:
+            base_image_id = vm_config.base_image_id
+        elif hasattr(vm_config, 'golden_image_id') and vm_config.golden_image_id:
+            golden_image_id = vm_config.golden_image_id
+        elif hasattr(vm_config, 'snapshot_id') and vm_config.snapshot_id:
+            snapshot_id = vm_config.snapshot_id
+        else:
+            # No image source found, skip this VM
             continue
 
         adjusted_ip = apply_subnet_offset(vm_config.ip_address, base_prefix, offset)
@@ -196,7 +210,9 @@ def _recreate_range_contents(
         vm = VM(
             range_id=range_obj.id,
             network_id=network_id,
-            template_id=template.id,
+            base_image_id=base_image_id,
+            golden_image_id=golden_image_id,
+            snapshot_id=snapshot_id,
             hostname=vm_config.hostname,
             ip_address=adjusted_ip,
             cpu=vm_config.cpu,

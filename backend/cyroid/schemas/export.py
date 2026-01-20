@@ -72,7 +72,12 @@ class VMExportData(BaseModel):
     hostname: str
     ip_address: str
     network_name: str  # Reference by name for portability
-    template_name: str  # Reference by name for portability
+    # Image Library sources (exactly one should be set)
+    base_image_id: Optional[str] = None
+    golden_image_id: Optional[str] = None
+    snapshot_id: Optional[str] = None
+    # Deprecated: kept for backward compatibility
+    template_name: Optional[str] = None
 
     # Compute resources
     cpu: int

@@ -32,7 +32,7 @@ from cyroid.models.msel import MSEL
 from cyroid.models.network import Network
 from cyroid.models.range import Range
 from cyroid.models.snapshot import Snapshot
-from cyroid.models.template import VMTemplate
+from cyroid.models.base_image import BaseImage
 from cyroid.models.user import User
 from cyroid.models.vm import VM
 from cyroid.schemas.export import (
@@ -114,14 +114,17 @@ class ExportService:
         )
 
     def _collect_vm_data(
-        self, vm: VM, network_map: Dict[UUID, str], template_map: Dict[UUID, str], encrypt: bool = True
+        self, vm: VM, network_map: Dict[UUID, str], encrypt: bool = True
     ) -> VMExportData:
         """Collect all VM fields (30+)."""
         return VMExportData(
             hostname=vm.hostname,
             ip_address=vm.ip_address,
             network_name=network_map.get(vm.network_id, "unknown"),
-            template_name=template_map.get(vm.template_id, "unknown"),
+            base_image_id=str(vm.base_image_id) if vm.base_image_id else None,
+            golden_image_id=str(vm.golden_image_id) if vm.golden_image_id else None,
+            snapshot_id=str(vm.snapshot_id) if vm.snapshot_id else None,
+            template_name=None,  # Deprecated
             # Compute resources
             cpu=vm.cpu,
             ram_mb=vm.ram_mb,
@@ -160,27 +163,8 @@ class ExportService:
             position_y=vm.position_y,
         )
 
-    def _collect_template_data(self, template: VMTemplate) -> TemplateExportData:
-        """Collect full template definition."""
-        return TemplateExportData(
-            name=template.name,
-            description=template.description,
-            os_type=template.os_type.value,
-            os_variant=template.os_variant,
-            base_image=template.base_image,
-            vm_type=template.vm_type.value,
-            linux_distro=template.linux_distro,
-            boot_mode=template.boot_mode,
-            disk_type=template.disk_type,
-            default_cpu=template.default_cpu,
-            default_ram_mb=template.default_ram_mb,
-            default_disk_gb=template.default_disk_gb,
-            config_script=template.config_script,
-            tags=template.tags or [],
-            golden_image_path=template.golden_image_path,
-            cached_iso_path=template.cached_iso_path,
-            is_cached=template.is_cached,
-        )
+    # NOTE: _collect_template_data removed - templates are deprecated
+    # VMs now use Image Library (BaseImage, GoldenImage, Snapshot)
 
     def _collect_msel_data(self, msel: MSEL, vm_id_to_hostname: Dict[str, str]) -> MSELExportData:
         """Collect MSEL with injects, converting VM IDs to hostnames."""
@@ -421,27 +405,17 @@ class ExportService:
         network_map: Dict[UUID, str] = {n.id: n.name for n in range_obj.networks}
         vm_id_to_hostname: Dict[str, str] = {str(vm.id): vm.hostname for vm in range_obj.vms}
 
-        # Collect unique templates
-        template_ids = {vm.template_id for vm in range_obj.vms}
-        templates_by_id: Dict[UUID, VMTemplate] = {}
-        if template_ids and options.include_templates:
-            stmt = select(VMTemplate).where(VMTemplate.id.in_(template_ids))
-            result = db.execute(stmt)
-            templates_by_id = {t.id: t for t in result.scalars()}
-
-        template_map: Dict[UUID, str] = {tid: t.name for tid, t in templates_by_id.items()}
-
         # Collect networks
         networks = [self._collect_network_data(n) for n in range_obj.networks]
 
-        # Collect VMs
+        # Collect VMs (templates deprecated - VMs now use Image Library)
         vms = [
-            self._collect_vm_data(vm, network_map, template_map, encrypt=options.encrypt_passwords)
+            self._collect_vm_data(vm, network_map, encrypt=options.encrypt_passwords)
             for vm in range_obj.vms
         ]
 
-        # Collect templates
-        templates = [self._collect_template_data(t) for t in templates_by_id.values()] if options.include_templates else []
+        # Templates deprecated - empty list for backward compatibility
+        templates: List[TemplateExportData] = []
 
         # Collect MSEL
         msel_data = None
@@ -510,8 +484,16 @@ class ExportService:
             if progress_callback:
                 progress_callback(30, "Exporting Docker images...")
 
+            # Collect image tags from VMs' base images
+            vm_image_tags: List[str] = []
+            for vm in range_obj.vms:
+                if vm.base_image and vm.base_image.docker_image_tag:
+                    vm_image_tags.append(vm.base_image.docker_image_tag)
+                elif vm.golden_image and vm.golden_image.docker_image_tag:
+                    vm_image_tags.append(vm.golden_image.docker_image_tag)
+
             docker_images = self._export_docker_images(
-                templates_by_id.values(),
+                vm_image_tags,
                 temp_dir,
                 progress_callback,
             )
@@ -553,7 +535,7 @@ class ExportService:
 
     def _export_docker_images(
         self,
-        templates: List[VMTemplate],
+        image_tags: List[str],
         temp_dir: str,
         progress_callback: Optional[callable] = None,
     ) -> List[DockerImageExportData]:
@@ -565,11 +547,8 @@ class ExportService:
         exported_images: List[DockerImageExportData] = []
         seen_images: set = set()
 
-        # Collect unique base images
-        base_images = set()
-        for template in templates:
-            if template.base_image:
-                base_images.add(template.base_image)
+        # Collect unique base images from provided tags
+        base_images = set(image_tags)
 
         # Always include the VM runtime images
         base_images.add("qemux/qemu:latest")
@@ -653,19 +632,8 @@ class ExportService:
             conflicts.name_conflict = True
             warnings.append(f"Range name '{export_data.range.name}' already exists - use name_override")
 
-        # Check template conflicts
-        template_names = [t.name for t in export_data.templates]
-        if template_names:
-            stmt = select(VMTemplate).where(VMTemplate.name.in_(template_names))
-            result = db.execute(stmt)
-            existing_templates = {t.name: t for t in result.scalars()}
-
-            for template in export_data.templates:
-                if template.name in existing_templates:
-                    conflicts.template_conflicts.append(TemplateConflict(
-                        template_name=template.name,
-                        existing_template_id=str(existing_templates[template.name].id),
-                    ))
+        # Templates deprecated - no template conflict checks needed
+        # VMs now use Image Library (BaseImage, GoldenImage, Snapshot)
 
         # Check network subnet conflicts
         for network in export_data.networks:
@@ -747,13 +715,8 @@ class ExportService:
                     errors=[f"Range name '{range_name}' already exists"],
                 )
 
-            # Resolve template conflicts and get template mapping
-            template_name_to_id = self._resolve_templates(
-                export_data.templates,
-                options.template_conflict_action,
-                user,
-                db,
-            )
+            # Templates deprecated - VMs now use Image Library
+            # No template resolution needed
 
             # Create the range
             new_range = Range(
@@ -783,19 +746,26 @@ class ExportService:
             vm_hostname_to_id: Dict[str, UUID] = {}
             for vm_data in export_data.vms:
                 network_id = network_name_to_id.get(vm_data.network_name)
-                template_id = template_name_to_id.get(vm_data.template_name)
 
                 if not network_id:
                     warnings.append(f"VM {vm_data.hostname}: network '{vm_data.network_name}' not found")
                     continue
-                if not template_id:
-                    warnings.append(f"VM {vm_data.hostname}: template '{vm_data.template_name}' not found")
+
+                # Parse image library IDs from export data
+                base_image_id = UUID(vm_data.base_image_id) if hasattr(vm_data, 'base_image_id') and vm_data.base_image_id else None
+                golden_image_id = UUID(vm_data.golden_image_id) if hasattr(vm_data, 'golden_image_id') and vm_data.golden_image_id else None
+                snapshot_id = UUID(vm_data.snapshot_id) if hasattr(vm_data, 'snapshot_id') and vm_data.snapshot_id else None
+
+                if not base_image_id and not golden_image_id and not snapshot_id:
+                    warnings.append(f"VM {vm_data.hostname}: no image source found")
                     continue
 
                 vm = VM(
                     range_id=new_range.id,
                     network_id=network_id,
-                    template_id=template_id,
+                    base_image_id=base_image_id,
+                    golden_image_id=golden_image_id,
+                    snapshot_id=snapshot_id,
                     hostname=vm_data.hostname,
                     ip_address=vm_data.ip_address,
                     cpu=vm_data.cpu,
@@ -930,72 +900,8 @@ class ExportService:
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
-    def _resolve_templates(
-        self,
-        templates: List[TemplateExportData],
-        conflict_action: str,
-        user: User,
-        db: Session,
-    ) -> Dict[str, UUID]:
-        """
-        Resolve template conflicts and return name-to-ID mapping.
-
-        Returns:
-            Dict mapping template names to their UUIDs
-        """
-        template_name_to_id: Dict[str, UUID] = {}
-
-        for template_data in templates:
-            # Check if template exists
-            stmt = select(VMTemplate).where(VMTemplate.name == template_data.name)
-            existing = db.execute(stmt).scalar_one_or_none()
-
-            if existing:
-                if conflict_action == "use_existing":
-                    template_name_to_id[template_data.name] = existing.id
-                elif conflict_action == "create_new":
-                    # Create with modified name
-                    new_name = f"{template_data.name} (imported)"
-                    new_template = self._create_template_from_data(template_data, new_name, user, db)
-                    template_name_to_id[template_data.name] = new_template.id
-                # skip: don't add to mapping
-            else:
-                # Create new template
-                new_template = self._create_template_from_data(template_data, template_data.name, user, db)
-                template_name_to_id[template_data.name] = new_template.id
-
-        return template_name_to_id
-
-    def _create_template_from_data(
-        self,
-        data: TemplateExportData,
-        name: str,
-        user: User,
-        db: Session,
-    ) -> VMTemplate:
-        """Create a new template from export data."""
-        from cyroid.models.template import OSType, VMType
-
-        template = VMTemplate(
-            name=name,
-            description=data.description,
-            os_type=OSType(data.os_type),
-            os_variant=data.os_variant,
-            base_image=data.base_image,
-            vm_type=VMType(data.vm_type),
-            linux_distro=data.linux_distro,
-            boot_mode=data.boot_mode,
-            disk_type=data.disk_type,
-            default_cpu=data.default_cpu,
-            default_ram_mb=data.default_ram_mb,
-            default_disk_gb=data.default_disk_gb,
-            config_script=data.config_script,
-            tags=data.tags,
-            created_by=user.id,
-        )
-        db.add(template)
-        db.flush()
-        return template
+    # NOTE: _resolve_templates and _create_template_from_data removed
+    # Templates are deprecated - VMs now use Image Library (BaseImage, GoldenImage, Snapshot)
 
     def _import_artifacts(
         self,

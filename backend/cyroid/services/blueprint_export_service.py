@@ -24,7 +24,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from cyroid.models.blueprint import RangeBlueprint
-from cyroid.models.template import VMTemplate, OSType, VMType
+from cyroid.models.template import OSType, VMType
+from cyroid.models.base_image import BaseImage
+from cyroid.models.golden_image import GoldenImage
 from cyroid.models.user import User
 from cyroid.schemas.blueprint import BlueprintConfig
 from cyroid.schemas.blueprint_export import (
@@ -47,24 +49,8 @@ class BlueprintExportService:
     # Data Collection Methods
     # =========================================================================
 
-    def _collect_template_data(self, template: VMTemplate) -> TemplateExportData:
-        """Collect full template definition for export."""
-        return TemplateExportData(
-            name=template.name,
-            description=template.description,
-            os_type=template.os_type.value,
-            os_variant=template.os_variant,
-            base_image=template.base_image,
-            vm_type=template.vm_type.value,
-            linux_distro=template.linux_distro,
-            boot_mode=template.boot_mode,
-            disk_type=template.disk_type,
-            default_cpu=template.default_cpu,
-            default_ram_mb=template.default_ram_mb,
-            default_disk_gb=template.default_disk_gb,
-            config_script=template.config_script,
-            tags=template.tags or [],
-        )
+    # NOTE: _collect_template_data removed - templates are deprecated
+    # Blueprints now reference images via base_image_id, golden_image_id, or snapshot_id
 
     def _compute_file_checksum(self, content: bytes) -> str:
         """Compute SHA256 checksum of file content."""
@@ -121,7 +107,7 @@ class BlueprintExportService:
 
     def _build_missing_images(
         self,
-        templates: List[TemplateExportData],
+        image_names: List[str],
         archive_dir: Path,
     ) -> Tuple[List[str], List[str]]:
         """
@@ -138,12 +124,7 @@ class BlueprintExportService:
             logger.debug("No dockerfiles directory in archive")
             return images_built, errors
 
-        for template in templates:
-            # Only process container templates
-            if template.vm_type != "container":
-                continue
-
-            image_name = template.base_image
+        for image_name in image_names:
             if not image_name:
                 continue
 
@@ -201,16 +182,8 @@ class BlueprintExportService:
         # Create temporary directory for export
         temp_dir = tempfile.mkdtemp(prefix="cyroid-blueprint-export-")
         try:
-            # Collect template names from VMs in config
-            template_names = {vm.template_name for vm in config.vms}
-
-            # Load templates
-            templates_data: List[TemplateExportData] = []
-            if template_names:
-                stmt = select(VMTemplate).where(VMTemplate.name.in_(template_names))
-                result = db.execute(stmt)
-                for template in result.scalars():
-                    templates_data.append(self._collect_template_data(template))
+            # Templates deprecated - blueprints now use Image Library IDs
+            # VMs reference base_image_id, golden_image_id, or snapshot_id directly
 
             # Build blueprint export data
             blueprint_data = BlueprintExportData(
@@ -222,19 +195,19 @@ class BlueprintExportService:
                 config=config,
             )
 
-            # Build export structure
+            # Build export structure (no templates included)
             export_data = BlueprintExportFull(
                 manifest=BlueprintExportManifest(
-                    version="1.0",
+                    version="2.0",  # Updated version for Image Library
                     export_type="blueprint",
                     created_at=datetime.utcnow(),
                     created_by=user.username,
                     blueprint_name=blueprint.name,
-                    template_count=len(templates_data),
+                    template_count=0,  # Templates deprecated
                     checksums={},  # Will be computed after writing files
                 ),
                 blueprint=blueprint_data,
-                templates=templates_data,
+                templates=[],  # Empty - templates deprecated
             )
 
             # Write blueprint.json
@@ -251,19 +224,6 @@ class BlueprintExportService:
             checksums = {
                 "blueprint.json": self._compute_file_checksum(blueprint_content.encode())
             }
-
-            # Write templates as individual files for easy inspection
-            templates_dir = os.path.join(temp_dir, "templates")
-            os.makedirs(templates_dir, exist_ok=True)
-            for template in templates_data:
-                template_filename = f"{template.name.replace('/', '_').replace(' ', '_')}.json"
-                template_path = os.path.join(templates_dir, template_filename)
-                template_content = json.dumps(template.model_dump(), indent=2)
-                with open(template_path, "w") as f:
-                    f.write(template_content)
-                checksums[f"templates/{template_filename}"] = self._compute_file_checksum(
-                    template_content.encode()
-                )
 
             # Update manifest with checksums
             export_data.manifest.checksums = checksums
@@ -357,8 +317,6 @@ class BlueprintExportService:
 
         blueprint_name = export_data.blueprint.name
         conflicts: List[str] = []
-        missing_templates: List[str] = []
-        included_templates = [t.name for t in export_data.templates]
 
         # Check blueprint name conflict
         existing = db.query(RangeBlueprint).filter(
@@ -367,33 +325,16 @@ class BlueprintExportService:
         if existing:
             conflicts.append(f"Blueprint name '{blueprint_name}' already exists")
 
-        # Get template names used by blueprint VMs
+        # Validate that VMs have image library sources
         config = export_data.blueprint.config
-        needed_templates = {vm.template_name for vm in config.vms}
-        included_template_names = {t.name for t in export_data.templates}
-
-        # Check which templates exist in target system
-        if needed_templates:
-            stmt = select(VMTemplate.name).where(VMTemplate.name.in_(needed_templates))
-            result = db.execute(stmt)
-            existing_template_names = {row[0] for row in result}
-        else:
-            existing_template_names = set()
-
-        # Templates that are neither included nor existing
-        for tpl_name in needed_templates:
-            if tpl_name not in included_template_names and tpl_name not in existing_template_names:
-                missing_templates.append(tpl_name)
-                errors.append(f"Template '{tpl_name}' is required but not included and not found in target system")
-
-        # Check for template conflicts (template exists with same name)
-        for tpl_name in included_template_names:
-            if tpl_name in existing_template_names:
-                warnings.append(f"Template '{tpl_name}' already exists - will use existing")
-
-        # Check subnet prefix conflicts (informational only)
-        base_prefix = export_data.blueprint.base_subnet_prefix
-        # This is just a warning since subnets are dynamic based on offset
+        for vm in config.vms:
+            has_source = (
+                (hasattr(vm, 'base_image_id') and vm.base_image_id) or
+                (hasattr(vm, 'golden_image_id') and vm.golden_image_id) or
+                (hasattr(vm, 'snapshot_id') and vm.snapshot_id)
+            )
+            if not has_source:
+                errors.append(f"VM '{vm.hostname}' has no image source (base_image_id, golden_image_id, or snapshot_id)")
 
         is_valid = len(errors) == 0
 
@@ -403,8 +344,8 @@ class BlueprintExportService:
             errors=errors,
             warnings=warnings,
             conflicts=conflicts,
-            missing_templates=missing_templates,
-            included_templates=included_templates,
+            missing_templates=[],  # Deprecated
+            included_templates=[],  # Deprecated
         )
 
     def import_blueprint(
@@ -448,16 +389,6 @@ class BlueprintExportService:
                     warnings=validation.warnings,
                 )
 
-            # Build any missing container images from included Dockerfiles
-            logger.info("Checking for missing container images...")
-            built, build_errors = self._build_missing_images(
-                export_data.templates,
-                temp_dir,
-            )
-            images_built.extend(built)
-            if build_errors:
-                warnings.extend(build_errors)
-
             # Determine blueprint name
             blueprint_name = options.new_name or export_data.blueprint.name
 
@@ -472,64 +403,8 @@ class BlueprintExportService:
                     images_built=images_built,
                 )
 
-            # Process templates
-            for template_data in export_data.templates:
-                existing_template = db.query(VMTemplate).filter(
-                    VMTemplate.name == template_data.name
-                ).first()
-
-                if existing_template:
-                    if options.template_conflict_strategy == "skip":
-                        templates_skipped.append(template_data.name)
-                        warnings.append(f"Template '{template_data.name}' exists - skipped")
-                    elif options.template_conflict_strategy == "update":
-                        # Update existing template
-                        existing_template.description = template_data.description
-                        existing_template.os_type = OSType(template_data.os_type)
-                        existing_template.os_variant = template_data.os_variant
-                        existing_template.base_image = template_data.base_image
-                        existing_template.vm_type = VMType(template_data.vm_type)
-                        existing_template.linux_distro = template_data.linux_distro
-                        existing_template.boot_mode = template_data.boot_mode
-                        existing_template.disk_type = template_data.disk_type
-                        existing_template.default_cpu = template_data.default_cpu
-                        existing_template.default_ram_mb = template_data.default_ram_mb
-                        existing_template.default_disk_gb = template_data.default_disk_gb
-                        existing_template.config_script = template_data.config_script
-                        existing_template.tags = template_data.tags
-                        templates_created.append(f"{template_data.name} (updated)")
-                    else:  # error
-                        errors.append(f"Template '{template_data.name}' already exists")
-                else:
-                    # Create new template
-                    new_template = VMTemplate(
-                        name=template_data.name,
-                        description=template_data.description,
-                        os_type=OSType(template_data.os_type),
-                        os_variant=template_data.os_variant,
-                        base_image=template_data.base_image,
-                        vm_type=VMType(template_data.vm_type),
-                        linux_distro=template_data.linux_distro,
-                        boot_mode=template_data.boot_mode,
-                        disk_type=template_data.disk_type,
-                        default_cpu=template_data.default_cpu,
-                        default_ram_mb=template_data.default_ram_mb,
-                        default_disk_gb=template_data.default_disk_gb,
-                        config_script=template_data.config_script,
-                        tags=template_data.tags,
-                        created_by=user.id,
-                    )
-                    db.add(new_template)
-                    templates_created.append(template_data.name)
-
-            if errors and options.template_conflict_strategy == "error":
-                db.rollback()
-                return BlueprintImportResult(
-                    success=False,
-                    errors=errors,
-                    warnings=warnings,
-                    images_built=images_built,
-                )
+            # Templates deprecated - VMs now use Image Library (base_image_id, golden_image_id, snapshot_id)
+            # No template processing needed
 
             # Create the blueprint
             blueprint = RangeBlueprint(

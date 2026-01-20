@@ -18,7 +18,12 @@ class VMConfig(BaseModel):
     hostname: str
     ip_address: str
     network_name: str
-    template_name: str
+    # Image Library sources - exactly one required
+    base_image_id: Optional[str] = None
+    golden_image_id: Optional[str] = None
+    snapshot_id: Optional[str] = None
+    # Deprecated: kept for backward compatibility with older blueprints
+    template_name: Optional[str] = None
     cpu: int = 1
     ram_mb: int = 1024
     disk_gb: int = 20

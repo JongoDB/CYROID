@@ -122,7 +122,7 @@ def filter_by_visibility(
         resource_type: Type of resource ('range', 'template', 'artifact')
         current_user: Current authenticated user
         db: Database session
-        model_class: The SQLAlchemy model class (Range, VMTemplate, Artifact)
+        model_class: The SQLAlchemy model class (Range, BaseImage, Artifact)
 
     Returns:
         Filtered query

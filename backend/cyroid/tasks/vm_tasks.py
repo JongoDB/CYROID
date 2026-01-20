@@ -7,7 +7,9 @@ from uuid import UUID
 from cyroid.database import get_session_local
 from cyroid.models.vm import VM, VMStatus
 from cyroid.models.network import Network
-from cyroid.models.template import VMTemplate
+from cyroid.models.base_image import BaseImage
+from cyroid.models.golden_image import GoldenImage
+from cyroid.models.snapshot import Snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -28,10 +30,29 @@ def start_vm_task(vm_id: str):
             return
 
         network = db.query(Network).filter(Network.id == vm.network_id).first()
-        template = db.query(VMTemplate).filter(VMTemplate.id == vm.template_id).first()
+        # Load image sources (base_image, golden_image, or snapshot)
+        base_img = db.query(BaseImage).filter(BaseImage.id == vm.base_image_id).first() if vm.base_image_id else None
+        golden_img = db.query(GoldenImage).filter(GoldenImage.id == vm.golden_image_id).first() if vm.golden_image_id else None
+        source_snapshot = db.query(Snapshot).filter(Snapshot.id == vm.snapshot_id).first() if vm.snapshot_id else None
 
         if not network or not network.docker_network_id:
             logger.error(f"Network not provisioned for VM {vm_id}")
+            vm.status = VMStatus.ERROR
+            db.commit()
+            return
+
+        # Determine image properties from source
+        if base_img:
+            image_ref = base_img.docker_image_tag or ""
+            os_type = base_img.os_type
+        elif golden_img:
+            image_ref = golden_img.docker_image_tag or ""
+            os_type = golden_img.os_type
+        elif source_snapshot:
+            image_ref = source_snapshot.docker_image_id or ""
+            os_type = source_snapshot.os_type or "linux"
+        else:
+            logger.error(f"No image source found for VM {vm_id}")
             vm.status = VMStatus.ERROR
             db.commit()
             return
@@ -48,19 +69,15 @@ def start_vm_task(vm_id: str):
                 "cyroid.hostname": vm.hostname,
             }
 
-            if template.os_type == "windows":
-                # Resolve Windows version from VM, template, or base_image
-                # Priority: vm.windows_version > template.os_version > base_image extraction > default
+            if os_type == "windows":
+                # Resolve Windows version from VM or image
                 win_version = vm.windows_version
-                if not win_version and template.os_version:
-                    win_version = template.os_version
-                if not win_version and template.base_image:
-                    # Extract version from base_image like "dockurr/windows:2022" or just "2022"
-                    img = template.base_image
-                    if ":" in img:
-                        win_version = img.split(":")[-1]
-                    elif img.replace(".", "").isdigit() or img in ["11", "10", "2025", "2022", "2019", "2016", "2012", "2008"]:
-                        win_version = img
+                if not win_version and image_ref:
+                    # Extract version from image_ref like "dockurr/windows:2022"
+                    if ":" in image_ref:
+                        win_version = image_ref.split(":")[-1]
+                    elif image_ref.replace(".", "").isdigit() or image_ref in ["11", "10", "2025", "2022", "2019", "2016", "2012", "2008"]:
+                        win_version = image_ref
                 if not win_version:
                     win_version = "11"  # Default to Windows 11
 
@@ -78,7 +95,7 @@ def start_vm_task(vm_id: str):
             else:
                 container_id = docker.create_container(
                     name=f"cyroid-{vm.hostname}-{str(vm.id)[:8]}",
-                    image=template.base_image,
+                    image=image_ref,
                     network_id=network.docker_network_id,
                     ip_address=vm.ip_address,
                     cpu_limit=vm.cpu,
@@ -89,12 +106,6 @@ def start_vm_task(vm_id: str):
 
             vm.container_id = container_id
             docker.start_container(container_id)
-
-            if template.config_script:
-                try:
-                    docker.exec_command(container_id, template.config_script)
-                except Exception as e:
-                    logger.warning(f"Config script failed for VM {vm_id}: {e}")
 
         vm.status = VMStatus.RUNNING
         db.commit()

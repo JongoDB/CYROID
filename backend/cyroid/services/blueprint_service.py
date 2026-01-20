@@ -11,7 +11,8 @@ from typing import Dict, Any, List
 from uuid import UUID
 from sqlalchemy.orm import Session
 
-from cyroid.models import Range, Network, VM, VMTemplate, MSEL, RangeRouter
+from cyroid.models import Range, Network, VM, MSEL, RangeRouter
+from cyroid.models.base_image import BaseImage
 from cyroid.schemas.blueprint import BlueprintConfig, NetworkConfig, VMConfig, RouterConfig, MSELConfig
 
 
@@ -40,13 +41,14 @@ def extract_config_from_range(db: Session, range_id: UUID) -> BlueprintConfig:
     vms = db.query(VM).filter(VM.range_id == range_id).all()
     vm_configs = []
     for vm in vms:
-        template = db.query(VMTemplate).filter(VMTemplate.id == vm.template_id).first()
         vm_configs.append(
             VMConfig(
                 hostname=vm.hostname,
                 ip_address=vm.ip_address,
                 network_name=network_lookup.get(vm.network_id, "unknown"),
-                template_name=template.name if template else "unknown",
+                base_image_id=str(vm.base_image_id) if vm.base_image_id else None,
+                golden_image_id=str(vm.golden_image_id) if vm.golden_image_id else None,
+                snapshot_id=str(vm.snapshot_id) if vm.snapshot_id else None,
                 cpu=vm.cpu,
                 ram_mb=vm.ram_mb,
                 disk_gb=vm.disk_gb,
@@ -140,7 +142,8 @@ def create_range_from_blueprint(
     Returns:
         Created Range object (not yet deployed)
     """
-    from cyroid.models import Range, Network, VM, VMTemplate, MSEL, RangeRouter, RangeStatus
+    from cyroid.models import Range, Network, VM, MSEL, RangeRouter, RangeStatus
+    from cyroid.models.base_image import BaseImage
 
     # Create range
     range_obj = Range(
@@ -168,19 +171,25 @@ def create_range_from_blueprint(
 
     # Create VMs with exact blueprint IPs
     for vm_config in config.vms:
-        # Find template by name
-        template = db.query(VMTemplate).filter(VMTemplate.name == vm_config.template_name).first()
-        if not template:
-            continue  # Skip VMs with missing templates
-
         network_id = network_lookup.get(vm_config.network_name)
         if not network_id:
             continue  # Skip VMs with missing networks
 
+        # Resolve image source from vm_config
+        from uuid import UUID as UUID_type
+        base_image_id = UUID_type(vm_config.base_image_id) if hasattr(vm_config, 'base_image_id') and vm_config.base_image_id else None
+        golden_image_id = UUID_type(vm_config.golden_image_id) if hasattr(vm_config, 'golden_image_id') and vm_config.golden_image_id else None
+        snapshot_id = UUID_type(vm_config.snapshot_id) if hasattr(vm_config, 'snapshot_id') and vm_config.snapshot_id else None
+
+        if not base_image_id and not golden_image_id and not snapshot_id:
+            continue  # Skip VMs with no image source
+
         vm = VM(
             range_id=range_obj.id,
             network_id=network_id,
-            template_id=template.id,
+            base_image_id=base_image_id,
+            golden_image_id=golden_image_id,
+            snapshot_id=snapshot_id,
             hostname=vm_config.hostname,
             ip_address=vm_config.ip_address,
             cpu=vm_config.cpu,

@@ -114,7 +114,12 @@ class VMTemplateData(BaseModel):
     hostname: str
     ip_address: str
     network_name: str  # Reference to network by name
-    template_name: str  # Reference to VM template by name
+    # Image Library sources (at least one required)
+    base_image_id: Optional[str] = None
+    golden_image_id: Optional[str] = None
+    snapshot_id: Optional[str] = None
+    # Legacy (for backwards compatibility with old exports)
+    template_name: Optional[str] = None
     cpu: int
     ram_mb: int
     disk_gb: int

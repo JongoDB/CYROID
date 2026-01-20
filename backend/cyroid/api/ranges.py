@@ -14,7 +14,8 @@ from cyroid.api.deps import DBSession, CurrentUser, filter_by_visibility, check_
 from cyroid.models.range import Range, RangeStatus
 from cyroid.models.network import Network
 from cyroid.models.vm import VM, VMStatus
-from cyroid.models.template import VMTemplate, OSType
+from cyroid.models.template import OSType
+from cyroid.models.base_image import BaseImage
 from cyroid.models.resource_tag import ResourceTag
 from cyroid.models.user import User
 from cyroid.models.router import RangeRouter, RouterStatus
@@ -835,17 +836,18 @@ def export_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
     # Build network name lookup
     network_lookup = {n.id: n.name for n in networks}
 
-    # Get VMs with their template names
+    # Get VMs with their image sources
     vms = db.query(VM).filter(VM.range_id == range_id).all()
     vm_data = []
     for vm in vms:
-        template = db.query(VMTemplate).filter(VMTemplate.id == vm.template_id).first()
         vm_data.append(
             VMTemplateData(
                 hostname=vm.hostname,
                 ip_address=vm.ip_address,
                 network_name=network_lookup.get(vm.network_id, "unknown"),
-                template_name=template.name if template else "unknown",
+                base_image_id=str(vm.base_image_id) if vm.base_image_id else None,
+                golden_image_id=str(vm.golden_image_id) if vm.golden_image_id else None,
+                snapshot_id=str(vm.snapshot_id) if vm.snapshot_id else None,
                 cpu=vm.cpu,
                 ram_mb=vm.ram_mb,
                 disk_gb=vm.disk_gb,
@@ -906,16 +908,22 @@ def import_range(
             logger.warning(f"Network '{vm_data.network_name}' not found for VM '{vm_data.hostname}'")
             continue
 
-        # Find template by name
-        vm_template = db.query(VMTemplate).filter(VMTemplate.name == vm_data.template_name).first()
-        if not vm_template:
-            logger.warning(f"VM template '{vm_data.template_name}' not found for VM '{vm_data.hostname}'")
+        # Determine image source (base_image_id, golden_image_id, or snapshot_id)
+        base_image_id = UUID(vm_data.base_image_id) if vm_data.base_image_id else None
+        golden_image_id = UUID(vm_data.golden_image_id) if vm_data.golden_image_id else None
+        snapshot_id = UUID(vm_data.snapshot_id) if vm_data.snapshot_id else None
+
+        # Validate at least one image source exists
+        if not any([base_image_id, golden_image_id, snapshot_id]):
+            logger.warning(f"VM '{vm_data.hostname}' has no image source (base_image_id, golden_image_id, or snapshot_id)")
             continue
 
         vm = VM(
             range_id=range_obj.id,
             network_id=network_id,
-            template_id=vm_template.id,
+            base_image_id=base_image_id,
+            golden_image_id=golden_image_id,
+            snapshot_id=snapshot_id,
             hostname=vm_data.hostname,
             ip_address=vm_data.ip_address,
             cpu=vm_data.cpu,
