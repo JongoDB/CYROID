@@ -1,4 +1,5 @@
 # backend/cyroid/api/ranges.py
+import asyncio
 import json
 from datetime import datetime
 from typing import List
@@ -889,37 +890,71 @@ def teardown_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
 
     try:
         docker = get_docker_service()
-        vyos = get_vyos_service()
+        dind = get_dind_service()
 
-        # Step 1: Remove all VM containers
-        vms = db.query(VM).filter(VM.range_id == range_id).all()
-        for vm in vms:
-            if vm.container_id:
-                docker.remove_container(vm.container_id, force=True)
+        # Check if this is a DinD-deployed range
+        if range_obj.dind_docker_url:
+            logger.info(f"Tearing down DinD range {range_id}")
+
+            # Delete the DinD container (removes all VMs and networks inside it)
+            try:
+                asyncio.run(dind.delete_range_container(str(range_id)))
+                logger.info(f"Deleted DinD container for range {range_id}")
+            except Exception as e:
+                logger.warning(f"Failed to delete DinD container: {e}")
+
+            # Clear DinD references
+            range_obj.dind_container_id = None
+            range_obj.dind_docker_url = None
+
+            # Reset all VM statuses and container IDs
+            vms = db.query(VM).filter(VM.range_id == range_id).all()
+            for vm in vms:
                 vm.container_id = None
                 vm.status = VMStatus.PENDING
-                db.commit()
-
-        # Step 2: Remove VyOS router
-        range_router = db.query(RangeRouter).filter(RangeRouter.range_id == range_id).first()
-        if range_router and range_router.container_id:
-            try:
-                vyos.remove_router(range_router.container_id)
-                logger.info(f"Removed VyOS router for range {range_id}")
-            except Exception as e:
-                logger.warning(f"Failed to remove VyOS router: {e}")
-            range_router.container_id = None
-            range_router.status = RouterStatus.PENDING
             db.commit()
 
-        # Step 3: Remove all Docker networks and reset VyOS interface assignments
-        networks = db.query(Network).filter(Network.range_id == range_id).all()
-        for network in networks:
-            if network.docker_network_id:
-                docker.delete_network(network.docker_network_id)
+            # Reset all network docker_network_ids
+            networks = db.query(Network).filter(Network.range_id == range_id).all()
+            for network in networks:
                 network.docker_network_id = None
                 network.vyos_interface = None
+            db.commit()
+
+        else:
+            # Legacy non-DinD deployment (fallback)
+            logger.info(f"Tearing down legacy (non-DinD) range {range_id}")
+            vyos = get_vyos_service()
+
+            # Step 1: Remove all VM containers
+            vms = db.query(VM).filter(VM.range_id == range_id).all()
+            for vm in vms:
+                if vm.container_id:
+                    docker.remove_container(vm.container_id, force=True)
+                    vm.container_id = None
+                    vm.status = VMStatus.PENDING
+                    db.commit()
+
+            # Step 2: Remove VyOS router
+            range_router = db.query(RangeRouter).filter(RangeRouter.range_id == range_id).first()
+            if range_router and range_router.container_id:
+                try:
+                    vyos.remove_router(range_router.container_id)
+                    logger.info(f"Removed VyOS router for range {range_id}")
+                except Exception as e:
+                    logger.warning(f"Failed to remove VyOS router: {e}")
+                range_router.container_id = None
+                range_router.status = RouterStatus.PENDING
                 db.commit()
+
+            # Step 3: Remove all Docker networks and reset VyOS interface assignments
+            networks = db.query(Network).filter(Network.range_id == range_id).all()
+            for network in networks:
+                if network.docker_network_id:
+                    docker.delete_network(network.docker_network_id)
+                    network.docker_network_id = None
+                    network.vyos_interface = None
+                    db.commit()
 
         range_obj.status = RangeStatus.DRAFT
         db.commit()

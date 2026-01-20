@@ -2722,6 +2722,84 @@ local-hostname: {name}
         range_client.images.pull(image)
         logger.info(f"Successfully pulled '{image}' into DinD")
 
+    async def create_snapshot_dind(
+        self,
+        range_id: str,
+        docker_url: str,
+        container_id: str,
+        snapshot_name: str,
+        labels: Optional[Dict[str, str]] = None
+    ) -> str:
+        """
+        Create a snapshot (Docker image) from a container inside DinD.
+
+        Returns:
+            Image ID
+        """
+        range_client = self.get_range_client_sync(range_id, docker_url)
+        try:
+            container = range_client.containers.get(container_id)
+            image = container.commit(
+                repository=snapshot_name,
+                tag="latest",
+                message=f"Snapshot of {container.name}",
+                conf={"Labels": labels or {}}
+            )
+            logger.info(f"Created DinD snapshot: {snapshot_name} ({image.id[:12]})")
+            return image.id
+        except NotFound:
+            raise ValueError(f"Container not found in DinD: {container_id}")
+        except APIError as e:
+            logger.error(f"Failed to create DinD snapshot: {e}")
+            raise
+
+    async def copy_to_container_dind(
+        self,
+        range_id: str,
+        docker_url: str,
+        container_id: str,
+        src_path: str,
+        dst_path: str
+    ) -> bool:
+        """
+        Copy a file to a container inside DinD.
+
+        Args:
+            range_id: Range identifier
+            docker_url: Docker URL for the range's DinD
+            container_id: Container ID
+            src_path: Local source file path
+            dst_path: Destination path in container
+
+        Returns:
+            True if successful
+        """
+        import os
+        import tarfile
+        import io
+
+        range_client = self.get_range_client_sync(range_id, docker_url)
+
+        try:
+            container = range_client.containers.get(container_id)
+
+            # Create tar archive with the file
+            data = io.BytesIO()
+            with tarfile.open(fileobj=data, mode='w') as tar:
+                tar.add(src_path, arcname=os.path.basename(src_path))
+            data.seek(0)
+
+            # Copy to container
+            container.put_archive(dst_path, data)
+            logger.info(f"Copied {src_path} to {container_id}:{dst_path} in DinD")
+            return True
+
+        except NotFound:
+            raise ValueError(f"Container not found in DinD: {container_id}")
+        except APIError as e:
+            logger.error(f"Failed to copy to container in DinD: {e}")
+            raise
+
 
 # Singleton instance
 _docker_service: Optional[DockerService] = None

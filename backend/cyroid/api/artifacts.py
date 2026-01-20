@@ -1,5 +1,6 @@
 # cyroid/api/artifacts.py
 """API endpoints for artifact management."""
+import asyncio
 from typing import List
 from uuid import UUID, uuid4
 import logging
@@ -11,6 +12,7 @@ import io
 from cyroid.api.deps import DBSession, CurrentUser
 from cyroid.models.artifact import Artifact, ArtifactPlacement, ArtifactType, MaliciousIndicator, PlacementStatus
 from cyroid.models.vm import VM
+from cyroid.models.range import Range
 from cyroid.schemas.artifact import (
     ArtifactCreate, ArtifactUpdate, ArtifactResponse,
     ArtifactPlacementCreate, ArtifactPlacementResponse
@@ -288,7 +290,21 @@ def execute_placement(
         try:
             docker = get_docker_service()
             target_dir = os.path.dirname(placement.target_path)
-            docker.copy_to_container(vm.container_id, tmp_path, target_dir)
+
+            # Check for DinD mode
+            range_obj = db.query(Range).filter(Range.id == vm.range_id).first()
+            use_dind = bool(range_obj and range_obj.dind_docker_url)
+
+            if use_dind:
+                asyncio.run(docker.copy_to_container_dind(
+                    range_id=str(vm.range_id),
+                    docker_url=range_obj.dind_docker_url,
+                    container_id=vm.container_id,
+                    src_path=tmp_path,
+                    dst_path=target_dir,
+                ))
+            else:
+                docker.copy_to_container(vm.container_id, tmp_path, target_dir)
 
             from datetime import datetime
             placement.status = PlacementStatus.PLACED

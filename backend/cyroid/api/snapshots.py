@@ -5,6 +5,7 @@ Implements the three-tier Image Library logic:
 - First snapshot of a VM → creates GoldenImage (with lineage to BaseImage)
 - Follow-on snapshots → creates Snapshot (fork, with lineage to GoldenImage)
 """
+import asyncio
 from typing import List, Union
 from uuid import UUID
 import logging
@@ -15,6 +16,7 @@ from cyroid.api.deps import DBSession, CurrentUser
 from cyroid.models.snapshot import Snapshot
 from cyroid.models.golden_image import GoldenImage
 from cyroid.models.vm import VM, VMStatus
+from cyroid.models.range import Range
 from cyroid.schemas.snapshot import SnapshotCreate, SnapshotResponse
 from cyroid.schemas.golden_image import GoldenImageResponse
 
@@ -58,6 +60,10 @@ def create_snapshot(
 
     docker = get_docker_service()
 
+    # Check for DinD mode
+    range_obj = db.query(Range).filter(Range.id == vm.range_id).first()
+    use_dind = bool(range_obj and range_obj.dind_docker_url)
+
     # Check if this VM already has a GoldenImage
     existing_golden = db.query(GoldenImage).filter(
         GoldenImage.source_vm_id == vm.id
@@ -68,7 +74,15 @@ def create_snapshot(
         image_name = f"cyroid-golden-{vm.id}-{snapshot_data.name}".lower().replace(" ", "-")
 
         try:
-            image_id = docker.create_snapshot(vm.container_id, image_name)
+            if use_dind:
+                image_id = asyncio.run(docker.create_snapshot_dind(
+                    range_id=str(vm.range_id),
+                    docker_url=range_obj.dind_docker_url,
+                    container_id=vm.container_id,
+                    snapshot_name=image_name,
+                ))
+            else:
+                image_id = docker.create_snapshot(vm.container_id, image_name)
         except Exception as e:
             logger.error(f"Failed to create golden image snapshot: {e}")
             raise HTTPException(
@@ -111,7 +125,15 @@ def create_snapshot(
         image_name = f"cyroid-snapshot-{vm.id}-{snapshot_data.name}".lower().replace(" ", "-")
 
         try:
-            image_id = docker.create_snapshot(vm.container_id, image_name)
+            if use_dind:
+                image_id = asyncio.run(docker.create_snapshot_dind(
+                    range_id=str(vm.range_id),
+                    docker_url=range_obj.dind_docker_url,
+                    container_id=vm.container_id,
+                    snapshot_name=image_name,
+                ))
+            else:
+                image_id = docker.create_snapshot(vm.container_id, image_name)
         except Exception as e:
             logger.error(f"Failed to create snapshot: {e}")
             raise HTTPException(
