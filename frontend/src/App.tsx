@@ -6,7 +6,7 @@ import { useSystemStore } from './stores/systemStore'
 import Login from './pages/Login'
 import Register from './pages/Register'
 import Dashboard from './pages/Dashboard'
-import Templates from './pages/Templates'
+import VMLibrary from './pages/VMLibrary'
 import Ranges from './pages/Ranges'
 import RangeDetail from './pages/RangeDetail'
 import RangeWizardPage from './pages/RangeWizardPage'
@@ -69,7 +69,7 @@ function App() {
             <Layout>
               <Routes>
                 <Route path="/" element={<Dashboard />} />
-                <Route path="/templates" element={<Templates />} />
+                <Route path="/vm-library" element={<VMLibrary />} />
                 <Route path="/ranges" element={<Ranges />} />
                 <Route path="/ranges/new" element={<RangeWizardPage />} />
                 <Route path="/ranges/:id" element={<RangeDetail />} />

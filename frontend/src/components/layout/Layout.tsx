@@ -37,7 +37,7 @@ interface NavItem {
 const navigation: NavItem[] = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
   { name: 'Image Cache', href: '/cache', icon: HardDrive },
-  { name: 'VM Templates', href: '/templates', icon: Server },
+  { name: 'VM Library', href: '/vm-library', icon: Server },
   { name: 'Range Blueprints', href: '/blueprints', icon: LayoutTemplate },
   { name: 'Training Scenarios', href: '/scenarios', icon: Target },
   { name: 'Content Library', href: '/content', icon: BookOpen },

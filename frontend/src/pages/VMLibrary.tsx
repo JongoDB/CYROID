@@ -1,11 +1,14 @@
-// frontend/src/pages/Templates.tsx
+// frontend/src/pages/VMLibrary.tsx
 import { useEffect, useState } from 'react'
 import { templatesApi, cacheApi, VMTemplateCreate } from '../services/api'
 import type { VMTemplate, CachedImage, WindowsVersionsResponse, LinuxVersionsResponse, CustomISOList, RecommendedImages } from '../types'
-import { Plus, Pencil, Trash2, Copy, Loader2, X, Server, Monitor, Info, RefreshCw, Tag, LayoutGrid, List, Disc } from 'lucide-react'
+import { Plus, Pencil, Trash2, Copy, Loader2, X, Server, Monitor, Info, RefreshCw, Tag, LayoutGrid, List, Disc, Camera, HardDrive } from 'lucide-react'
 import clsx from 'clsx'
 import { ConfirmDialog } from '../components/common/ConfirmDialog'
 import { toast } from '../stores/toastStore'
+
+// Tab type for the VM Library
+type VMLibraryTab = 'snapshots' | 'base-images'
 
 // Core CYROID service images to exclude from the dropdown
 const CYROID_SERVICE_IMAGES = [
@@ -60,7 +63,10 @@ const WINDOWS_DEFAULTS = {
   base_image: 'dockur/windows'
 }
 
-export default function Templates() {
+export default function VMLibrary() {
+  // Tab state - default to 'snapshots'
+  const [activeTab, setActiveTab] = useState<VMLibraryTab>('snapshots')
+
   const [templates, setTemplates] = useState<VMTemplate[]>([])
   const [loading, setLoading] = useState(true)
   const [viewMode, setViewMode] = useState<'tile' | 'list'>('tile')
@@ -342,11 +348,254 @@ export default function Templates() {
     }
   }
 
-  if (loading) {
+  // Render the Snapshots tab content
+  const renderSnapshotsTab = () => {
     return (
-      <div className="flex items-center justify-center h-64">
-        <Loader2 className="h-8 w-8 animate-spin text-primary-600" />
+      <div className="mt-6">
+        <div className="bg-white shadow rounded-lg p-8 text-center">
+          <Camera className="mx-auto h-12 w-12 text-gray-400" />
+          <h3 className="mt-4 text-lg font-medium text-gray-900">Snapshots</h3>
+          <p className="mt-2 text-sm text-gray-500 max-w-md mx-auto">
+            Snapshots allow you to capture the state of a running VM and restore it later.
+            This feature will be implemented in a future update.
+          </p>
+          <div className="mt-6 bg-gray-50 rounded-lg p-4 max-w-lg mx-auto">
+            <h4 className="text-sm font-medium text-gray-700 mb-2">Planned Features:</h4>
+            <ul className="text-sm text-gray-600 text-left list-disc list-inside space-y-1">
+              <li>Create snapshots from running or stopped VMs</li>
+              <li>Restore VMs to previous snapshot states</li>
+              <li>Create VM templates from snapshots</li>
+              <li>Export snapshots for backup or sharing</li>
+              <li>Golden image management for rapid deployment</li>
+            </ul>
+          </div>
+        </div>
       </div>
+    )
+  }
+
+  // Render the Base OS Images tab content (existing template list)
+  const renderBaseImagesTab = () => {
+    if (loading) {
+      return (
+        <div className="flex items-center justify-center h-64">
+          <Loader2 className="h-8 w-8 animate-spin text-primary-600" />
+        </div>
+      )
+    }
+
+    return (
+      <>
+        {templates.length === 0 ? (
+          <div className="mt-8 text-center">
+            <Server className="mx-auto h-12 w-12 text-gray-400" />
+            <h3 className="mt-2 text-sm font-medium text-gray-900">No templates</h3>
+            <p className="mt-1 text-sm text-gray-500">Get started by creating a new VM template.</p>
+            <div className="mt-6">
+              <button
+                onClick={openCreateModal}
+                className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary-600 hover:bg-primary-700"
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                New Template
+              </button>
+            </div>
+          </div>
+        ) : viewMode === 'tile' ? (
+          /* Tile View */
+          <div className="mt-8 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+            {templates.map((template) => (
+              <div
+                key={template.id}
+                className="bg-white overflow-hidden shadow rounded-lg"
+              >
+                <div className="p-5">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center">
+                      <div className={clsx(
+                        "flex-shrink-0 rounded-md p-2",
+                        template.os_type === 'linux' ? 'bg-orange-100' : 'bg-blue-100'
+                      )}>
+                        {template.os_type === 'linux' ? (
+                          <Server className="h-6 w-6 text-orange-600" />
+                        ) : (
+                          <Monitor className="h-6 w-6 text-blue-600" />
+                        )}
+                      </div>
+                      <div className="ml-4">
+                        <h3 className="text-lg font-medium text-gray-900">{template.name}</h3>
+                        <p className="text-sm text-gray-500">{template.os_variant}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {template.description && (
+                    <p className="mt-3 text-sm text-gray-600 line-clamp-2">{template.description}</p>
+                  )}
+
+                  <div className="mt-4 grid grid-cols-3 gap-2 text-center text-xs">
+                    <div className="bg-gray-50 rounded p-2">
+                      <div className="font-semibold text-gray-900">{template.default_cpu}</div>
+                      <div className="text-gray-500">CPU</div>
+                    </div>
+                    <div className="bg-gray-50 rounded p-2">
+                      <div className="font-semibold text-gray-900">{template.default_ram_mb / 1024}GB</div>
+                      <div className="text-gray-500">RAM</div>
+                    </div>
+                    <div className="bg-gray-50 rounded p-2">
+                      <div className="font-semibold text-gray-900">{template.default_disk_gb}GB</div>
+                      <div className="text-gray-500">Disk</div>
+                    </div>
+                  </div>
+
+                  {template.tags.length > 0 && (
+                    <div className="mt-3 flex flex-wrap gap-1">
+                      {template.tags.map((tag) => (
+                        <span
+                          key={tag}
+                          className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800"
+                        >
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="bg-gray-50 px-5 py-3 flex justify-end space-x-2">
+                  <button
+                    onClick={() => handleClone(template)}
+                    className="p-2 text-gray-400 hover:text-gray-600"
+                    title="Clone"
+                  >
+                    <Copy className="h-4 w-4" />
+                  </button>
+                  <button
+                    onClick={() => openEditModal(template)}
+                    className="p-2 text-gray-400 hover:text-primary-600"
+                    title="Edit"
+                  >
+                    <Pencil className="h-4 w-4" />
+                  </button>
+                  <button
+                    onClick={() => handleDelete(template)}
+                    className="p-2 text-gray-400 hover:text-red-600"
+                    title="Delete"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          /* List View */
+          <div className="mt-8 bg-white shadow rounded-lg overflow-hidden">
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Template
+                  </th>
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    OS
+                  </th>
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Resources
+                  </th>
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Tags
+                  </th>
+                  <th scope="col" className="relative px-6 py-3">
+                    <span className="sr-only">Actions</span>
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {templates.map((template) => (
+                  <tr key={template.id} className="hover:bg-gray-50">
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="flex items-center">
+                        <div className={clsx(
+                          "flex-shrink-0 rounded-md p-2",
+                          template.os_type === 'linux' ? 'bg-orange-100' : 'bg-blue-100'
+                        )}>
+                          {template.os_type === 'linux' ? (
+                            <Server className="h-5 w-5 text-orange-600" />
+                          ) : (
+                            <Monitor className="h-5 w-5 text-blue-600" />
+                          )}
+                        </div>
+                        <div className="ml-4">
+                          <div className="text-sm font-medium text-gray-900">{template.name}</div>
+                          {template.description && (
+                            <div className="text-sm text-gray-500 truncate max-w-xs">{template.description}</div>
+                          )}
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm text-gray-900">{template.os_variant}</div>
+                      <div className="text-xs text-gray-500 capitalize">{template.os_type}</div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                      <div className="flex items-center space-x-4">
+                        <span>{template.default_cpu} CPU</span>
+                        <span>{template.default_ram_mb / 1024} GB RAM</span>
+                        <span>{template.default_disk_gb} GB Disk</span>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      {template.tags.length > 0 ? (
+                        <div className="flex flex-wrap gap-1">
+                          {template.tags.slice(0, 3).map((tag) => (
+                            <span
+                              key={tag}
+                              className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800"
+                            >
+                              {tag}
+                            </span>
+                          ))}
+                          {template.tags.length > 3 && (
+                            <span className="text-xs text-gray-500">+{template.tags.length - 3}</span>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-gray-400 text-sm">-</span>
+                      )}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                      <div className="flex justify-end space-x-2">
+                        <button
+                          onClick={() => handleClone(template)}
+                          className="p-1.5 text-gray-400 hover:text-gray-600 rounded"
+                          title="Clone"
+                        >
+                          <Copy className="h-4 w-4" />
+                        </button>
+                        <button
+                          onClick={() => openEditModal(template)}
+                          className="p-1.5 text-gray-400 hover:text-primary-600 rounded"
+                          title="Edit"
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </button>
+                        <button
+                          onClick={() => handleDelete(template)}
+                          className="p-1.5 text-gray-400 hover:text-red-600 rounded"
+                          title="Delete"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </>
     )
   }
 
@@ -354,258 +603,101 @@ export default function Templates() {
     <div>
       <div className="sm:flex sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">VM Templates</h1>
+          <h1 className="text-2xl font-bold text-gray-900">VM Library</h1>
           <p className="mt-2 text-sm text-gray-700">
-            Create and manage VM templates for your cyber ranges
+            Manage preconfigured snapshots and base OS images
           </p>
         </div>
         <div className="mt-4 sm:mt-0 flex items-center space-x-3">
-          {/* View Toggle */}
-          <div className="flex items-center bg-gray-100 rounded-lg p-1">
-            <button
-              onClick={() => setViewMode('tile')}
-              className={clsx(
-                "p-2 rounded-md transition-colors",
-                viewMode === 'tile'
-                  ? "bg-white text-primary-600 shadow-sm"
-                  : "text-gray-500 hover:text-gray-700"
-              )}
-              title="Tile view"
-            >
-              <LayoutGrid className="h-4 w-4" />
-            </button>
-            <button
-              onClick={() => setViewMode('list')}
-              className={clsx(
-                "p-2 rounded-md transition-colors",
-                viewMode === 'list'
-                  ? "bg-white text-primary-600 shadow-sm"
-                  : "text-gray-500 hover:text-gray-700"
-              )}
-              title="List view"
-            >
-              <List className="h-4 w-4" />
-            </button>
-          </div>
-          <button
-            onClick={openCreateModal}
-            className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500"
-          >
-            <Plus className="h-4 w-4 mr-2" />
-            New Template
-          </button>
+          {/* View Toggle - only show on Base OS Images tab */}
+          {activeTab === 'base-images' && (
+            <>
+              <div className="flex items-center bg-gray-100 rounded-lg p-1">
+                <button
+                  onClick={() => setViewMode('tile')}
+                  className={clsx(
+                    "p-2 rounded-md transition-colors",
+                    viewMode === 'tile'
+                      ? "bg-white text-primary-600 shadow-sm"
+                      : "text-gray-500 hover:text-gray-700"
+                  )}
+                  title="Tile view"
+                >
+                  <LayoutGrid className="h-4 w-4" />
+                </button>
+                <button
+                  onClick={() => setViewMode('list')}
+                  className={clsx(
+                    "p-2 rounded-md transition-colors",
+                    viewMode === 'list'
+                      ? "bg-white text-primary-600 shadow-sm"
+                      : "text-gray-500 hover:text-gray-700"
+                  )}
+                  title="List view"
+                >
+                  <List className="h-4 w-4" />
+                </button>
+              </div>
+              <button
+                onClick={openCreateModal}
+                className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500"
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                New Template
+              </button>
+            </>
+          )}
         </div>
       </div>
 
-      {templates.length === 0 ? (
-        <div className="mt-8 text-center">
-          <Server className="mx-auto h-12 w-12 text-gray-400" />
-          <h3 className="mt-2 text-sm font-medium text-gray-900">No templates</h3>
-          <p className="mt-1 text-sm text-gray-500">Get started by creating a new VM template.</p>
-          <div className="mt-6">
-            <button
-              onClick={openCreateModal}
-              className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary-600 hover:bg-primary-700"
-            >
-              <Plus className="h-4 w-4 mr-2" />
-              New Template
-            </button>
-          </div>
-        </div>
-      ) : viewMode === 'tile' ? (
-        /* Tile View */
-        <div className="mt-8 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-          {templates.map((template) => (
-            <div
-              key={template.id}
-              className="bg-white overflow-hidden shadow rounded-lg"
-            >
-              <div className="p-5">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center">
-                    <div className={clsx(
-                      "flex-shrink-0 rounded-md p-2",
-                      template.os_type === 'linux' ? 'bg-orange-100' : 'bg-blue-100'
-                    )}>
-                      {template.os_type === 'linux' ? (
-                        <Server className="h-6 w-6 text-orange-600" />
-                      ) : (
-                        <Monitor className="h-6 w-6 text-blue-600" />
-                      )}
-                    </div>
-                    <div className="ml-4">
-                      <h3 className="text-lg font-medium text-gray-900">{template.name}</h3>
-                      <p className="text-sm text-gray-500">{template.os_variant}</p>
-                    </div>
-                  </div>
-                </div>
+      {/* Tab Navigation */}
+      <div className="mt-6 border-b border-gray-200">
+        <nav className="-mb-px flex space-x-8" aria-label="Tabs">
+          <button
+            onClick={() => setActiveTab('snapshots')}
+            className={clsx(
+              "flex items-center whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm",
+              activeTab === 'snapshots'
+                ? "border-primary-500 text-primary-600"
+                : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+            )}
+          >
+            <Camera className={clsx(
+              "mr-2 h-5 w-5",
+              activeTab === 'snapshots' ? "text-primary-500" : "text-gray-400"
+            )} />
+            Snapshots
+          </button>
+          <button
+            onClick={() => setActiveTab('base-images')}
+            className={clsx(
+              "flex items-center whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm",
+              activeTab === 'base-images'
+                ? "border-primary-500 text-primary-600"
+                : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+            )}
+          >
+            <HardDrive className={clsx(
+              "mr-2 h-5 w-5",
+              activeTab === 'base-images' ? "text-primary-500" : "text-gray-400"
+            )} />
+            Base OS Images
+            {templates.length > 0 && (
+              <span className={clsx(
+                "ml-2 py-0.5 px-2.5 rounded-full text-xs font-medium",
+                activeTab === 'base-images'
+                  ? "bg-primary-100 text-primary-600"
+                  : "bg-gray-100 text-gray-900"
+              )}>
+                {templates.length}
+              </span>
+            )}
+          </button>
+        </nav>
+      </div>
 
-                {template.description && (
-                  <p className="mt-3 text-sm text-gray-600 line-clamp-2">{template.description}</p>
-                )}
-
-                <div className="mt-4 grid grid-cols-3 gap-2 text-center text-xs">
-                  <div className="bg-gray-50 rounded p-2">
-                    <div className="font-semibold text-gray-900">{template.default_cpu}</div>
-                    <div className="text-gray-500">CPU</div>
-                  </div>
-                  <div className="bg-gray-50 rounded p-2">
-                    <div className="font-semibold text-gray-900">{template.default_ram_mb / 1024}GB</div>
-                    <div className="text-gray-500">RAM</div>
-                  </div>
-                  <div className="bg-gray-50 rounded p-2">
-                    <div className="font-semibold text-gray-900">{template.default_disk_gb}GB</div>
-                    <div className="text-gray-500">Disk</div>
-                  </div>
-                </div>
-
-                {template.tags.length > 0 && (
-                  <div className="mt-3 flex flex-wrap gap-1">
-                    {template.tags.map((tag) => (
-                      <span
-                        key={tag}
-                        className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800"
-                      >
-                        {tag}
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div className="bg-gray-50 px-5 py-3 flex justify-end space-x-2">
-                <button
-                  onClick={() => handleClone(template)}
-                  className="p-2 text-gray-400 hover:text-gray-600"
-                  title="Clone"
-                >
-                  <Copy className="h-4 w-4" />
-                </button>
-                <button
-                  onClick={() => openEditModal(template)}
-                  className="p-2 text-gray-400 hover:text-primary-600"
-                  title="Edit"
-                >
-                  <Pencil className="h-4 w-4" />
-                </button>
-                <button
-                  onClick={() => handleDelete(template)}
-                  className="p-2 text-gray-400 hover:text-red-600"
-                  title="Delete"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-      ) : (
-        /* List View */
-        <div className="mt-8 bg-white shadow rounded-lg overflow-hidden">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-              <tr>
-                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Template
-                </th>
-                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  OS
-                </th>
-                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Resources
-                </th>
-                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Tags
-                </th>
-                <th scope="col" className="relative px-6 py-3">
-                  <span className="sr-only">Actions</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {templates.map((template) => (
-                <tr key={template.id} className="hover:bg-gray-50">
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="flex items-center">
-                      <div className={clsx(
-                        "flex-shrink-0 rounded-md p-2",
-                        template.os_type === 'linux' ? 'bg-orange-100' : 'bg-blue-100'
-                      )}>
-                        {template.os_type === 'linux' ? (
-                          <Server className="h-5 w-5 text-orange-600" />
-                        ) : (
-                          <Monitor className="h-5 w-5 text-blue-600" />
-                        )}
-                      </div>
-                      <div className="ml-4">
-                        <div className="text-sm font-medium text-gray-900">{template.name}</div>
-                        {template.description && (
-                          <div className="text-sm text-gray-500 truncate max-w-xs">{template.description}</div>
-                        )}
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm text-gray-900">{template.os_variant}</div>
-                    <div className="text-xs text-gray-500 capitalize">{template.os_type}</div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    <div className="flex items-center space-x-4">
-                      <span>{template.default_cpu} CPU</span>
-                      <span>{template.default_ram_mb / 1024} GB RAM</span>
-                      <span>{template.default_disk_gb} GB Disk</span>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    {template.tags.length > 0 ? (
-                      <div className="flex flex-wrap gap-1">
-                        {template.tags.slice(0, 3).map((tag) => (
-                          <span
-                            key={tag}
-                            className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800"
-                          >
-                            {tag}
-                          </span>
-                        ))}
-                        {template.tags.length > 3 && (
-                          <span className="text-xs text-gray-500">+{template.tags.length - 3}</span>
-                        )}
-                      </div>
-                    ) : (
-                      <span className="text-gray-400 text-sm">—</span>
-                    )}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                    <div className="flex justify-end space-x-2">
-                      <button
-                        onClick={() => handleClone(template)}
-                        className="p-1.5 text-gray-400 hover:text-gray-600 rounded"
-                        title="Clone"
-                      >
-                        <Copy className="h-4 w-4" />
-                      </button>
-                      <button
-                        onClick={() => openEditModal(template)}
-                        className="p-1.5 text-gray-400 hover:text-primary-600 rounded"
-                        title="Edit"
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </button>
-                      <button
-                        onClick={() => handleDelete(template)}
-                        className="p-1.5 text-gray-400 hover:text-red-600 rounded"
-                        title="Delete"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+      {/* Tab Content */}
+      {activeTab === 'snapshots' ? renderSnapshotsTab() : renderBaseImagesTab()}
 
       {/* Modal */}
       {showModal && (
