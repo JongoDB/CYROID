@@ -387,6 +387,15 @@ export interface AddNetworkResponse {
   interfaces: NetworkInterface[]
 }
 
+export interface AvailableIpsResponse {
+  network_id: string
+  network_name: string
+  subnet: string
+  gateway: string
+  available_ips: string[]
+  count: number
+}
+
 export const vmsApi = {
   list: (rangeId: string) => api.get<VM[]>(`/vms?range_id=${rangeId}`),
   get: (id: string) => api.get<VM>(`/vms/${id}`),
@@ -412,6 +421,13 @@ export const vmsApi = {
     }),
   removeNetwork: (vmId: string, networkId: string) =>
     api.delete<AddNetworkResponse>(`/vms/${vmId}/networks/${networkId}`),
+  // Get available IP addresses in a network subnet
+  getAvailableIps: async (networkId: string, limit: number = 20): Promise<AvailableIpsResponse> => {
+    const response = await api.get<AvailableIpsResponse>(`/vms/network/${networkId}/available-ips`, {
+      params: { limit }
+    })
+    return response.data
+  },
 }
 
 // Events API

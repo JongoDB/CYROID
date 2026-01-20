@@ -273,6 +273,59 @@ export default function RangeDetail() {
     ? networks[0].subnet.split('.').slice(0, 2).join('.')
     : '10.100';
 
+  // State for available IPs dropdown
+  const [availableIps, setAvailableIps] = useState<string[]>([])
+  const [loadingIps, setLoadingIps] = useState(false)
+
+  // Helper: Calculate default gateway from subnet (e.g., 10.0.1.0/24 -> 10.0.1.1)
+  const calculateGatewayFromSubnet = useCallback((subnet: string): string => {
+    const match = subnet.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})\/\d{1,2}$/)
+    if (match) {
+      return `${match[1]}.${match[2]}.${match[3]}.1`
+    }
+    return ''
+  }, [])
+
+  // Helper: Get IP prefix from network subnet (e.g., 10.0.1.0/24 -> 10.0.1.)
+  const getIpPrefixFromSubnet = useCallback((subnet: string): string => {
+    const match = subnet.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\./)
+    return match ? match[0] : ''
+  }, [])
+
+  // Fetch available IPs when network is selected for VM
+  const fetchAvailableIps = useCallback(async (networkId: string) => {
+    if (!networkId) {
+      setAvailableIps([])
+      return
+    }
+    setLoadingIps(true)
+    try {
+      const response = await vmsApi.getAvailableIps(networkId, 50)
+      setAvailableIps(response.available_ips || [])
+      // Auto-select the first available IP
+      if (response.available_ips?.length > 0) {
+        setVmForm(prev => ({ ...prev, ip_address: response.available_ips[0] }))
+      }
+    } catch (err) {
+      console.error('Failed to fetch available IPs:', err)
+      setAvailableIps([])
+    } finally {
+      setLoadingIps(false)
+    }
+  }, [])
+
+  // Handler: When subnet changes, auto-fill gateway
+  const handleSubnetChange = useCallback((subnet: string) => {
+    const gateway = calculateGatewayFromSubnet(subnet)
+    setNetworkForm(prev => ({ ...prev, subnet, gateway }))
+  }, [calculateGatewayFromSubnet])
+
+  // Handler: When network is selected for VM, fetch available IPs and set prefix
+  const handleNetworkSelectForVm = useCallback((networkId: string) => {
+    setVmForm(prev => ({ ...prev, network_id: networkId, ip_address: '' }))
+    fetchAvailableIps(networkId)
+  }, [fetchAvailableIps])
+
   // Determine if selected image requires emulation on ARM host
   const imageRequiresEmulation = useMemo(() => {
     if (!isArmHost || !selectedImage) return false
@@ -1196,10 +1249,11 @@ export default function RangeDetail() {
                       type="text"
                       required
                       value={networkForm.subnet}
-                      onChange={(e) => setNetworkForm({ ...networkForm, subnet: e.target.value })}
+                      onChange={(e) => handleSubnetChange(e.target.value)}
                       className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
                       placeholder="10.0.1.0/24"
                     />
+                    <p className="mt-1 text-xs text-gray-500">Gateway will auto-fill as .1 in subnet</p>
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700">Gateway</label>
@@ -1525,7 +1579,7 @@ export default function RangeDetail() {
                   <select
                     required
                     value={vmForm.network_id}
-                    onChange={(e) => setVmForm({ ...vmForm, network_id: e.target.value })}
+                    onChange={(e) => handleNetworkSelectForVm(e.target.value)}
                     className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
                   >
                     <option value="">Select a network</option>
@@ -1534,16 +1588,51 @@ export default function RangeDetail() {
                     ))}
                   </select>
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700">Hostname</label>
-                  <input
-                    type="text"
-                    required
-                    value={vmForm.hostname}
-                    onChange={(e) => setVmForm({ ...vmForm, hostname: e.target.value })}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
-                    placeholder="web-server-01"
-                  />
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Hostname</label>
+                    <input
+                      type="text"
+                      required
+                      value={vmForm.hostname}
+                      onChange={(e) => setVmForm({ ...vmForm, hostname: e.target.value })}
+                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                      placeholder="web-server-01"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">IP Address</label>
+                    {loadingIps ? (
+                      <div className="mt-1 flex items-center text-gray-500 text-sm">
+                        <Loader2 className="animate-spin h-4 w-4 mr-2" />
+                        Loading IPs...
+                      </div>
+                    ) : availableIps.length > 0 ? (
+                      <select
+                        required
+                        value={vmForm.ip_address}
+                        onChange={(e) => setVmForm({ ...vmForm, ip_address: e.target.value })}
+                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                      >
+                        {availableIps.map(ip => (
+                          <option key={ip} value={ip}>{ip}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        type="text"
+                        required
+                        value={vmForm.ip_address}
+                        onChange={(e) => setVmForm({ ...vmForm, ip_address: e.target.value })}
+                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                        placeholder={vmForm.network_id ? 'No available IPs' : 'Select network first'}
+                        disabled={!vmForm.network_id}
+                      />
+                    )}
+                    {vmForm.network_id && availableIps.length > 0 && (
+                      <p className="mt-1 text-xs text-gray-500">{availableIps.length} IPs available</p>
+                    )}
+                  </div>
                 </div>
                 <div className="grid grid-cols-3 gap-4">
                   <div>
