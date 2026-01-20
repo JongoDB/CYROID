@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import { VM, VMStats } from '../../types'
 import { vmsApi } from '../../services/api'
 import {
-  Play, Square, RotateCcw, Terminal, Server, Cpu, HardDrive
+  Play, Square, RotateCcw, Terminal, Server, Cpu, HardDrive, Monitor
 } from 'lucide-react'
 import clsx from 'clsx'
 import { EmulationWarning } from '../common/EmulationWarning'
@@ -158,13 +158,33 @@ export function VMGrid({ vms, onRefresh, onOpenConsole }: Props) {
                   >
                     <RotateCcw className="w-4 h-4 text-blue-600" />
                   </button>
-                  <button
-                    onClick={() => onOpenConsole(vm.id, vm.hostname)}
-                    className="p-1.5 hover:bg-gray-100 rounded"
-                    title="Console"
-                  >
-                    <Terminal className="w-4 h-4 text-gray-600" />
-                  </button>
+                  {/* Console button - show based on display_type */}
+                  {vm.display_type === 'desktop' ? (
+                    <button
+                      onClick={() => onOpenConsole(vm.id, vm.hostname)}
+                      className="p-1.5 hover:bg-purple-100 rounded"
+                      title="VNC Console (Desktop)"
+                    >
+                      <Monitor className="w-4 h-4 text-purple-600" />
+                    </button>
+                  ) : vm.display_type === 'server' || vm.display_type === 'headless' ? (
+                    <button
+                      onClick={() => onOpenConsole(vm.id, vm.hostname)}
+                      className="p-1.5 hover:bg-gray-100 rounded"
+                      title="Terminal Console"
+                    >
+                      <Terminal className="w-4 h-4 text-gray-600" />
+                    </button>
+                  ) : (
+                    /* Null/undefined - show generic console button */
+                    <button
+                      onClick={() => onOpenConsole(vm.id, vm.hostname)}
+                      className="p-1.5 hover:bg-gray-100 rounded"
+                      title="Console"
+                    >
+                      <Terminal className="w-4 h-4 text-gray-600" />
+                    </button>
+                  )}
                 </>
               )}
             </div>

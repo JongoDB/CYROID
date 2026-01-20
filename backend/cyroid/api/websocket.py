@@ -11,6 +11,7 @@ import websockets
 
 from cyroid.database import get_db
 from cyroid.models.vm import VM
+from cyroid.models.range import Range
 from cyroid.utils.security import decode_access_token
 
 logger = logging.getLogger(__name__)
@@ -19,6 +20,19 @@ router = APIRouter(tags=["WebSocket"])
 
 # VNC port for desktop VMs (noVNC websockify)
 VNC_WEBSOCKET_PORT = 8006
+
+
+def get_dind_docker_client(range_obj: Range):
+    """Get a Docker client for a DinD range.
+
+    Returns None if range is not a DinD deployment.
+    """
+    if not range_obj.dind_container_id or not range_obj.dind_docker_url:
+        return None
+
+    from cyroid.services.dind_service import get_dind_service
+    dind_service = get_dind_service()
+    return dind_service.get_range_client(str(range_obj.id), range_obj.dind_docker_url)
 
 
 async def get_current_user_ws(websocket: WebSocket, token: str, db: Session):
@@ -47,6 +61,9 @@ async def vm_console(
     """
     WebSocket endpoint for VM console access.
     Provides interactive terminal to running containers.
+
+    For DinD-isolated ranges, connects to the Docker daemon inside the DinD container.
+    For non-DinD ranges (legacy), connects to the host Docker daemon.
     """
     await websocket.accept()
 
@@ -59,7 +76,7 @@ async def vm_console(
         if not user:
             return
 
-        # Get VM
+        # Get VM with range loaded
         vm = db.query(VM).filter(VM.id == vm_id).first()
         if not vm:
             await websocket.close(code=4004, reason="VM not found")
@@ -69,19 +86,33 @@ async def vm_console(
             await websocket.close(code=4000, reason="VM has no running container")
             return
 
-        # Import Docker service
-        from cyroid.services.docker_service import get_docker_service
-        docker = get_docker_service()
+        # Get the range to check if it's a DinD deployment
+        range_obj = db.query(Range).filter(Range.id == vm.range_id).first()
+        if not range_obj:
+            await websocket.close(code=4000, reason="VM range not found")
+            return
+
+        # Get the appropriate Docker client (DinD or host)
+        dind_client = get_dind_docker_client(range_obj)
+        if dind_client:
+            # DinD deployment - use the range's Docker client
+            docker_client = dind_client
+            logger.debug(f"Using DinD Docker client for VM {vm_id}")
+        else:
+            # Non-DinD (legacy) - use host Docker client
+            from cyroid.services.docker_service import get_docker_service
+            docker_client = get_docker_service().client
+            logger.debug(f"Using host Docker client for VM {vm_id}")
 
         # Get container and create exec instance
-        container = docker.client.containers.get(vm.container_id)
+        container = docker_client.containers.get(vm.container_id)
 
         # Try /bin/bash first, fall back to /bin/sh
         # Use shell with login to get proper environment
         shell_cmd = ["/bin/sh", "-c", "if [ -x /bin/bash ]; then exec /bin/bash; else exec /bin/sh; fi"]
 
         # Create interactive exec instance
-        exec_instance = docker.client.api.exec_create(
+        exec_instance = docker_client.api.exec_create(
             vm.container_id,
             cmd=shell_cmd,
             stdin=True,
@@ -91,7 +122,7 @@ async def vm_console(
         )
 
         # Start exec and get socket
-        exec_socket = docker.client.api.exec_start(
+        exec_socket = docker_client.api.exec_start(
             exec_instance["Id"],
             socket=True,
             tty=True,
@@ -180,6 +211,13 @@ async def vm_vnc_console(
     WebSocket proxy for VNC console access (noVNC).
     Proxies WebSocket traffic to the VM's noVNC server for graphical desktop access.
     Used for Windows VMs and Linux VMs with desktop environments.
+
+    For DinD-isolated ranges:
+        - Uses iptables DNAT port forwarding via the DinD management IP
+        - VNC traffic: Traefik -> DinD mgmt IP:proxy_port -> iptables DNAT -> VM:vnc_port
+
+    For non-DinD ranges (legacy):
+        - Connects directly to the container's IP address on the host Docker network
     """
     await websocket.accept()
 
@@ -202,31 +240,48 @@ async def vm_vnc_console(
             await websocket.close(code=4000, reason="VM has no running container")
             return
 
-        # Get container IP address
-        from cyroid.services.docker_service import get_docker_service
-        docker = get_docker_service()
+        # Get the range to check for DinD and VNC proxy mappings
+        range_obj = db.query(Range).filter(Range.id == vm.range_id).first()
+        if not range_obj:
+            await websocket.close(code=4000, reason="VM range not found")
+            return
 
-        try:
-            container = docker.client.containers.get(vm.container_id)
-            # Get IP from the first network the container is attached to
-            networks = container.attrs.get("NetworkSettings", {}).get("Networks", {})
-            container_ip = None
-            for network_name, network_config in networks.items():
-                container_ip = network_config.get("IPAddress")
-                if container_ip:
-                    break
+        # Determine VNC connection target
+        vnc_host = None
+        vnc_port = VNC_WEBSOCKET_PORT
 
-            if not container_ip:
-                await websocket.close(code=4000, reason="Could not determine container IP")
+        # Check if this is a DinD deployment with VNC proxy mappings
+        vm_id_str = str(vm_id)
+        if range_obj.vnc_proxy_mappings and vm_id_str in range_obj.vnc_proxy_mappings:
+            # DinD deployment - use proxy mapping
+            proxy_info = range_obj.vnc_proxy_mappings[vm_id_str]
+            vnc_host = proxy_info.get("proxy_host")
+            vnc_port = proxy_info.get("proxy_port", VNC_WEBSOCKET_PORT)
+            logger.debug(f"Using DinD VNC proxy for VM {vm_id}: {vnc_host}:{vnc_port}")
+        else:
+            # Non-DinD (legacy) or no proxy mapping - get container IP directly
+            from cyroid.services.docker_service import get_docker_service
+            docker = get_docker_service()
+
+            try:
+                container = docker.client.containers.get(vm.container_id)
+                # Get IP from the first network the container is attached to
+                networks = container.attrs.get("NetworkSettings", {}).get("Networks", {})
+                for network_name, network_config in networks.items():
+                    vnc_host = network_config.get("IPAddress")
+                    if vnc_host:
+                        break
+            except Exception as e:
+                logger.error(f"Failed to get container info for VM {vm_id}: {e}")
+                await websocket.close(code=4000, reason="Container not found")
                 return
 
-        except Exception as e:
-            logger.error(f"Failed to get container info for VM {vm_id}: {e}")
-            await websocket.close(code=4000, reason="Container not found")
+        if not vnc_host:
+            await websocket.close(code=4000, reason="Could not determine VNC connection target")
             return
 
         # Connect to the VNC WebSocket server
-        vnc_url = f"ws://{container_ip}:{VNC_WEBSOCKET_PORT}/websockify"
+        vnc_url = f"ws://{vnc_host}:{vnc_port}/websockify"
         logger.info(f"Connecting to VNC at {vnc_url} for VM {vm_id}")
 
         try:

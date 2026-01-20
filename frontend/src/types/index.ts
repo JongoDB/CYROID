@@ -101,7 +101,7 @@ export interface VM {
   windows_username: string | null
   iso_url: string | null
   iso_path: string | null
-  display_type: 'desktop' | 'server' | null
+  display_type: 'desktop' | 'server' | 'headless' | null
   // Extended dockur/windows configuration
   use_dhcp: boolean
   disk2_gb: number | null

@@ -69,6 +69,16 @@ export default function ExecutionConsole() {
   }
 
   const handleOpenConsole = async (vmId: string, hostname: string) => {
+    // Find the VM to check its display_type
+    const vm = vms.find(v => v.id === vmId)
+
+    if (vm?.display_type === 'server' || vm?.display_type === 'headless') {
+      // Server/headless VMs only have terminal console
+      setSelectedVM({ id: vmId, hostname })
+      return
+    }
+
+    // Desktop VMs or unknown display_type - try VNC
     const token = localStorage.getItem('token') || ''
 
     // Check if VM has VNC capability
