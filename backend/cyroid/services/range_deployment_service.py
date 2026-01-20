@@ -20,7 +20,6 @@ from cyroid.models import Range, Network, VM, RangeStatus
 from cyroid.models.template import VMType
 from cyroid.services.dind_service import DinDService, get_dind_service
 from cyroid.services.docker_service import DockerService, get_docker_service
-from cyroid.services.vnc_proxy_service import VNCProxyService
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -40,11 +39,9 @@ class RangeDeploymentService:
         self,
         docker_service: Optional[DockerService] = None,
         dind_service: Optional[DinDService] = None,
-        vnc_proxy_service: Optional[VNCProxyService] = None,
     ):
         self._docker_service = docker_service
         self._dind_service = dind_service
-        self._vnc_proxy_service = vnc_proxy_service
 
     @property
     def docker_service(self) -> DockerService:
@@ -57,12 +54,6 @@ class RangeDeploymentService:
         if self._dind_service is None:
             self._dind_service = get_dind_service()
         return self._dind_service
-
-    @property
-    def vnc_proxy_service(self) -> VNCProxyService:
-        if self._vnc_proxy_service is None:
-            self._vnc_proxy_service = VNCProxyService(self.docker_service)
-        return self._vnc_proxy_service
 
     async def deploy_range(
         self,
@@ -248,11 +239,10 @@ class RangeDeploymentService:
 
         db.commit()
 
-        # 5. Deploy VNC proxy for console access
-        dind_mgmt_ip = dind_info["mgmt_ip"]
+        # 5. Set up VNC port forwarding using iptables DNAT (replaces nginx proxy)
         vm_ports = []
         for vm in vms:
-            if vm.container_id:
+            if vm.container_id and vm.ip_address:
                 # Determine VNC port based on VM type
                 vnc_port = 8006  # Default for QEMU/Windows
                 if vm.template and vm.template.vm_type == VMType.CONTAINER:
@@ -268,23 +258,21 @@ class RangeDeploymentService:
                     "vm_id": str(vm.id),
                     "hostname": vm.hostname,
                     "vnc_port": vnc_port,
-                    "container_name": f"cyroid-{vm.hostname}-{str(vm.id)[:8]}",
+                    "ip_address": vm.ip_address,
                 })
 
         if vm_ports:
             try:
-                proxy_result = await self.vnc_proxy_service.deploy_vnc_proxy(
+                port_mappings = await self.dind_service.setup_vnc_port_forwarding(
                     range_id=range_id,
-                    docker_url=docker_url,
-                    dind_mgmt_ip=dind_mgmt_ip,
                     vm_ports=vm_ports,
                 )
-                range_obj.vnc_proxy_mappings = proxy_result["port_mappings"]
+                range_obj.vnc_proxy_mappings = port_mappings
                 db.commit()
-                logger.info(f"Deployed VNC proxy for range {range_id} with {len(vm_ports)} ports")
+                logger.info(f"Set up VNC port forwarding for range {range_id} with {len(vm_ports)} ports")
             except Exception as e:
-                logger.warning(f"Failed to deploy VNC proxy for range {range_id}: {e}")
-                # Don't fail the deployment if VNC proxy fails - console will be unavailable
+                logger.warning(f"Failed to set up VNC port forwarding for range {range_id}: {e}")
+                # Don't fail the deployment if VNC forwarding fails - console will be unavailable
 
         return {
             "range_id": range_id,

@@ -1,7 +1,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Status-Active%20Development-brightgreen" alt="Status">
   <img src="https://img.shields.io/badge/Phase-5%20of%207-blue" alt="Phase">
-  <img src="https://img.shields.io/badge/Version-0.11.0--alpha-orange" alt="Version">
+  <img src="https://img.shields.io/badge/Version-0.12.0--alpha-orange" alt="Version">
   <img src="https://img.shields.io/badge/License-Proprietary-red" alt="License">
 </p>
 
@@ -38,11 +38,45 @@
 
 ---
 
-## What's New in v0.11.0
+## What's New in v0.12.0
+
+### Simplified Architecture
+
+This release simplifies the range architecture by removing unnecessary components:
+
+- **VyOS Now Optional**: Ranges deploy without VyOS by default. DinD handles routing via iptables
+- **Native VNC Routing**: Replaced nginx proxy with iptables DNAT for VNC console access
+- **Removed Promote-to-Library**: Snapshots are now created only from live VM instances
+- **Inter-Network Routing**: DinD can route between networks using iptables FORWARD rules
+
+### Streamlined VNC Console Access
+
+```
+Before (v0.11.0):
+  Traefik → DinD:15900 → nginx (inside DinD) → VM:8006
+
+After (v0.12.0):
+  Traefik → DinD:15900 → iptables DNAT → VM:8006
+```
+
+This eliminates the nginx container inside DinD, reducing complexity and resource usage.
+
+### DinD as Router (VyOS Optional)
+
+For simple ranges, DinD handles all routing:
+- Network isolation via iptables FORWARD rules
+- NAT/MASQUERADE for internet access
+- Inter-network routing when needed
+
+VyOS remains available for advanced scenarios (DHCP server, complex routing policies).
+
+---
+
+## Architecture Overview
 
 ### DinD (Docker-in-Docker) Isolation
 
-Every range now deploys inside its own isolated Docker-in-Docker container, providing:
+Every range deploys inside its own isolated Docker-in-Docker container:
 
 - **Complete Network Isolation**: Each range has its own Docker daemon and network namespace
 - **Identical IP Spaces**: Multiple ranges can use the same blueprint IPs simultaneously
@@ -242,28 +276,27 @@ Every range now deploys inside its own isolated Docker-in-Docker container, prov
 
 ### Per-Range Network Architecture (Inside DinD)
 
-Each range runs VyOS router containers for internal network management:
+Each range runs inside a DinD container with iptables-based routing (VyOS optional):
 
 ```
 ┌────────────────────────────────────────────────────────────────────────────┐
 │                        Range DinD Container                                 │
 │                                                                             │
 │  ┌───────────────────────────────────────────────────────────────────────┐ │
-│  │               Management Network (10.0.0.0/16)                         │ │
-│  │                      Internal to DinD                                  │ │
+│  │                   DinD iptables (Router)                               │ │
+│  │           - Network isolation via FORWARD rules                        │ │
+│  │           - NAT/MASQUERADE for internet                               │ │
+│  │           - VNC DNAT port forwarding                                  │ │
 │  └─────────┬────────────────────────────────────────────────────────────┘ │
-│            │                                                               │
-│       ┌────┴────┐                                                          │
-│       │ VyOS    │                                                          │
-│       │ Router  │                                                          │
-│       └────┬────┘                                                          │
 │            │                                                               │
 │  ┌─────────┴───────────────────────────────────────────────────────────┐  │
 │  │                                                                      │  │
-│  │  eth1 ──► Network A (10.0.1.0/24) ──┬── VM1 (10.0.1.10)            │  │
-│  │                                      └── VM2 (10.0.1.11)            │  │
+│  │  Network A (10.0.1.0/24) ──┬── VM1 (10.0.1.10)                      │  │
+│  │                             └── VM2 (10.0.1.11)                      │  │
 │  │                                                                      │  │
-│  │  eth2 ──► Network B (10.0.2.0/24) ──── VM3 (10.0.2.10)             │  │
+│  │  Network B (10.0.2.0/24) ──── VM3 (10.0.2.10)                       │  │
+│  │                                                                      │  │
+│  │  (Optional) VyOS Router ──── For DHCP, advanced routing             │  │
 │  └─────────────────────────────────────────────────────────────────────┘  │
 └────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -273,17 +306,18 @@ Each range runs VyOS router containers for internal network management:
 | Feature | Description |
 |---------|-------------|
 | **DinD Isolation** | Each range runs in its own Docker-in-Docker container |
-| **Per-Range VyOS Router** | Each range gets a dedicated VyOS container for routing/NAT |
-| **Network Isolation** | Shield icon toggle - VyOS firewall blocks external access |
-| **Internet Access** | Globe icon toggle - VyOS NAT enables per-network internet |
-| **VNC Access** | Traefik routes through cyroid-ranges to DinD containers |
+| **iptables Routing** | DinD handles network isolation and NAT via iptables |
+| **VyOS Optional** | Add VyOS only for DHCP server or advanced routing policies |
+| **Network Isolation** | Shield icon toggle - iptables FORWARD rules block external access |
+| **Internet Access** | Globe icon toggle - iptables MASQUERADE enables per-network internet |
+| **VNC Access** | Traefik → DinD (iptables DNAT) → VM container |
 
 **Network Connectivity Matrix:**
 
 | is_isolated | internet_enabled | Result |
 |-------------|------------------|--------|
-| ✓ | ✗ | No external access, deny all outbound |
-| ✓ | ✓ | NAT to internet via VyOS, isolated from host |
+| ✓ | ✗ | No external access, iptables DROP on FORWARD |
+| ✓ | ✓ | NAT to internet via iptables MASQUERADE |
 | ✗ | ✗ | Direct Docker bridge access |
 | ✗ | ✓ | Full internet + host access |
 
@@ -831,6 +865,7 @@ Proprietary - All Rights Reserved
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| 0.12.0 | 2026-01-20 | Simplified architecture: VyOS optional, iptables VNC routing, removed promote-to-library |
 | 0.11.0 | 2026-01-19 | DinD isolation for all ranges, simplified deployment |
 | 0.10.1 | 2026-01-16 | Bug fixes, dropdown overlay fix |
 | 0.10.0 | 2026-01-16 | Multi-architecture support (x86_64 + ARM64) |

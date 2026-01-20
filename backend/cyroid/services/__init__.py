@@ -1,5 +1,5 @@
 # cyroid/services/__init__.py
 from .docker_service import DockerService
-from .vnc_proxy_service import VNCProxyService
+from .dind_service import DinDService
 
-__all__ = ['DockerService', 'VNCProxyService']
+__all__ = ['DockerService', 'DinDService']

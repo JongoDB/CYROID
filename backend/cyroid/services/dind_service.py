@@ -604,6 +604,213 @@ class DinDService:
         logger.debug(f"Teardown network isolation for range {range_id} (no-op)")
         pass
 
+    async def setup_vnc_port_forwarding(
+        self,
+        range_id: str,
+        vm_ports: List[dict],
+    ) -> dict[str, dict]:
+        """
+        Set up iptables DNAT rules for VNC port forwarding inside DinD.
+
+        Instead of using nginx proxy, this uses iptables PREROUTING DNAT rules
+        to forward traffic from the DinD management IP to VM VNC ports.
+
+        Architecture:
+            Traefik (host) -> 172.30.1.5:15900 -> iptables DNAT -> vm-container:8006
+
+        Args:
+            range_id: Range identifier
+            vm_ports: List of VM port configurations, each with:
+                - vm_id: VM identifier
+                - hostname: VM hostname
+                - vnc_port: VNC port inside the VM container (e.g., 8006, 6901)
+                - ip_address: IP address of the VM container inside DinD
+
+        Returns:
+            dict mapping vm_id to proxy info:
+                - proxy_port: External port on DinD management IP
+                - proxy_host: DinD management IP
+                - original_port: Original VNC port in VM container
+        """
+        # Base port for VNC proxy - VMs will be mapped to 15900, 15901, 15902, etc.
+        VNC_PROXY_BASE_PORT = 15900
+
+        container_name = self._get_container_name(range_id)
+
+        try:
+            dind_container = self.host_client.containers.get(container_name)
+        except NotFound:
+            logger.error(f"Cannot find DinD container {container_name}")
+            raise ValueError(f"DinD container not found for range {range_id}")
+
+        # Get DinD management IP
+        dind_container.reload()
+        networks = dind_container.attrs["NetworkSettings"]["Networks"]
+        dind_mgmt_ip = networks.get(self.ranges_network, {}).get("IPAddress")
+
+        if not dind_mgmt_ip:
+            raise ValueError(f"Cannot get management IP for DinD container {container_name}")
+
+        port_mappings = {}
+
+        # Build iptables rules for each VM
+        for idx, vm_info in enumerate(vm_ports):
+            vm_id = vm_info["vm_id"]
+            vm_ip = vm_info["ip_address"]
+            vnc_port = vm_info["vnc_port"]
+            external_port = VNC_PROXY_BASE_PORT + idx
+
+            # Record port mapping
+            port_mappings[vm_id] = {
+                "proxy_port": external_port,
+                "proxy_host": dind_mgmt_ip,
+                "original_port": vnc_port,
+            }
+
+            # DNAT rule: forward traffic from external_port to vm_ip:vnc_port
+            # -d {dind_mgmt_ip} matches traffic destined for DinD's management IP
+            dnat_rule = (
+                f"iptables -t nat -A PREROUTING -p tcp "
+                f"-d {dind_mgmt_ip} --dport {external_port} "
+                f"-j DNAT --to-destination {vm_ip}:{vnc_port}"
+            )
+
+            try:
+                exit_code, output = dind_container.exec_run(dnat_rule, privileged=True)
+                if exit_code != 0:
+                    output_str = output.decode() if isinstance(output, bytes) else str(output)
+                    logger.warning(f"VNC DNAT rule failed: {dnat_rule} -> {output_str}")
+                else:
+                    logger.debug(f"Applied VNC DNAT rule: {dnat_rule}")
+            except Exception as e:
+                logger.warning(f"Error applying VNC DNAT rule: {e}")
+
+        # Ensure FORWARD chain allows the forwarded traffic
+        # (May already be set by setup_network_isolation_in_dind, but ensure it)
+        try:
+            # Insert at the beginning to take precedence
+            dind_container.exec_run(
+                "iptables -I FORWARD 1 -m state --state NEW,ESTABLISHED,RELATED -j ACCEPT",
+                privileged=True
+            )
+        except Exception as e:
+            logger.debug(f"Forward rule may already exist: {e}")
+
+        logger.info(
+            f"Set up VNC port forwarding for range {range_id}: "
+            f"{len(port_mappings)} ports via iptables DNAT"
+        )
+
+        return port_mappings
+
+    async def teardown_vnc_port_forwarding(
+        self,
+        range_id: str,
+    ) -> None:
+        """
+        Remove VNC port forwarding iptables rules.
+
+        Note: This is effectively a no-op since destroying the DinD container
+        automatically removes all iptables rules. This method exists for
+        symmetry and potential future use cases.
+
+        Args:
+            range_id: Range identifier
+        """
+        # No explicit action needed - destroying DinD container removes all rules
+        logger.debug(f"Teardown VNC port forwarding for range {range_id} (no-op)")
+
+    async def setup_inter_network_routing(
+        self,
+        range_id: str,
+        docker_url: str,
+        network_pairs: List[tuple[str, str]],
+    ) -> None:
+        """
+        Enable routing between specified networks within a range.
+
+        This allows communication between network-a and network-b within the
+        same range using iptables FORWARD rules. DinD acts as the router.
+
+        By default, networks are isolated from each other (cannot route between
+        them). Use this method to enable specific network-to-network communication.
+
+        Args:
+            range_id: Range identifier
+            docker_url: Docker daemon URL inside DinD
+            network_pairs: List of (network_name_a, network_name_b) pairs to enable routing between
+
+        Example:
+            # Enable routing between "lan" and "dmz" networks
+            await setup_inter_network_routing(
+                range_id="...",
+                docker_url="tcp://...",
+                network_pairs=[("lan", "dmz")]
+            )
+        """
+        container_name = self._get_container_name(range_id)
+
+        try:
+            dind_container = self.host_client.containers.get(container_name)
+        except NotFound:
+            logger.error(f"Cannot find DinD container {container_name}")
+            return
+
+        # Get range client to query network IDs
+        try:
+            range_client = self.get_range_client(range_id, docker_url)
+        except Exception as e:
+            logger.error(f"Cannot connect to Docker daemon in DinD: {e}")
+            return
+
+        # Build mapping of network names to bridge IDs
+        network_bridge_ids = {}
+        all_networks = set()
+        for net_a, net_b in network_pairs:
+            all_networks.add(net_a)
+            all_networks.add(net_b)
+
+        for network in all_networks:
+            if not self._validate_network_name(network):
+                logger.error(f"Invalid network name rejected: {network}")
+                continue
+            bridge_id = self._get_network_bridge_id(range_client, network)
+            if bridge_id:
+                network_bridge_ids[network] = bridge_id
+            else:
+                logger.warning(f"Skipping network '{network}' - could not resolve bridge ID")
+
+        # Add FORWARD rules to allow traffic between network pairs
+        for net_a, net_b in network_pairs:
+            bridge_a = network_bridge_ids.get(net_a)
+            bridge_b = network_bridge_ids.get(net_b)
+
+            if not bridge_a or not bridge_b:
+                logger.warning(f"Skipping routing between {net_a} and {net_b} - missing bridge ID")
+                continue
+
+            # Allow bidirectional traffic between the two networks
+            rules = [
+                f"iptables -I FORWARD 1 -i br-{bridge_a} -o br-{bridge_b} -j ACCEPT",
+                f"iptables -I FORWARD 1 -i br-{bridge_b} -o br-{bridge_a} -j ACCEPT",
+            ]
+
+            for rule in rules:
+                try:
+                    exit_code, output = dind_container.exec_run(rule, privileged=True)
+                    if exit_code != 0:
+                        output_str = output.decode() if isinstance(output, bytes) else str(output)
+                        logger.warning(f"Inter-network routing rule failed: {rule} -> {output_str}")
+                    else:
+                        logger.debug(f"Applied inter-network routing rule: {rule}")
+                except Exception as e:
+                    logger.warning(f"Error applying inter-network routing rule: {e}")
+
+        logger.info(
+            f"Set up inter-network routing for range {range_id}: "
+            f"{len(network_pairs)} network pairs"
+        )
+
 
 # Singleton instance for dependency injection
 _dind_service: Optional[DinDService] = None
