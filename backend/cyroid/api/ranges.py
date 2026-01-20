@@ -286,23 +286,25 @@ def delete_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
         docker = get_docker_service()
         dind = get_dind_service()
 
-        # Check if this is a DinD-based deployment
-        if range_obj.dind_container_id:
-            # DinD-based deployment: destroy the DinD container
-            # This automatically cleans up all VMs and networks inside it
-            logger.info(f"Deleting DinD container for range {range_id}")
-
-            # Run async delete_range_container
+        # Always try DinD container cleanup first (defensive - container may exist
+        # even if dind_container_id wasn't stored due to deployment errors)
+        logger.info(f"Attempting DinD container cleanup for range {range_id}")
+        try:
             asyncio.run(dind.delete_range_container(str(range_id)))
-            logger.info(f"Successfully deleted DinD container for range {range_id}")
+            logger.info(f"DinD container cleanup completed for range {range_id}")
+        except Exception as dind_err:
+            logger.debug(f"DinD cleanup skipped or failed (may not exist): {dind_err}")
 
-            # Clear the Docker client cache for this range
+        # Clear the Docker client cache for this range (always do this)
+        try:
             docker.dind_service.close_range_client(str(range_id))
+        except Exception:
+            pass  # Ignore if cache doesn't exist
 
-        else:
-            # Legacy non-DinD deployment: use label-based cleanup
-            logger.info(f"Cleaning up legacy (non-DinD) range {range_id}")
-            docker.cleanup_range(str(range_id))
+        # Also run legacy label-based cleanup for any orphaned resources
+        # (handles cases where VMs were created outside DinD or partial deployments)
+        logger.info(f"Running legacy cleanup for range {range_id}")
+        docker.cleanup_range(str(range_id))
 
     except Exception as e:
         logger.warning(f"Failed to cleanup Docker resources for range {range_id}: {e}")

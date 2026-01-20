@@ -202,7 +202,10 @@
       "Bash(git -C /Users/JonWFH/jondev/CYROID commit -m \"$\\(cat <<''EOF''\ntest: add VM Library integration tests\n\nAdd comprehensive integration tests for the VM Library feature:\n\n- test_create_vm_from_snapshot: Verify VMs can be created from snapshots\n- test_create_vm_requires_template_or_snapshot: Validation for VM creation\n- test_create_vm_cannot_have_both_template_and_snapshot: Mutual exclusivity\n- test_promote_image_to_library: Admin can promote cached images\n- test_promote_image_requires_admin: Non-admin users are rejected\n- test_deployment_validation: Range pre-deployment validation works\n- test_deployment_validation_with_vms: Validation with snapshot-based VMs\n- test_deployment_validation_nonexistent_range: 404 for missing ranges\n- test_get_vm_shows_snapshot_info: VM GET returns snapshot source\n- test_list_vms_includes_snapshot_vms: VM LIST includes snapshot VMs\n\nAlso fixes SQLAlchemy foreign_keys relationship definitions in VM and\nSnapshot models that were causing mapper initialization failures.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
       "mcp__plugin_playwright_playwright__browser_press_key",
       "mcp__plugin_playwright_playwright__browser_tabs",
-      "mcp__plugin_playwright_playwright__browser_evaluate"
+      "mcp__plugin_playwright_playwright__browser_evaluate",
+      "Bash(TOKEN=\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2ZGI1ODE5ZC1lZmUzLTRjMWItOTY2Yi02MzFmYWUwZDZjNjIiLCJleHAiOjE3Njg5NDA5ODJ9.oUPi0CksWQoA5wNcu_kIn3qK5xYtrWJw_io4-O2Bvfc\")",
+      "Bash(# Check VNC port forwarding - look for iptables rules docker exec cyroid-range-30249f00f372 iptables -t nat -L PREROUTING -n || echo \"\"iptables not available\"\" # Check traefik routes for this range ls -la /Users/JonWFH/jondev/CYROID/traefik/dynamic/)",
+      "Bash(__NEW_LINE_cb4040915f0585aa__ git diff --cached --stat)"
     ]
   },
   "enableAllProjectMcpServers": true,
