@@ -462,7 +462,7 @@ export const connectionsApi = {
 }
 
 // Cache API
-import type { CachedImage, ISOCacheStatus, GoldenImagesStatus, CacheStats, RecommendedImages, WindowsVersionsResponse, LinuxVersionsResponse, LinuxISODownloadResponse, LinuxISODownloadStatus, CustomISOList, CustomISODownloadResponse, CustomISOStatusResponse, ISOUploadResponse, WindowsISODownloadResponse, WindowsISODownloadStatus, AllSnapshotsStatus, SnapshotResponse, PromoteToLibraryResponse } from '../types'
+import type { CachedImage, ISOCacheStatus, GoldenImagesStatus, CacheStats, RecommendedImages, WindowsVersionsResponse, LinuxVersionsResponse, LinuxISODownloadResponse, LinuxISODownloadStatus, CustomISOList, CustomISODownloadResponse, CustomISOStatusResponse, ISOUploadResponse, WindowsISODownloadResponse, WindowsISODownloadStatus, AllSnapshotsStatus, SnapshotResponse } from '../types'
 
 export interface DockerPullStatus {
   status: 'pulling' | 'completed' | 'failed' | 'cancelled' | 'not_found' | 'already_cached' | 'already_pulling'
@@ -630,19 +630,6 @@ export const cacheApi = {
   // Stats and info
   getStats: () => api.get<CacheStats>('/cache/stats'),
   getRecommendedImages: () => api.get<RecommendedImages>('/cache/recommended-images'),
-
-  // Promote image to VM Library
-  promoteToLibrary: (data: {
-    image_name: string
-    name: string
-    description?: string
-    os_type?: string
-    vm_type?: string
-    default_cpu?: number
-    default_ram_mb?: number
-    default_disk_gb?: number
-    tags?: string[]
-  }) => api.post<PromoteToLibraryResponse>('/cache/promote-to-library', data),
 }
 
 // Walkthrough API

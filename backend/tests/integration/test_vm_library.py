@@ -3,13 +3,11 @@
 
 Tests the following VM Library features:
 1. Creating VMs from snapshots (snapshot-based VM creation)
-2. Promoting Docker images from cache to VM Library
-3. Pre-deployment validation for ranges
+2. Pre-deployment validation for ranges
 
 Note: The first user registered in the system becomes admin automatically.
 """
 import pytest
-from unittest.mock import MagicMock, patch
 
 
 @pytest.fixture
@@ -222,71 +220,6 @@ class TestVMLibrary:
         )
 
         assert response.status_code == 422  # Validation error
-
-    @pytest.mark.integration
-    def test_promote_image_to_library(self, client, auth_headers):
-        """Test promoting a cached Docker image to the VM Library.
-
-        Note: auth_headers is the first user, which is automatically admin.
-
-        Verifies that:
-        - POST /api/v1/cache/promote-to-library works
-        - Response has name and is_global=True
-        """
-        # Mock the Docker client to simulate an existing image
-        mock_image = MagicMock()
-        mock_image.id = "sha256:testimage123456"
-        mock_image.tags = ["alpine:latest"]
-
-        with patch('cyroid.api.cache.get_docker_service') as mock_get_docker:
-            mock_docker = MagicMock()
-            mock_docker.client.images.get.return_value = mock_image
-            mock_get_docker.return_value = mock_docker
-
-            response = client.post(
-                "/api/v1/cache/promote-to-library",
-                headers=auth_headers,  # First user is admin
-                json={
-                    "image_name": "alpine:latest",
-                    "name": "Alpine Linux Library",
-                    "description": "Lightweight Alpine Linux container",
-                    "os_type": "linux",
-                    "vm_type": "container",
-                    "default_cpu": 1,
-                    "default_ram_mb": 256,
-                    "default_disk_gb": 10,
-                    "tags": ["linux", "alpine", "minimal"],
-                },
-            )
-
-        assert response.status_code == 201, f"Failed to promote image: {response.json()}"
-        data = response.json()
-
-        # Verify the promoted snapshot
-        assert data["name"] == "Alpine Linux Library"
-        assert data["is_global"] is True
-        assert data["docker_image_tag"] == "alpine:latest"
-        assert data["os_type"] == "linux"
-        assert data["vm_type"] == "container"
-
-    @pytest.mark.integration
-    def test_promote_image_requires_admin(self, client, non_admin_auth_headers):
-        """Test that promoting images requires admin role.
-
-        Uses non_admin_auth_headers which creates a second user without admin rights.
-        """
-        response = client.post(
-            "/api/v1/cache/promote-to-library",
-            headers=non_admin_auth_headers,  # Non-admin user
-            json={
-                "image_name": "alpine:latest",
-                "name": "Should Fail",
-                "os_type": "linux",
-                "vm_type": "container",
-            },
-        )
-
-        assert response.status_code == 403
 
     @pytest.mark.integration
     def test_deployment_validation(self, client, auth_headers, test_range):
