@@ -4,6 +4,7 @@ from uuid import UUID
 import logging
 
 from fastapi import APIRouter, HTTPException, status, Request, Query
+from sqlalchemy.orm import joinedload, Session
 
 from cyroid.api.deps import DBSession, CurrentUser
 from cyroid.models.vm import VM, VMStatus
@@ -148,6 +149,26 @@ def get_docker_service():
     return _get_docker_service()
 
 
+def load_vm_source(db: Session, vm: VM) -> Tuple[Optional[VMTemplate], Optional[Snapshot]]:
+    """
+    Load VM's template or snapshot source.
+
+    Args:
+        db: Database session
+        vm: The VM model instance
+
+    Returns:
+        Tuple of (template, snapshot) - one will be None
+    """
+    template = None
+    snapshot = None
+    if vm.template_id:
+        template = db.query(VMTemplate).filter(VMTemplate.id == vm.template_id).first()
+    elif vm.snapshot_id:
+        snapshot = db.query(Snapshot).filter(Snapshot.id == vm.snapshot_id).first()
+    return template, snapshot
+
+
 @router.get("", response_model=List[VMResponse])
 def list_vms(range_id: UUID, db: DBSession, current_user: CurrentUser):
     """List all VMs in a range"""
@@ -159,17 +180,17 @@ def list_vms(range_id: UUID, db: DBSession, current_user: CurrentUser):
             detail="Range not found",
         )
 
-    vms = db.query(VM).filter(VM.range_id == range_id).all()
+    # Use eager loading to avoid N+1 query problem
+    vms = db.query(VM).options(
+        joinedload(VM.template),
+        joinedload(VM.source_snapshot)
+    ).filter(VM.range_id == range_id).all()
 
-    # Build responses with emulation status
+    # Build responses with emulation status (relationships already loaded)
     responses = []
     for vm in vms:
-        template = None
-        snapshot = None
-        if vm.template_id:
-            template = db.query(VMTemplate).filter(VMTemplate.id == vm.template_id).first()
-        elif vm.snapshot_id:
-            snapshot = db.query(Snapshot).filter(Snapshot.id == vm.snapshot_id).first()
+        template = vm.template  # Already loaded via joinedload
+        snapshot = vm.source_snapshot  # Already loaded via joinedload
         responses.append(vm_to_response(vm, template, snapshot))
     return responses
 
@@ -262,12 +283,7 @@ def get_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
             status_code=status.HTTP_404_NOT_FOUND,
             detail="VM not found",
         )
-    template = None
-    snapshot = None
-    if vm.template_id:
-        template = db.query(VMTemplate).filter(VMTemplate.id == vm.template_id).first()
-    elif vm.snapshot_id:
-        snapshot = db.query(Snapshot).filter(Snapshot.id == vm.snapshot_id).first()
+    template, snapshot = load_vm_source(db, vm)
     return vm_to_response(vm, template, snapshot)
 
 
@@ -291,12 +307,7 @@ def update_vm(
 
     db.commit()
     db.refresh(vm)
-    template = None
-    snapshot = None
-    if vm.template_id:
-        template = db.query(VMTemplate).filter(VMTemplate.id == vm.template_id).first()
-    elif vm.snapshot_id:
-        snapshot = db.query(Snapshot).filter(Snapshot.id == vm.snapshot_id).first()
+    template, snapshot = load_vm_source(db, vm)
     return vm_to_response(vm, template, snapshot)
 
 
@@ -380,6 +391,11 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
                 )
             # Use docker_image_tag if available, otherwise docker_image_id
             base_image = snapshot.docker_image_tag or snapshot.docker_image_id
+            if not base_image:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Snapshot has no Docker image reference",
+                )
             os_type = OSType(snapshot.os_type) if snapshot.os_type else OSType.LINUX
             vm_type = VMType(snapshot.vm_type) if snapshot.vm_type else VMType.CONTAINER
             config_script = None  # Snapshots don't have config scripts
@@ -736,12 +752,7 @@ def stop_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
             detail=f"Failed to stop VM: {str(e)}",
         )
 
-    template = None
-    snapshot = None
-    if vm.template_id:
-        template = db.query(VMTemplate).filter(VMTemplate.id == vm.template_id).first()
-    elif vm.snapshot_id:
-        snapshot = db.query(Snapshot).filter(Snapshot.id == vm.snapshot_id).first()
+    template, snapshot = load_vm_source(db, vm)
     return vm_to_response(vm, template, snapshot)
 
 
@@ -1143,12 +1154,7 @@ def restart_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
             detail=f"Failed to restart VM: {str(e)}",
         )
 
-    template = None
-    snapshot = None
-    if vm.template_id:
-        template = db.query(VMTemplate).filter(VMTemplate.id == vm.template_id).first()
-    elif vm.snapshot_id:
-        snapshot = db.query(Snapshot).filter(Snapshot.id == vm.snapshot_id).first()
+    template, snapshot = load_vm_source(db, vm)
     return vm_to_response(vm, template, snapshot)
 
 
