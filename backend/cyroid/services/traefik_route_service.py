@@ -5,6 +5,7 @@ Traefik Route Service
 Manages dynamic Traefik routes for VNC console access in DinD deployments.
 Generates YAML route files that Traefik watches via file provider.
 """
+import base64
 import os
 import logging
 from pathlib import Path
@@ -12,6 +13,11 @@ from typing import Optional, Dict, Any
 import yaml
 
 logger = logging.getLogger(__name__)
+
+# KasmVNC auto-login credentials (hardcoded for seamless access)
+KASM_USER = "kasm_user"
+KASM_PASSWORD = "vncpassword"
+KASM_AUTH_HEADER = f"Basic {base64.b64encode(f'{KASM_USER}:{KASM_PASSWORD}'.encode()).decode()}"
 
 
 class TraefikRouteService:
@@ -112,13 +118,29 @@ class TraefikRouteService:
                 }
             }
 
+            # Build middleware list for this route
+            route_middlewares = [middleware_name]
+
+            # For KasmVNC (port 6901), add auth header middleware for auto-login
+            if requires_ssl:
+                auth_middleware_name = f"vnc-auth-{vm_id_short}"
+                middlewares[auth_middleware_name] = {
+                    "headers": {
+                        "customRequestHeaders": {
+                            "Authorization": KASM_AUTH_HEADER
+                        }
+                    }
+                }
+                route_middlewares.append(auth_middleware_name)
+                logger.debug(f"Added KasmVNC auto-auth middleware for VM {vm_id}")
+
             # HTTP router (priority=100 to take precedence over frontend catch-all)
             routers[router_name] = {
                 "rule": f"PathPrefix(`/vnc/{vm_id}`)",
                 "entryPoints": ["web"],
                 "service": router_name,
                 "priority": 100,
-                "middlewares": [middleware_name],
+                "middlewares": route_middlewares,
             }
 
             # HTTPS router
@@ -127,7 +149,7 @@ class TraefikRouteService:
                 "entryPoints": ["websecure"],
                 "service": router_name,
                 "priority": 100,
-                "middlewares": [middleware_name],
+                "middlewares": route_middlewares,
                 "tls": {},
             }
 

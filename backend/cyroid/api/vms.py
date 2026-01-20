@@ -892,12 +892,21 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
                 if use_dind:
                     # Build environment for LinuxServer/KasmVNC containers
                     environment = {}
-                    if vm.linux_username:
-                        environment["CUSTOM_USER"] = vm.linux_username
-                        environment["PUID"] = "1000"
-                        environment["PGID"] = "1000"
-                    if vm.linux_password:
-                        environment["PASSWORD"] = vm.linux_password
+
+                    # KasmVNC containers use VNC_PW for auto-auth
+                    if "kasmweb/" in (image_ref or ""):
+                        environment["VNC_PW"] = "vncpassword"
+
+                    # LinuxServer containers use CUSTOM_USER, PASSWORD, SUDO_ACCESS
+                    if "linuxserver/" in (image_ref or "") or "lscr.io/linuxserver" in (image_ref or ""):
+                        if vm.linux_username:
+                            environment["CUSTOM_USER"] = vm.linux_username
+                            environment["PUID"] = "1000"
+                            environment["PGID"] = "1000"
+                        if vm.linux_password:
+                            environment["PASSWORD"] = vm.linux_password
+                        if vm.linux_user_sudo:
+                            environment["SUDO_ACCESS"] = "true"
 
                     container_id = asyncio.run(docker.create_range_container_dind(
                         range_id=str(vm.range_id),
@@ -943,11 +952,18 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
             else:
                 docker.start_container(container_id)
 
-            # Configure Linux user for KasmVNC containers
+            # Configure Linux user for KasmVNC and LinuxServer containers
             image_for_check = image_ref or ""
             if "kasmweb/" in image_for_check:
                 # KasmVNC uses 'kasm-user' as the default user
                 username = vm.linux_username or "kasm-user"
+                if vm.linux_password:
+                    docker.set_linux_user_password(container_id, username, vm.linux_password)
+                if vm.linux_user_sudo:
+                    docker.grant_sudo_privileges(container_id, username)
+            elif "linuxserver/" in image_for_check or "lscr.io/linuxserver" in image_for_check:
+                # LinuxServer containers use 'abc' as default user (or CUSTOM_USER from env)
+                username = vm.linux_username or "abc"
                 if vm.linux_password:
                     docker.set_linux_user_password(container_id, username, vm.linux_password)
                 if vm.linux_user_sudo:
