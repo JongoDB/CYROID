@@ -142,10 +142,19 @@ export interface Artifact {
 
 export interface Snapshot {
   id: string
-  vm_id: string
+  vm_id: string | null
   name: string
   description: string | null
   docker_image_id: string | null
+  docker_image_tag: string | null
+  os_type: string | null
+  vm_type: string | null
+  default_cpu: number
+  default_ram_mb: number
+  default_disk_gb: number
+  display_type: string | null
+  is_global: boolean
+  tags: string[]
   created_at: string
   updated_at: string
 }

@@ -315,7 +315,8 @@ export const networksApi = {
 export interface VMCreate {
   range_id: string
   network_id: string
-  template_id: string
+  template_id?: string  // Optional: use template_id OR snapshot_id
+  snapshot_id?: string  // Optional: use snapshot_id OR template_id
   hostname: string
   ip_address: string
   cpu: number

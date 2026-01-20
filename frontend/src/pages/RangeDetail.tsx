@@ -1,8 +1,8 @@
 // frontend/src/pages/RangeDetail.tsx
 import { useEffect, useState, useMemo, useCallback, useRef } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
-import { rangesApi, networksApi, vmsApi, templatesApi, NetworkCreate, VMCreate } from '../services/api'
-import type { Range, Network, VM, VMTemplate, RealtimeEvent } from '../types'
+import { rangesApi, networksApi, vmsApi, templatesApi, snapshotsApi, NetworkCreate, VMCreate } from '../services/api'
+import type { Range, Network, VM, VMTemplate, RealtimeEvent, Snapshot } from '../types'
 import {
   ArrowLeft, Plus, Loader2, X, Play, Square, RotateCw, Camera,
   Network as NetworkIcon, Server, Trash2, Rocket, Activity, Monitor, Shield, Download, Pencil, Globe, Router, Wifi, Radio, Wrench, BookOpen, LayoutTemplate
@@ -42,6 +42,7 @@ export default function RangeDetail() {
   const [networks, setNetworks] = useState<Network[]>([])
   const [vms, setVms] = useState<VM[]>([])
   const [templates, setTemplates] = useState<VMTemplate[]>([])
+  const [availableSnapshots, setAvailableSnapshots] = useState<Snapshot[]>([])
   const [loading, setLoading] = useState(true)
 
   // Tab state
@@ -59,6 +60,7 @@ export default function RangeDetail() {
 
   // VM modal state
   const [showVmModal, setShowVmModal] = useState(false)
+  const [vmSourceType, setVmSourceType] = useState<'template' | 'snapshot'>('template')
   const [vmForm, setVmForm] = useState<Partial<VMCreate>>({
     hostname: '',
     ip_address: '',
@@ -238,6 +240,11 @@ export default function RangeDetail() {
     return templates.find(t => t.id === vmForm.template_id) || null
   }, [templates, vmForm.template_id])
 
+  // Get the currently selected snapshot for the VM form
+  const selectedSnapshot = useMemo(() => {
+    return availableSnapshots.find(s => s.id === vmForm.snapshot_id) || null
+  }, [availableSnapshots, vmForm.snapshot_id])
+
   // Extract subnet prefix from first network for blueprint suggestion
   const suggestedPrefix = networks?.[0]?.subnet
     ? networks[0].subnet.split('.').slice(0, 2).join('.')
@@ -266,16 +273,19 @@ export default function RangeDetail() {
   const fetchData = async () => {
     if (!id) return
     try {
-      const [rangeRes, networksRes, vmsRes, templatesRes] = await Promise.all([
+      const [rangeRes, networksRes, vmsRes, templatesRes, snapshotsRes] = await Promise.all([
         rangesApi.get(id),
         networksApi.list(id),
         vmsApi.list(id),
-        templatesApi.list()
+        templatesApi.list(),
+        snapshotsApi.list()  // Fetch all global snapshots for VM creation
       ])
       setRange(rangeRes.data)
       setNetworks(networksRes.data)
       setVms(vmsRes.data)
       setTemplates(templatesRes.data)
+      // Filter to only global snapshots that can be used for VM creation
+      setAvailableSnapshots(snapshotsRes.data.filter((s: Snapshot) => s.is_global))
     } catch (err) {
       console.error('Failed to fetch range:', err)
     } finally {
@@ -508,12 +518,18 @@ export default function RangeDetail() {
       const vmData: VMCreate = {
         range_id: id,
         network_id: vmForm.network_id!,
-        template_id: vmForm.template_id!,
         hostname: vmForm.hostname!,
         ip_address: usesDhcp ? '' : vmForm.ip_address!,
         cpu: vmForm.cpu!,
         ram_mb: vmForm.ram_mb!,
         disk_gb: vmForm.disk_gb!
+      }
+
+      // Add source: either template_id OR snapshot_id (mutually exclusive)
+      if (vmSourceType === 'template') {
+        vmData.template_id = vmForm.template_id!
+      } else {
+        vmData.snapshot_id = vmForm.snapshot_id!
       }
 
       // Add Windows-specific settings if template is Windows
@@ -566,8 +582,9 @@ export default function RangeDetail() {
 
       await vmsApi.create(vmData)
       setShowVmModal(false)
+      setVmSourceType('template')
       setVmForm({
-        hostname: '', ip_address: '', network_id: '', template_id: '',
+        hostname: '', ip_address: '', network_id: '', template_id: '', snapshot_id: '',
         cpu: 2, ram_mb: 2048, disk_gb: 20,
         windows_version: '', windows_username: '', windows_password: '',
         display_type: 'desktop',
@@ -1192,47 +1209,157 @@ export default function RangeDetail() {
               </div>
               <form onSubmit={handleCreateVm} className="p-4 space-y-4">
                 {error && <div className="p-3 bg-red-50 text-red-700 rounded-md text-sm">{error}</div>}
+
+                {/* Source Type Selection */}
                 <div>
-                  <label className="block text-sm font-medium text-gray-700">Template</label>
-                  <select
-                    required
-                    value={vmForm.template_id}
-                    onChange={(e) => {
-                      const template = templates.find(t => t.id === e.target.value)
-                      const isWindows = template?.os_type === 'windows'
-                      const isLinuxISO = template?.os_type === 'linux' && template?.base_image?.startsWith('iso:')
-                      // Detect KasmVNC and LinuxServer containers
-                      const baseImage = template?.base_image?.toLowerCase() || ''
-                      const isKasmVNC = baseImage.includes('kasmweb/')
-                      const isLinuxServer = baseImage.includes('linuxserver/') || baseImage.includes('lscr.io/linuxserver')
-                      const isLinuxContainer = (isKasmVNC || isLinuxServer) && !isLinuxISO
-                      setShowWindowsOptions(isWindows)
-                      setShowLinuxISOOptions(isLinuxISO)
-                      setShowLinuxContainerOptions(isLinuxContainer)
-                      setLinuxContainerType(isKasmVNC ? 'kasmvnc' : isLinuxServer ? 'linuxserver' : null)
-                      setVmForm({
-                        ...vmForm,
-                        template_id: e.target.value,
-                        cpu: template?.default_cpu || (isWindows ? 4 : 2),
-                        ram_mb: template?.default_ram_mb || (isWindows ? 8192 : 2048),
-                        disk_gb: template?.default_disk_gb || (isWindows ? 64 : 20),
-                        windows_version: isWindows ? template?.os_variant || '11' : '',
-                        display_type: 'desktop',
-                        // Reset Linux user config
-                        linux_username: '',
-                        linux_password: '',
-                        linux_user_sudo: true
-                      })
-                    }}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
-                  >
-                    <option value="">Select a template</option>
-                    {templates.map(t => (
-                      <option key={t.id} value={t.id}>{t.name} ({t.os_type === 'windows' ? 'Windows' : 'Linux'} - {t.os_variant})</option>
-                    ))}
-                  </select>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Create from</label>
+                  <div className="flex space-x-4">
+                    <label className="flex items-center">
+                      <input
+                        type="radio"
+                        name="vmSourceType"
+                        value="template"
+                        checked={vmSourceType === 'template'}
+                        onChange={() => {
+                          setVmSourceType('template')
+                          // Clear snapshot selection and reset form values
+                          setVmForm({
+                            ...vmForm,
+                            template_id: '',
+                            snapshot_id: '',
+                            cpu: 2,
+                            ram_mb: 2048,
+                            disk_gb: 20
+                          })
+                          setShowWindowsOptions(false)
+                          setShowLinuxISOOptions(false)
+                          setShowLinuxContainerOptions(false)
+                          setLinuxContainerType(null)
+                        }}
+                        className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300"
+                      />
+                      <span className="ml-2 text-sm text-gray-700">Base Template</span>
+                    </label>
+                    <label className="flex items-center">
+                      <input
+                        type="radio"
+                        name="vmSourceType"
+                        value="snapshot"
+                        checked={vmSourceType === 'snapshot'}
+                        disabled={availableSnapshots.length === 0}
+                        onChange={() => {
+                          setVmSourceType('snapshot')
+                          // Clear template selection and reset form values
+                          setVmForm({
+                            ...vmForm,
+                            template_id: '',
+                            snapshot_id: '',
+                            cpu: 2,
+                            ram_mb: 2048,
+                            disk_gb: 20
+                          })
+                          setShowWindowsOptions(false)
+                          setShowLinuxISOOptions(false)
+                          setShowLinuxContainerOptions(false)
+                          setLinuxContainerType(null)
+                        }}
+                        className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 disabled:opacity-50"
+                      />
+                      <span className={clsx("ml-2 text-sm", availableSnapshots.length === 0 ? "text-gray-400" : "text-gray-700")}>
+                        Library Snapshot
+                        {availableSnapshots.length === 0 && " (none available)"}
+                      </span>
+                    </label>
+                  </div>
                 </div>
-                {templateRequiresEmulation && (
+
+                {/* Template Selector (shown when vmSourceType is 'template') */}
+                {vmSourceType === 'template' && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Template</label>
+                    <select
+                      required
+                      value={vmForm.template_id}
+                      onChange={(e) => {
+                        const template = templates.find(t => t.id === e.target.value)
+                        const isWindows = template?.os_type === 'windows'
+                        const isLinuxISO = template?.os_type === 'linux' && template?.base_image?.startsWith('iso:')
+                        // Detect KasmVNC and LinuxServer containers
+                        const baseImage = template?.base_image?.toLowerCase() || ''
+                        const isKasmVNC = baseImage.includes('kasmweb/')
+                        const isLinuxServer = baseImage.includes('linuxserver/') || baseImage.includes('lscr.io/linuxserver')
+                        const isLinuxContainer = (isKasmVNC || isLinuxServer) && !isLinuxISO
+                        setShowWindowsOptions(isWindows)
+                        setShowLinuxISOOptions(isLinuxISO)
+                        setShowLinuxContainerOptions(isLinuxContainer)
+                        setLinuxContainerType(isKasmVNC ? 'kasmvnc' : isLinuxServer ? 'linuxserver' : null)
+                        setVmForm({
+                          ...vmForm,
+                          template_id: e.target.value,
+                          snapshot_id: '',
+                          cpu: template?.default_cpu || (isWindows ? 4 : 2),
+                          ram_mb: template?.default_ram_mb || (isWindows ? 8192 : 2048),
+                          disk_gb: template?.default_disk_gb || (isWindows ? 64 : 20),
+                          windows_version: isWindows ? template?.os_variant || '11' : '',
+                          display_type: 'desktop',
+                          // Reset Linux user config
+                          linux_username: '',
+                          linux_password: '',
+                          linux_user_sudo: true
+                        })
+                      }}
+                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                    >
+                      <option value="">Select a template</option>
+                      {templates.map(t => (
+                        <option key={t.id} value={t.id}>{t.name} ({t.os_type === 'windows' ? 'Windows' : 'Linux'} - {t.os_variant})</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {/* Snapshot Selector (shown when vmSourceType is 'snapshot') */}
+                {vmSourceType === 'snapshot' && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Library Snapshot</label>
+                    <select
+                      required
+                      value={vmForm.snapshot_id}
+                      onChange={(e) => {
+                        const snapshot = availableSnapshots.find(s => s.id === e.target.value)
+                        // For snapshots, we use the stored defaults - snapshots are pre-configured
+                        setShowWindowsOptions(false)
+                        setShowLinuxISOOptions(false)
+                        setShowLinuxContainerOptions(false)
+                        setLinuxContainerType(null)
+                        setVmForm({
+                          ...vmForm,
+                          snapshot_id: e.target.value,
+                          template_id: '',
+                          cpu: snapshot?.default_cpu || 2,
+                          ram_mb: snapshot?.default_ram_mb || 4096,
+                          disk_gb: snapshot?.default_disk_gb || 40,
+                          display_type: (snapshot?.display_type as 'desktop' | 'server') || 'desktop'
+                        })
+                      }}
+                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+                    >
+                      <option value="">Select a snapshot</option>
+                      {availableSnapshots.map(s => (
+                        <option key={s.id} value={s.id}>
+                          {s.name} ({s.os_type || 'unknown'})
+                        </option>
+                      ))}
+                    </select>
+                    {selectedSnapshot && (
+                      <p className="mt-1 text-xs text-gray-500">
+                        Defaults: {selectedSnapshot.default_cpu} CPU, {(selectedSnapshot.default_ram_mb / 1024).toFixed(1)}GB RAM, {selectedSnapshot.default_disk_gb}GB disk
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {templateRequiresEmulation && vmSourceType === 'template' && (
                   <EmulationWarning className="mt-2" />
                 )}
                 <div>
