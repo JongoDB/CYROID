@@ -1516,7 +1516,7 @@ export default function ImageCache() {
         <div className="space-y-6">
           <div className="flex justify-between items-center">
             <div>
-              <h3 className="text-lg font-medium text-gray-900">Linux Distributions (qemus/qemu)</h3>
+              <h3 className="text-lg font-medium text-gray-900">Linux Distributions (qemux/qemu)</h3>
               <p className="text-sm text-gray-500">
                 {linuxVersions.cached_count} of {linuxVersions.total_count} distributions cached
               </p>

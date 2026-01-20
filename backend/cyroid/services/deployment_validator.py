@@ -239,7 +239,7 @@ class DeploymentValidator:
     def _is_auto_download_image(self, image: str, vm: VM) -> bool:
         """Check if an image is auto-downloadable.
 
-        Some images (like qemus/qemu and dockur/windows) auto-download
+        Some images (like qemux/qemu and dockur/windows) auto-download
         OS images at runtime. For these, we don't require the final
         image to exist beforehand.
 
@@ -250,9 +250,9 @@ class DeploymentValidator:
         Returns:
             True if image will be auto-downloaded
         """
-        # qemus/qemu and dockur/windows images pull OS at runtime
+        # qemux/qemu and dockur/windows images pull OS at runtime
         auto_download_images = [
-            "qemus/qemu",
+            "qemux/qemu",
             "dockur/windows",
             "linuxserver/",  # LinuxServer images
             "kasmweb/",  # KasmVNC images

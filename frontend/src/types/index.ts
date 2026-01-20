@@ -477,7 +477,7 @@ export interface WindowsVersionsResponse {
   note: string
 }
 
-// Linux VM (qemus/qemu) Types
+// Linux VM (qemux/qemu) Types
 export interface LinuxVersion {
   version: string
   name: string

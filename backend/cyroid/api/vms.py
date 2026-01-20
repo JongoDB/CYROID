@@ -432,7 +432,7 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
                     vnc_scheme = "http"
                     needs_auth = False
                 elif image_for_check.startswith("iso:") or os_type == OSType.WINDOWS or os_type == OSType.CUSTOM:
-                    # qemus/qemu and dockur/windows use port 8006 over HTTP
+                    # qemux/qemu and dockur/windows use port 8006 over HTTP
                     vnc_port = "8006"
                     vnc_scheme = "http"
                     needs_auth = False

@@ -1217,9 +1217,9 @@ DOCKUR_WINDOWS_VERSIONS = [
 ]
 
 
-# qemus/qemu supported Linux distributions
-# These are auto-downloaded by qemus/qemu when the container starts
-# Download URLs sourced from: https://github.com/qemus/qemu-docker/blob/master/src/define.sh
+# qemux/qemu supported Linux distributions
+# These are auto-downloaded by qemux/qemu when the container starts
+# Download URLs sourced from: https://github.com/qemux/qemu-docker/blob/master/src/define.sh
 QEMU_LINUX_VERSIONS = [
     # Popular desktop distributions
     {
@@ -1456,9 +1456,9 @@ def get_linux_iso_dir() -> str:
 @router.get("/linux-versions")
 def get_linux_versions(current_user: CurrentUser):
     """
-    Get all supported Linux distributions for qemus/qemu with cached status.
+    Get all supported Linux distributions for qemux/qemu with cached status.
 
-    These distributions are automatically downloaded by qemus/qemu
+    These distributions are automatically downloaded by qemux/qemu
     when a container is started - no manual ISO download needed.
     Returns cached status for each version.
     """
@@ -1502,7 +1502,7 @@ def get_linux_versions(current_user: CurrentUser):
         "cache_dir": linux_iso_dir,
         "cached_count": cached_count,
         "total_count": len(all_versions),
-        "note": "ISOs are automatically downloaded by qemus/qemu when the VM starts. Pre-caching is optional but speeds up first boot."
+        "note": "ISOs are automatically downloaded by qemux/qemu when the VM starts. Pre-caching is optional but speeds up first boot."
     }
 
 

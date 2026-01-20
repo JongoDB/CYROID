@@ -242,7 +242,7 @@ class TestDeploymentValidator:
         from docker.errors import ImageNotFound
 
         mock_template.id = mock_vm.template_id
-        mock_template.base_image = "qemus/qemu"  # Auto-downloadable
+        mock_template.base_image = "qemux/qemu"  # Auto-downloadable
         mock_vm.linux_distro = "ubuntu"  # Indicates auto-download
 
         # Configure mock to raise ImageNotFound

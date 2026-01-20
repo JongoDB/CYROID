@@ -18,15 +18,15 @@ class OSType(str, Enum):
 class VMType(str, Enum):
     """Type of VM/container implementation."""
     CONTAINER = "container"      # Basic Docker container (lightweight Linux)
-    LINUX_VM = "linux_vm"        # Full Linux VM via qemus/qemu
+    LINUX_VM = "linux_vm"        # Full Linux VM via qemux/qemu
     WINDOWS_VM = "windows_vm"    # Full Windows VM via dockur/windows
 
 
 class LinuxDistro(str, Enum):
-    """Supported Linux distributions for qemus/qemu VMs.
+    """Supported Linux distributions for qemux/qemu VMs.
 
-    These are auto-downloaded by qemus/qemu when specified in the BOOT env var.
-    See: https://github.com/qemus/qemu
+    These are auto-downloaded by qemux/qemu when specified in the BOOT env var.
+    See: https://github.com/qemux/qemu
     """
     # Popular desktop distributions
     UBUNTU = "ubuntu"            # ~2.5 GB
@@ -70,7 +70,7 @@ class VMTemplate(Base, UUIDMixin, TimestampMixin):
     # VM implementation type
     vm_type: Mapped[VMType] = mapped_column(default=VMType.CONTAINER)  # container, linux_vm, or windows_vm
 
-    # Linux VM-specific (for qemus/qemu)
+    # Linux VM-specific (for qemux/qemu)
     linux_distro: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)  # ubuntu, kali, etc.
     boot_mode: Mapped[Optional[str]] = mapped_column(String(10), nullable=True, default="uefi")
     disk_type: Mapped[Optional[str]] = mapped_column(String(10), nullable=True, default="scsi")

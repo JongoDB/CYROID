@@ -66,7 +66,7 @@ class VMCreate(VMBase):
     # Installation mode
     manual_install: bool = Field(default=False, description="Enable manual/interactive installation mode")
 
-    # Linux user configuration (for cloud-init in qemus/qemu, env vars in KasmVNC/LinuxServer)
+    # Linux user configuration (for cloud-init in qemux/qemu, env vars in KasmVNC/LinuxServer)
     linux_username: Optional[str] = Field(None, max_length=64, description="Linux username")
     linux_password: Optional[str] = Field(None, max_length=128, description="Linux password")
     linux_user_sudo: bool = Field(default=True, description="Grant sudo/admin privileges to the user")

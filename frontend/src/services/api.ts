@@ -345,7 +345,7 @@ export interface VMCreate {
   keyboard?: string | null
   region?: string | null
   manual_install?: boolean
-  // Linux user configuration (for cloud-init in qemus/qemu, env vars in KasmVNC/LinuxServer)
+  // Linux user configuration (for cloud-init in qemux/qemu, env vars in KasmVNC/LinuxServer)
   linux_username?: string
   linux_password?: string
   linux_user_sudo?: boolean
@@ -561,7 +561,7 @@ export const cacheApi = {
   getWindowsVersions: () => api.get<WindowsVersionsResponse>('/cache/windows-versions'),
   getISOStatus: () => api.get<ISOCacheStatus>('/cache/isos'),
 
-  // Linux versions (auto-downloaded by qemus/qemu)
+  // Linux versions (auto-downloaded by qemux/qemu)
   getLinuxVersions: () => api.get<LinuxVersionsResponse>('/cache/linux-versions'),
   getLinuxISOStatus: () => api.get<ISOCacheStatus>('/cache/linux-isos'),
 

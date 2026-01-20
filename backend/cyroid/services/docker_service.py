@@ -4,10 +4,10 @@ Docker orchestration service for managing containers and networks.
 
 Supports three VM/container types:
 1. Container: Basic Docker containers for lightweight Linux workloads
-2. Linux VM: Full Linux VMs via qemus/qemu (desktop & server environments)
+2. Linux VM: Full Linux VMs via qemux/qemu (desktop & server environments)
 3. Windows VM: Full Windows VMs via dockur/windows
 
-Both qemus/qemu and dockur/windows provide:
+Both qemux/qemu and dockur/windows provide:
 - KVM acceleration for near-native performance
 - Web-based VNC console on port 8006
 - Persistent storage and golden image support
@@ -984,7 +984,7 @@ class DockerService:
         gateway: Optional[str] = None,
         dns_servers: Optional[str] = None,
         dns_search: Optional[str] = None,
-        # Extended qemus/qemu configuration
+        # Extended qemux/qemu configuration
         boot_mode: str = "uefi",
         disk_type: str = "scsi",
         disk2_gb: Optional[int] = None,
@@ -999,7 +999,7 @@ class DockerService:
         linux_user_sudo: bool = True,
     ) -> str:
         """
-        Create a Linux VM container using qemus/qemu.
+        Create a Linux VM container using qemux/qemu.
 
         Provides full Linux desktop/server VMs with KVM acceleration and web VNC console,
         mirroring the dockur/windows approach for Windows VMs.
@@ -1009,7 +1009,7 @@ class DockerService:
                  zorin, elementary, popos, kali, parrot, tails, rocky, alma
         Server: Any of the above work in server mode, or use custom ISO
 
-        See: https://github.com/qemus/qemu for full documentation
+        See: https://github.com/qemux/qemu for full documentation
 
         Args:
             name: Container name
@@ -1058,8 +1058,8 @@ class DockerService:
             )
         })
 
-        # Environment for qemus/qemu
-        # See: https://github.com/qemus/qemu for full documentation
+        # Environment for qemux/qemu
+        # See: https://github.com/qemux/qemu for full documentation
         environment = {
             "BOOT": linux_distro,
             "DISK_SIZE": f"{disk_size_gb}G",
@@ -2084,7 +2084,7 @@ local-hostname: {name}
     def get_golden_images_status(self, os_type: Optional[str] = None) -> Dict[str, Any]:
         """
         Check status of golden images (pre-installed VM templates).
-        Works for both Windows (dockur/windows) and Linux (qemus/qemu) VMs.
+        Works for both Windows (dockur/windows) and Linux (qemux/qemu) VMs.
 
         Args:
             os_type: Filter by OS type ('windows', 'linux', or None for all)
@@ -2139,7 +2139,7 @@ local-hostname: {name}
         """
         Create a golden image from a running VM container.
         This saves the /storage directory for reuse.
-        Works for both Windows (dockur/windows) and Linux (qemus/qemu) VMs.
+        Works for both Windows (dockur/windows) and Linux (qemux/qemu) VMs.
 
         Args:
             container_id: ID of the VM container with completed installation

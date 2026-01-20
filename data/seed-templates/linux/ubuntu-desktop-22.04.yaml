@@ -11,7 +11,7 @@ os_type: linux
 os_variant: "Ubuntu Desktop 22.04 LTS"
 vm_type: linux_vm
 linux_distro: ubuntu
-base_image: qemus/qemu:latest
+base_image: qemux/qemu:latest
 
 default_cpu: 2
 default_ram_mb: 4096

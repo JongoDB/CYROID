@@ -77,14 +77,14 @@ class VM(Base, UUIDMixin, TimestampMixin):
     # Installation mode
     manual_install: Mapped[bool] = mapped_column(Boolean, default=False)  # Interactive install mode
 
-    # Linux VM-specific settings (for qemus/qemu VMs)
+    # Linux VM-specific settings (for qemux/qemu VMs)
     # Distro codes: ubuntu, debian, fedora, alpine, arch, manjaro, opensuse, mint,
     #               zorin, elementary, popos, kali, parrot, tails, rocky, alma
     linux_distro: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     boot_mode: Mapped[Optional[str]] = mapped_column(String(10), nullable=True, default="uefi")  # uefi or legacy
     disk_type: Mapped[Optional[str]] = mapped_column(String(10), nullable=True, default="scsi")  # scsi, blk, or ide
 
-    # Linux user configuration (for cloud-init in qemus/qemu, env vars in KasmVNC/LinuxServer)
+    # Linux user configuration (for cloud-init in qemux/qemu, env vars in KasmVNC/LinuxServer)
     linux_username: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     linux_password: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     linux_user_sudo: Mapped[bool] = mapped_column(Boolean, default=True)
