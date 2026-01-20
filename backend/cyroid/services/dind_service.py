@@ -519,16 +519,11 @@ class DinDService:
             allow_internet: Networks that should have internet access (via DinD NAT)
         """
         allow_internet = allow_internet or []
-        container_name = self._get_container_name(range_id)
 
-        try:
-            # Get the DinD container (runs on host Docker daemon)
-            dind_container = self.host_client.containers.get(container_name)
-        except NotFound:
-            logger.error(f"Cannot find DinD container {container_name}")
-            return
-        except Exception as e:
-            logger.error(f"Error getting DinD container {container_name}: {e}")
+        # Find the DinD container by range_id label (name may include range name)
+        dind_container = self._find_container_by_range_id(range_id)
+        if not dind_container:
+            logger.error(f"Cannot find DinD container for range {range_id}")
             return
 
         # Get range client to query network IDs from Docker inside DinD
@@ -674,12 +669,10 @@ class DinDService:
         # Base port for VNC proxy - VMs will be mapped to 15900, 15901, 15902, etc.
         VNC_PROXY_BASE_PORT = 15900
 
-        container_name = self._get_container_name(range_id)
-
-        try:
-            dind_container = self.host_client.containers.get(container_name)
-        except NotFound:
-            logger.error(f"Cannot find DinD container {container_name}")
+        # Find the DinD container by range_id label (name may include range name)
+        dind_container = self._find_container_by_range_id(range_id)
+        if not dind_container:
+            logger.error(f"Cannot find DinD container for range {range_id}")
             raise ValueError(f"DinD container not found for range {range_id}")
 
         # Get DinD management IP
@@ -688,7 +681,7 @@ class DinDService:
         dind_mgmt_ip = networks.get(self.ranges_network, {}).get("IPAddress")
 
         if not dind_mgmt_ip:
-            raise ValueError(f"Cannot get management IP for DinD container {container_name}")
+            raise ValueError(f"Cannot get management IP for DinD container (range {range_id})")
 
         port_mappings = {}
 
@@ -787,12 +780,10 @@ class DinDService:
                 network_pairs=[("lan", "dmz")]
             )
         """
-        container_name = self._get_container_name(range_id)
-
-        try:
-            dind_container = self.host_client.containers.get(container_name)
-        except NotFound:
-            logger.error(f"Cannot find DinD container {container_name}")
+        # Find the DinD container by range_id label (name may include range name)
+        dind_container = self._find_container_by_range_id(range_id)
+        if not dind_container:
+            logger.error(f"Cannot find DinD container for range {range_id}")
             return
 
         # Get range client to query network IDs
