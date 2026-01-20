@@ -70,11 +70,15 @@ def sync_from_cache(
     # Sync Docker images
     cached_images = docker.list_cached_images()
     for img in cached_images:
-        image_tag = img.get("tag") or img.get("name")
-        if not image_tag:
+        # list_cached_images returns {"tags": [...], "id": ..., "size_bytes": ...}
+        tags = img.get("tags", [])
+        if not tags:
             continue
 
-        # Check if BaseImage already exists
+        # Use first tag as the primary identifier
+        image_tag = tags[0]
+
+        # Check if BaseImage already exists for any of the tags
         existing = db.query(BaseImage).filter(
             BaseImage.docker_image_tag == image_tag
         ).first()
@@ -85,10 +89,15 @@ def sync_from_cache(
 
             # Determine OS type from image name
             os_type = "linux"  # default
-            if "windows" in image_tag.lower():
+            if "windows" in image_tag.lower() or "dockur" in image_tag.lower():
                 os_type = "windows"
             elif any(net in image_tag.lower() for net in ["openwrt", "vyos", "pfsense", "opnsense"]):
                 os_type = "network"
+
+            # Determine VM type
+            vm_type = "container"
+            if "dockur/windows" in image_tag.lower():
+                vm_type = "windows_vm"
 
             base_image = BaseImage(
                 name=image_name,
@@ -97,11 +106,11 @@ def sync_from_cache(
                 docker_image_id=img.get("id"),
                 docker_image_tag=image_tag,
                 os_type=os_type,
-                vm_type="container",
-                native_arch=img.get("architecture", "amd64"),
+                vm_type=vm_type,
+                native_arch="x86_64",
                 default_cpu=2,
-                default_ram_mb=2048,
-                default_disk_gb=20,
+                default_ram_mb=4096 if os_type == "windows" else 2048,
+                default_disk_gb=64 if os_type == "windows" else 20,
                 size_bytes=img.get("size_bytes"),
                 is_global=True,
             )
@@ -109,6 +118,7 @@ def sync_from_cache(
             docker_synced += 1
 
     # Sync Windows ISOs
+    # get_windows_iso_cache_status returns {"isos": [{"filename": ..., "path": ..., "size_bytes": ...}]}
     iso_cache = docker.get_windows_iso_cache_status()
     for iso in iso_cache.get("isos", []):
         iso_path = iso.get("path")
@@ -121,10 +131,23 @@ def sync_from_cache(
         ).first()
 
         if not existing:
-            version = iso.get("version", "Unknown")
+            # Extract version from filename (e.g., "win11x64.iso" -> "11")
+            filename = iso.get("filename", "")
+            version = "Unknown"
+            name = filename.replace('.iso', '')
+
+            # Try to extract Windows version from common filename patterns
+            import re
+            version_match = re.search(r'win(\d+)', filename.lower())
+            if version_match:
+                version = version_match.group(1)
+                name = f"Windows {version}"
+            elif "windows" in filename.lower():
+                name = filename.replace('.iso', '').replace('-', ' ').replace('_', ' ')
+
             base_image = BaseImage(
-                name=f"Windows {version}",
-                description=f"Windows ISO: {iso.get('name', version)}",
+                name=name,
+                description=f"Windows ISO: {filename}",
                 image_type="iso",
                 iso_path=iso_path,
                 iso_source="windows",
@@ -141,11 +164,11 @@ def sync_from_cache(
             db.add(base_image)
             windows_synced += 1
 
-    # Sync Linux ISOs
-    linux_iso_dir = getattr(settings, 'linux_iso_cache_dir', None) or os.path.join(settings.iso_cache_dir, 'linux')
+    # Sync Linux ISOs (directory is "linux-isos" per docker_service.py)
+    linux_iso_dir = os.path.join(settings.iso_cache_dir, 'linux-isos')
     if os.path.exists(linux_iso_dir):
         for filename in os.listdir(linux_iso_dir):
-            if filename.endswith('.iso'):
+            if filename.endswith('.iso') or filename.endswith('.img') or filename.endswith('.qcow2'):
                 iso_path = os.path.join(linux_iso_dir, filename)
 
                 # Check if BaseImage already exists
@@ -155,7 +178,7 @@ def sync_from_cache(
 
                 if not existing:
                     # Extract name from filename
-                    name = filename.replace('.iso', '').replace('-', ' ').replace('_', ' ')
+                    name = filename.rsplit('.', 1)[0].replace('-', ' ').replace('_', ' ')
                     base_image = BaseImage(
                         name=name,
                         description=f"Linux ISO: {filename}",
@@ -174,11 +197,11 @@ def sync_from_cache(
                     db.add(base_image)
                     linux_synced += 1
 
-    # Sync Custom ISOs
-    custom_iso_dir = getattr(settings, 'custom_iso_cache_dir', None) or os.path.join(settings.iso_cache_dir, 'custom')
+    # Sync Custom ISOs (directory is "custom-isos")
+    custom_iso_dir = os.path.join(settings.iso_cache_dir, 'custom-isos')
     if os.path.exists(custom_iso_dir):
         for filename in os.listdir(custom_iso_dir):
-            if filename.endswith('.iso'):
+            if filename.endswith('.iso') or filename.endswith('.img'):
                 iso_path = os.path.join(custom_iso_dir, filename)
 
                 # Check if BaseImage already exists
@@ -187,7 +210,7 @@ def sync_from_cache(
                 ).first()
 
                 if not existing:
-                    name = filename.replace('.iso', '').replace('-', ' ').replace('_', ' ')
+                    name = filename.rsplit('.', 1)[0].replace('-', ' ').replace('_', ' ')
                     base_image = BaseImage(
                         name=name,
                         description=f"Custom ISO: {filename}",
