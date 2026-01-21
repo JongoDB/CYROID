@@ -159,34 +159,20 @@ export const usersApi = {
     api.delete(`/users/${userId}/attributes/${attributeId}`),
 }
 
-// Templates API
-import type { VMTemplate, Range, Network, VM, EventLog, EventLogList, VMStatsResponse, VMLogsResponse, ResourceTagsResponse, Walkthrough, WalkthroughProgress, DeploymentStatusResponse, ScenarioDetail, ScenariosListResponse, ScenarioUpload, ApplyScenarioRequest, ApplyScenarioResponse } from '../types'
+import type { Range, Network, VM, EventLog, EventLogList, VMStatsResponse, VMLogsResponse, ResourceTagsResponse, Walkthrough, WalkthroughProgress, DeploymentStatusResponse, ScenarioDetail, ScenariosListResponse, ScenarioUpload, ApplyScenarioRequest, ApplyScenarioResponse } from '../types'
 
-export interface VMTemplateCreate {
-  name: string
-  description?: string
-  os_type: 'windows' | 'linux' | 'custom' | 'network'
-  os_variant: string
-  base_image: string
-  default_cpu?: number
-  default_ram_mb?: number
-  default_disk_gb?: number
-  config_script?: string
-  tags?: string[]
-  cached_iso_path?: string  // For custom ISOs
-}
-
+// Templates API - DEPRECATED: Returns empty arrays for backward compatibility
+// TODO: Remove once Range Wizard is migrated to Base Images (see GitHub issue)
 export const templatesApi = {
-  list: () => api.get<VMTemplate[]>('/templates'),
-  get: (id: string) => api.get<VMTemplate>(`/templates/${id}`),
-  create: (data: VMTemplateCreate) => api.post<VMTemplate>('/templates', data),
-  update: (id: string, data: Partial<VMTemplateCreate>) => api.put<VMTemplate>(`/templates/${id}`, data),
-  delete: (id: string) => api.delete(`/templates/${id}`),
-  clone: (id: string) => api.post<VMTemplate>(`/templates/${id}/clone`),
-  // Visibility tag management (ABAC)
-  getTags: (id: string) => api.get<ResourceTagsResponse>(`/templates/${id}/tags`),
-  addTag: (id: string, tag: string) => api.post(`/templates/${id}/tags`, { tag }),
-  removeTag: (id: string, tag: string) => api.delete(`/templates/${id}/tags/${encodeURIComponent(tag)}`),
+  list: () => Promise.resolve({ data: [] }),
+  get: (_id: string) => Promise.resolve({ data: null }),
+  create: (_data: unknown) => Promise.resolve({ data: null }),
+  update: (_id: string, _data: unknown) => Promise.resolve({ data: null }),
+  delete: (_id: string) => Promise.resolve({}),
+  clone: (_id: string) => Promise.resolve({ data: null }),
+  getTags: (_id: string) => Promise.resolve({ data: { tags: [] } }),
+  addTag: (_id: string, _tag: string) => Promise.resolve({}),
+  removeTag: (_id: string, _tag: string) => Promise.resolve({}),
 }
 
 // Ranges API
