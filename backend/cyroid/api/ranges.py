@@ -874,12 +874,25 @@ def repair_vnc_for_range(range_id: UUID, db: DBSession, current_user: CurrentUse
             continue
 
         # Determine VNC port based on VM type and image
-        from cyroid.models.template import VMType
-        vnc_port = 8006  # Default for QEMU VMs
+        # Get vm_type from related base_image, golden_image, or snapshot
+        vm_type_str = None
+        docker_image_tag = None
 
-        if vm.vm_type == VMType.CONTAINER:
+        if vm.base_image:
+            vm_type_str = vm.base_image.vm_type
+            docker_image_tag = vm.base_image.docker_image_tag
+        elif vm.golden_image:
+            vm_type_str = vm.golden_image.vm_type
+            docker_image_tag = vm.golden_image.docker_image_tag
+        elif vm.source_snapshot:
+            vm_type_str = vm.source_snapshot.vm_type
+            docker_image_tag = vm.source_snapshot.docker_image_tag
+
+        vnc_port = 8006  # Default for QEMU VMs (linux_vm, windows_vm)
+
+        if vm_type_str == "container":
             # Container VMs have image-specific VNC ports
-            image = vm.base_image or vm.docker_image or ""
+            image = docker_image_tag or ""
             if "kasmweb" in image:
                 vnc_port = 6901  # KasmVNC (HTTPS)
             elif "linuxserver/" in image or "lscr.io/linuxserver" in image:
