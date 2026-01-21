@@ -2,12 +2,13 @@
 import asyncio
 import json
 from datetime import datetime
-from typing import List
+from typing import List, Optional
 from uuid import UUID
 import logging
 import os
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, Query
+from pydantic import BaseModel
 
 from cyroid.config import get_settings
 
