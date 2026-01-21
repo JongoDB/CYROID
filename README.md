@@ -1,8 +1,9 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Status-Active%20Development-brightgreen" alt="Status">
   <img src="https://img.shields.io/badge/Phase-5%20of%207-blue" alt="Phase">
-  <img src="https://img.shields.io/badge/Version-0.13.17--alpha-orange" alt="Version">
+  <img src="https://img.shields.io/badge/Version-0.20.2--alpha-orange" alt="Version">
   <img src="https://img.shields.io/badge/License-Proprietary-red" alt="License">
+  <img src="https://github.com/JongoDB/CYROID/actions/workflows/docker-publish.yml/badge.svg" alt="Docker Build">
 </p>
 
 <h1 align="center">CYROID</h1>
@@ -38,28 +39,29 @@
 
 ---
 
-## What's New in v0.13.x
+## What's New in v0.20.x
 
-### Cross-Platform Support (v0.13.17)
+### Container Registry & CI/CD (v0.20.2)
 
-CYROID now runs on both **Linux** and **macOS** (Docker Desktop):
+CYROID images are now published to **GitHub Container Registry (GHCR)**:
 
-- **Platform-aware storage paths**: Automatically uses `~/.cyroid/` on macOS, `/data/cyroid/` on Linux
-- **Auto-directory creation**: Storage directories are created automatically on first range deployment
-- **ISO Cache sharing**: Downloaded ISOs are automatically available to all range VMs
+- **Pre-built images**: All 6 CYROID images available on GHCR for instant deployment
+- **GitHub Actions CI/CD**: Automated builds on every push to master
+- **Version tagging**: Images tagged with version numbers and `latest`
+- **Development mode**: Local builds with hot-reload for development
 
-### Image Cache Enhancements (v0.13.x)
+### Docker Image Upload (v0.20.2)
 
-- **Linux ISO downloads**: Direct download support for Ubuntu, Debian, Kali, Fedora, and more
-- **Windows ISO downloads**: Windows 10/11 Pro, Enterprise, Server editions
-- **Custom ISO uploads**: Upload your own ISOs for specialized VMs
-- **QEMU VM support**: Full support for ISO-based Linux and Windows VMs via qemux/qemu and dockur/windows
+- **Upload Docker images**: Upload .tar/.tar.gz archives via the UI
+- **CYROID Services category**: Platform infrastructure images grouped together
+- **Image Cache improvements**: Better categorization of cached images
 
-### Previous: Simplified Architecture (v0.12.0)
+### Previous Highlights
 
-- **VyOS Now Optional**: Ranges deploy without VyOS by default. DinD handles routing via iptables
-- **Native VNC Routing**: Replaced nginx proxy with iptables DNAT for VNC console access
-- **Inter-Network Routing**: DinD can route between networks using iptables FORWARD rules
+- **Cross-Platform Support**: Linux and macOS (Docker Desktop)
+- **Image Cache**: Linux/Windows ISO downloads, custom uploads, QEMU VM support
+- **DinD Isolation**: Each range runs in isolated Docker-in-Docker container
+- **Simplified Architecture**: VyOS optional, iptables-based routing
 
 ---
 
@@ -265,6 +267,21 @@ Every range deploys inside its own isolated Docker-in-Docker container:
 | | Docker | 24+ | Container Runtime |
 | | Docker DinD | 24 | Range Isolation |
 
+### Container Images (GHCR)
+
+All CYROID images are published to GitHub Container Registry:
+
+| Image | Description | Pull Command |
+|-------|-------------|--------------|
+| `ghcr.io/jongodb/cyroid-api` | FastAPI backend | `docker pull ghcr.io/jongodb/cyroid-api:latest` |
+| `ghcr.io/jongodb/cyroid-frontend` | React web UI | `docker pull ghcr.io/jongodb/cyroid-frontend:latest` |
+| `ghcr.io/jongodb/cyroid-worker` | Dramatiq task worker | `docker pull ghcr.io/jongodb/cyroid-worker:latest` |
+| `ghcr.io/jongodb/cyroid-proxy` | Traefik reverse proxy | `docker pull ghcr.io/jongodb/cyroid-proxy:latest` |
+| `ghcr.io/jongodb/cyroid-dind` | Docker-in-Docker | `docker pull ghcr.io/jongodb/cyroid-dind:latest` |
+| `ghcr.io/jongodb/cyroid-storage` | MinIO object storage | `docker pull ghcr.io/jongodb/cyroid-storage:latest` |
+
+Images are automatically built and pushed on every commit to master via GitHub Actions.
+
 ### Per-Range Network Architecture (Inside DinD)
 
 Each range runs inside a DinD container with iptables-based routing (VyOS optional):
@@ -327,7 +344,7 @@ Each range runs inside a DinD container with iptables-based routing (VyOS option
 
 ```bash
 # Clone the repository
-git clone <repository-url> CYROID
+git clone https://github.com/JongoDB/CYROID.git
 cd CYROID
 
 # Copy environment template
@@ -342,7 +359,7 @@ sed -i '' "s/your-secret-key-here/$(openssl rand -hex 32)/" .env
 # Initialize CYROID networks
 ./scripts/init-networks.sh
 
-# Start all services
+# Start all services (pulls pre-built images from GHCR)
 docker-compose up -d
 
 # Verify services are running
@@ -350,6 +367,19 @@ docker-compose ps
 
 # Check API health
 curl http://localhost/api/v1/version
+```
+
+### Development Setup
+
+For development with local builds and hot-reload:
+
+```bash
+# Use the development compose file
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+
+# Or copy to override for automatic loading
+cp docker-compose.dev.yml docker-compose.override.yml
+docker-compose up --build
 ```
 
 ### macOS Setup (Docker Desktop)
@@ -499,13 +529,17 @@ CYROID/
 │
 ├── scripts/                    # Utility scripts
 │   ├── init-networks.sh       # Network initialization
+│   ├── retag-infrastructure.sh # Retag Docker Hub images with cyroid- prefix
 │   └── build-dind-image.sh    # Custom DinD build
 │
 ├── docs/                       # Documentation
 │   └── plans/                 # Development plans
 │
+├── .github/workflows/          # GitHub Actions CI/CD
+│   └── docker-publish.yml     # Build and push to GHCR
 ├── certs/                      # SSL certificates
-├── docker-compose.yml          # Service orchestration
+├── docker-compose.yml          # Production (GHCR images)
+├── docker-compose.dev.yml      # Development (local builds)
 ├── traefik-dynamic.yml         # Traefik configuration
 ├── CLAUDE.md                   # AI assistant context
 └── README.md                   # This file
@@ -681,7 +715,7 @@ TEMPLATE_STORAGE_DIR=${CYROID_DATA_DIR}/template-storage
 VM_STORAGE_DIR=${CYROID_DATA_DIR}/vm-storage
 
 # DinD Configuration
-DIND_IMAGE=docker:24-dind
+DIND_IMAGE=ghcr.io/jongodb/cyroid-dind:latest
 DIND_STARTUP_TIMEOUT=60
 DIND_DOCKER_PORT=2375
 ```
@@ -880,11 +914,12 @@ Proprietary - All Rights Reserved
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| 0.13.17 | 2026-01-20 | Cross-platform support (macOS Docker Desktop), auto-directory creation, ISO cache sharing with DinD |
-| 0.13.x | 2026-01-20 | Image cache enhancements, Linux/Windows ISO downloads, QEMU VM support, VNC improvements |
-| 0.12.0 | 2026-01-20 | Simplified architecture: VyOS optional, iptables VNC routing, removed promote-to-library |
+| 0.20.2 | 2026-01-21 | GHCR publishing, GitHub Actions CI/CD, Docker image upload, CYROID Services category |
+| 0.20.1 | 2026-01-21 | Image Cache tab consolidation, macOS ISO support |
+| 0.20.0 | 2026-01-21 | Major refactor: consolidated Image Cache, improved UX |
+| 0.13.17 | 2026-01-20 | Cross-platform support (macOS Docker Desktop), auto-directory creation |
+| 0.12.0 | 2026-01-20 | Simplified architecture: VyOS optional, iptables VNC routing |
 | 0.11.0 | 2026-01-19 | DinD isolation for all ranges, simplified deployment |
-| 0.10.1 | 2026-01-16 | Bug fixes, dropdown overlay fix |
 | 0.10.0 | 2026-01-16 | Multi-architecture support (x86_64 + ARM64) |
 | 0.9.0 | 2026-01-15 | Version display, console pop-out default |
 | 0.8.0 | 2026-01-15 | Comprehensive range export with Docker images |
