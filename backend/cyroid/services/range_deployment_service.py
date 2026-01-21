@@ -252,6 +252,37 @@ class RangeDeploymentService:
                 "cyroid.vm_id": str(vm.id),
             }
 
+            # Set up environment variables based on image type
+            environment = {}
+            privileged = False
+
+            # macOS VM (dockur/macos) - requires VERSION env and privileged mode for KVM
+            if "dockur/macos" in container_image.lower():
+                # Map version number to dockur version name
+                macos_version_map = {
+                    "15": "sequoia",
+                    "14": "sonoma",
+                    "13": "ventura",
+                    "12": "monterey",
+                    "11": "big-sur",
+                }
+                version_name = macos_version_map.get(vm.macos_version, "sonoma")  # Default to Sonoma
+                environment["VERSION"] = version_name
+                privileged = True  # Required for KVM access
+                labels["cyroid.vm_type"] = "macos"
+
+            # Windows VM (dockur/windows) - set VERSION if specified
+            elif "dockur/windows" in container_image.lower():
+                if vm.windows_version:
+                    environment["VERSION"] = vm.windows_version
+                privileged = True  # Required for KVM access
+                labels["cyroid.vm_type"] = "windows"
+
+            # Linux VM (qemux/qemu) - uses VERSION for distro
+            elif "qemux/qemu" in container_image.lower():
+                privileged = True  # Required for KVM access
+                labels["cyroid.vm_type"] = "linux"
+
             container_id = await self.docker_service.create_range_container_dind(
                 range_id=range_id,
                 docker_url=docker_url,
@@ -265,6 +296,8 @@ class RangeDeploymentService:
                 labels=labels,
                 dns_servers=network.dns_servers,
                 dns_search=network.dns_search,
+                environment=environment if environment else None,
+                privileged=privileged,
             )
 
             vm.container_id = container_id
@@ -555,6 +588,36 @@ class RangeDeploymentService:
                     "cyroid.vm_id": str(vm.id),
                 }
 
+                # Set up environment variables based on image type
+                environment = {}
+                privileged = False
+
+                # macOS VM (dockur/macos) - requires VERSION env and privileged mode for KVM
+                if "dockur/macos" in image_tag.lower():
+                    macos_version_map = {
+                        "15": "sequoia",
+                        "14": "sonoma",
+                        "13": "ventura",
+                        "12": "monterey",
+                        "11": "big-sur",
+                    }
+                    version_name = macos_version_map.get(vm.macos_version, "sonoma")
+                    environment["VERSION"] = version_name
+                    privileged = True
+                    labels["cyroid.vm_type"] = "macos"
+
+                # Windows VM (dockur/windows) - set VERSION if specified
+                elif "dockur/windows" in image_tag.lower():
+                    if vm.windows_version:
+                        environment["VERSION"] = vm.windows_version
+                    privileged = True
+                    labels["cyroid.vm_type"] = "windows"
+
+                # Linux VM (qemux/qemu) - uses VERSION for distro
+                elif "qemux/qemu" in image_tag.lower():
+                    privileged = True
+                    labels["cyroid.vm_type"] = "linux"
+
                 # Create container (same pattern as deploy_range)
                 container_id = await self.docker_service.create_range_container_dind(
                     range_id=range_id_str,
@@ -569,6 +632,8 @@ class RangeDeploymentService:
                     labels=labels,
                     dns_servers=vm_network.dns_servers,
                     dns_search=vm_network.dns_search,
+                    environment=environment if environment else None,
+                    privileged=privileged,
                 )
 
                 vm.container_id = container_id

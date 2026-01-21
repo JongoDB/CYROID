@@ -6,7 +6,7 @@ import logging
 from typing import List, Optional, Dict, Any
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, status, BackgroundTasks, Query
+from fastapi import APIRouter, HTTPException, status, BackgroundTasks, Query, UploadFile, File, Form
 from pydantic import BaseModel
 
 from cyroid.api.deps import DBSession, CurrentUser, AdminUser, require_role
@@ -1332,6 +1332,64 @@ def has_windows_arm64_support(version: str) -> bool:
     return version in WINDOWS_ARM64_VERSIONS
 
 
+# ============================================================================
+# macOS ISOs (dockur/macos) - x86_64 ONLY
+# ============================================================================
+# macOS versions supported by dockur/macos
+# NOTE: macOS VMs only work on x86_64 hosts (KVM-based virtualization)
+# dockur/macos downloads images at runtime if not pre-cached
+# Source: https://github.com/dockur/macos
+DOCKUR_MACOS_VERSIONS = [
+    {
+        "version": "15",
+        "name": "macOS Sequoia",
+        "size_gb": 14.0,
+        "category": "desktop",
+        "download_url": None,  # dockur downloads at runtime
+        "note": "Latest - Apple Account sign-in not working yet",
+    },
+    {
+        "version": "14",
+        "name": "macOS Sonoma",
+        "size_gb": 14.0,
+        "category": "desktop",
+        "download_url": None,
+        "note": "Recommended - most stable",
+    },
+    {
+        "version": "13",
+        "name": "macOS Ventura",
+        "size_gb": 12.0,
+        "category": "desktop",
+        "download_url": None,
+    },
+    {
+        "version": "12",
+        "name": "macOS Monterey",
+        "size_gb": 12.0,
+        "category": "desktop",
+        "download_url": None,
+    },
+    {
+        "version": "11",
+        "name": "macOS Big Sur",
+        "size_gb": 12.0,
+        "category": "desktop",
+        "download_url": None,
+    },
+]
+
+
+def get_macos_iso_dir() -> str:
+    """Get the macOS ISO cache directory path."""
+    settings = get_settings()
+    return os.path.join(settings.iso_cache_dir, "macos-isos")
+
+
+# Track active macOS ISO downloads
+_active_macos_downloads: Dict[str, Dict[str, Any]] = {}
+
+
 # qemux/qemu supported Linux distributions
 # These are auto-downloaded by qemux/qemu when the container starts
 # Download URLs sourced from: https://github.com/qemux/qemu-docker/blob/master/src/define.sh
@@ -2004,6 +2062,330 @@ def delete_linux_iso(
         )
 
 
+# ============================================================================
+# macOS ISO Endpoints (dockur/macos) - x86_64 ONLY
+# ============================================================================
+
+@router.get("/macos-versions")
+def get_macos_versions(current_user: CurrentUser):
+    """
+    Get all supported macOS versions for dockur/macos with cached status.
+
+    NOTE: macOS VMs only work on x86_64 hosts. dockur/macos downloads
+    images at runtime if not pre-cached.
+    """
+    from cyroid.utils.arch import HOST_ARCH
+
+    macos_dir = get_macos_iso_dir()
+    os.makedirs(macos_dir, exist_ok=True)
+
+    cached_isos = set()
+    if os.path.exists(macos_dir):
+        cached_isos = {f.lower() for f in os.listdir(macos_dir) if f.endswith('.iso')}
+
+    versions = []
+    cached_count = 0
+
+    for v in DOCKUR_MACOS_VERSIONS:
+        version_code = v["version"]
+        filename = f"macos-{version_code}.iso"
+        is_cached = filename.lower() in cached_isos
+
+        if is_cached:
+            cached_count += 1
+
+        versions.append({
+            **v,
+            "cached": is_cached,
+            "precache_available": v.get("download_url") is not None,
+        })
+
+    return {
+        "versions": versions,
+        "cache_dir": macos_dir,
+        "cached_count": cached_count,
+        "total_count": len(DOCKUR_MACOS_VERSIONS),
+        "host_arch": HOST_ARCH,
+        "x86_64_only": True,
+        "note": "macOS VMs only work on x86_64 hosts. dockur/macos downloads images at runtime if not pre-cached.",
+    }
+
+
+class MacOSISODownloadRequest(BaseModel):
+    version: str
+    url: Optional[str] = None
+
+
+@router.post("/macos-isos/download", status_code=status.HTTP_202_ACCEPTED)
+def download_macos_iso(
+    request: MacOSISODownloadRequest,
+    background_tasks: BackgroundTasks,
+    current_user: AdminUser
+):
+    """
+    Download a macOS ISO from a provided URL.
+    Admin only.
+
+    NOTE: Most macOS ISOs don't have direct download URLs available.
+    dockur/macos downloads images at runtime. This endpoint is for
+    manually providing a custom URL or pre-caching from a known source.
+    """
+    # Validate version
+    valid_versions = {v["version"] for v in DOCKUR_MACOS_VERSIONS}
+    if request.version not in valid_versions:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid version '{request.version}'. Valid versions: {', '.join(sorted(valid_versions))}"
+        )
+
+    # Check if already downloading
+    if request.version in _active_macos_downloads:
+        if _active_macos_downloads[request.version].get("status") == "downloading":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Download already in progress for this version"
+            )
+
+    macos_dir = get_macos_iso_dir()
+    os.makedirs(macos_dir, exist_ok=True)
+    filename = f"macos-{request.version}.iso"
+    filepath = os.path.join(macos_dir, filename)
+
+    # Get download URL
+    version_info = next((v for v in DOCKUR_MACOS_VERSIONS if v["version"] == request.version), None)
+    download_url = request.url or (version_info.get("download_url") if version_info else None)
+
+    if not download_url:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No download URL available. macOS images are typically downloaded by dockur at runtime. Provide a custom URL or upload the ISO manually."
+        )
+
+    # Initialize tracking
+    _active_macos_downloads[request.version] = {
+        "status": "downloading",
+        "filename": filename,
+        "progress_bytes": 0,
+        "total_bytes": None,
+        "error": None,
+    }
+
+    def download_macos_iso_task(url: str, dest_path: str, version: str):
+        """Download macOS ISO in background with progress tracking."""
+        import requests
+        import time
+
+        try:
+            response = requests.get(url, stream=True, timeout=7200, allow_redirects=True)
+            response.raise_for_status()
+
+            total_size = response.headers.get('content-length')
+            if total_size:
+                total_size = int(total_size)
+                _active_macos_downloads[version]["total_bytes"] = total_size
+
+            downloaded = 0
+            with open(dest_path, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=1024 * 1024):
+                    # Check if cancelled
+                    if version not in _active_macos_downloads or _active_macos_downloads[version].get("cancelled"):
+                        if os.path.exists(dest_path):
+                            os.remove(dest_path)
+                        if version in _active_macos_downloads:
+                            del _active_macos_downloads[version]
+                        return
+
+                    if chunk:
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        _active_macos_downloads[version]["progress_bytes"] = downloaded
+
+            _active_macos_downloads[version]["status"] = "completed"
+            _active_macos_downloads[version]["progress_bytes"] = os.path.getsize(dest_path)
+
+            time.sleep(3)
+            if version in _active_macos_downloads:
+                del _active_macos_downloads[version]
+
+        except Exception as e:
+            if os.path.exists(dest_path):
+                os.remove(dest_path)
+            if version in _active_macos_downloads:
+                _active_macos_downloads[version]["status"] = "failed"
+                _active_macos_downloads[version]["error"] = str(e)
+                time.sleep(5)
+                if version in _active_macos_downloads:
+                    del _active_macos_downloads[version]
+
+    background_tasks.add_task(download_macos_iso_task, download_url, filepath, request.version)
+
+    return {
+        "status": "downloading",
+        "version": request.version,
+        "name": version_info["name"] if version_info else f"macOS {request.version}",
+        "filename": filename,
+        "destination": filepath,
+        "source_url": download_url,
+        "message": f"Downloading macOS {request.version} ISO..."
+    }
+
+
+@router.get("/macos-isos/download/{version}/status")
+def get_macos_iso_download_status(version: str, current_user: CurrentUser):
+    """Check macOS ISO download status."""
+    if version in _active_macos_downloads:
+        info = _active_macos_downloads[version]
+        response = {
+            "status": info["status"],
+            "version": version,
+            "filename": info.get("filename"),
+        }
+
+        if info.get("progress_bytes") is not None:
+            response["progress_bytes"] = info["progress_bytes"]
+            response["progress_gb"] = round(info["progress_bytes"] / (1024**3), 2)
+
+        if info.get("total_bytes") is not None:
+            response["total_bytes"] = info["total_bytes"]
+            response["total_gb"] = round(info["total_bytes"] / (1024**3), 2)
+            if info["progress_bytes"]:
+                response["progress_percent"] = round(info["progress_bytes"] / info["total_bytes"] * 100, 1)
+
+        if info.get("error"):
+            response["error"] = info["error"]
+
+        return response
+
+    # Check if already cached
+    macos_dir = get_macos_iso_dir()
+    filepath = os.path.join(macos_dir, f"macos-{version}.iso")
+    if os.path.exists(filepath):
+        size = os.path.getsize(filepath)
+        return {
+            "status": "completed",
+            "version": version,
+            "filename": f"macos-{version}.iso",
+            "path": filepath,
+            "size_bytes": size,
+            "size_gb": round(size / (1024**3), 2),
+        }
+
+    return {"status": "not_found", "version": version}
+
+
+@router.post("/macos-isos/upload", status_code=status.HTTP_201_CREATED)
+async def upload_macos_iso(
+    file: UploadFile = File(...),
+    version: str = Form(...),
+    current_user: AdminUser = None,
+):
+    """
+    Upload a macOS ISO file to the cache.
+    The version should match a supported macOS version (e.g., '14', '15').
+    Admin only.
+    """
+    import aiofiles
+
+    valid_versions = {v["version"] for v in DOCKUR_MACOS_VERSIONS}
+    if version not in valid_versions:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid version '{version}'. Valid versions: {', '.join(sorted(valid_versions))}"
+        )
+
+    if not file.filename or not file.filename.lower().endswith('.iso'):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File must be an ISO file"
+        )
+
+    macos_dir = get_macos_iso_dir()
+    os.makedirs(macos_dir, exist_ok=True)
+
+    filename = f"macos-{version}.iso"
+    filepath = os.path.join(macos_dir, filename)
+
+    # Check if already exists
+    if os.path.exists(filepath):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"ISO for version '{version}' already exists. Delete it first to replace."
+        )
+
+    try:
+        async with aiofiles.open(filepath, 'wb') as out_file:
+            while content := await file.read(1024 * 1024):
+                await out_file.write(content)
+
+        size = os.path.getsize(filepath)
+        return {
+            "status": "uploaded",
+            "version": version,
+            "filename": filename,
+            "path": filepath,
+            "size_bytes": size,
+            "size_gb": round(size / (1024**3), 2),
+        }
+    except Exception as e:
+        if os.path.exists(filepath):
+            os.remove(filepath)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to upload ISO: {str(e)}"
+        )
+
+
+@router.delete("/macos-isos/{version}")
+def delete_macos_iso(version: str, current_user: AdminUser):
+    """Delete a cached macOS ISO. Admin only."""
+    macos_dir = get_macos_iso_dir()
+    filepath = os.path.join(macos_dir, f"macos-{version}.iso")
+
+    # Clear any active download entry
+    if version in _active_macos_downloads:
+        del _active_macos_downloads[version]
+
+    if not os.path.exists(filepath):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"macOS ISO for version '{version}' not found"
+        )
+
+    try:
+        os.remove(filepath)
+        return {"status": "deleted", "version": version, "filename": f"macos-{version}.iso"}
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete ISO: {str(e)}"
+        )
+
+
+@router.post("/macos-isos/download/{version}/cancel")
+def cancel_macos_iso_download(version: str, current_user: AdminUser):
+    """Cancel macOS ISO download. Admin only."""
+    if version not in _active_macos_downloads:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No active download found for version '{version}'"
+        )
+
+    if _active_macos_downloads[version].get("status") != "downloading":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Download for version '{version}' is not in progress"
+        )
+
+    _active_macos_downloads[version]["cancelled"] = True
+    _active_macos_downloads[version]["status"] = "cancelled"
+
+    return {
+        "status": "cancelled",
+        "version": version,
+        "message": f"Download for macOS {version} has been cancelled"
+    }
+
+
 @router.get("/windows-versions")
 def get_windows_versions(current_user: CurrentUser):
     """
@@ -2544,7 +2926,6 @@ def get_recommended_images(current_user: CurrentUser):
 
 
 # ISO Upload endpoints
-from fastapi import UploadFile, File, Form
 
 
 @router.post("/isos/upload", status_code=status.HTTP_201_CREATED)

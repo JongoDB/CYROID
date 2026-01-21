@@ -564,7 +564,7 @@ export const connectionsApi = {
 }
 
 // Cache API
-import type { CachedImage, ISOCacheStatus, GoldenImagesStatus, CacheStats, PruneResult, RecommendedImages, WindowsVersionsResponse, LinuxVersionsResponse, LinuxISODownloadResponse, LinuxISODownloadStatus, CustomISOList, CustomISODownloadResponse, CustomISOStatusResponse, ISOUploadResponse, WindowsISODownloadResponse, WindowsISODownloadStatus, AllSnapshotsStatus, SnapshotResponse } from '../types'
+import type { CachedImage, ISOCacheStatus, GoldenImagesStatus, CacheStats, PruneResult, RecommendedImages, WindowsVersionsResponse, LinuxVersionsResponse, LinuxISODownloadResponse, LinuxISODownloadStatus, CustomISOList, CustomISODownloadResponse, CustomISOStatusResponse, ISOUploadResponse, WindowsISODownloadResponse, WindowsISODownloadStatus, AllSnapshotsStatus, SnapshotResponse, MacOSVersionsResponse, MacOSISODownloadResponse, MacOSISODownloadStatus } from '../types'
 
 export interface DockerPullStatus {
   status: 'pulling' | 'completed' | 'failed' | 'cancelled' | 'not_found' | 'already_cached' | 'already_pulling'
@@ -677,6 +677,17 @@ export const cacheApi = {
   deleteLinuxISO: (version: string, arch?: string) =>
     api.delete(`/cache/linux-isos/${encodeURIComponent(version)}${arch ? `?arch=${arch}` : ''}`),
 
+  // macOS ISOs (dockur/macos) - x86_64 ONLY
+  getMacOSVersions: () => api.get<MacOSVersionsResponse>('/cache/macos-versions'),
+  downloadMacOSISO: (version: string, url?: string) =>
+    api.post<MacOSISODownloadResponse>('/cache/macos-isos/download', { version, url }),
+  getMacOSISODownloadStatus: (version: string) =>
+    api.get<MacOSISODownloadStatus>(`/cache/macos-isos/download/${encodeURIComponent(version)}/status`),
+  cancelMacOSISODownload: (version: string) =>
+    api.post(`/cache/macos-isos/download/${encodeURIComponent(version)}/cancel`),
+  deleteMacOSISO: (version: string) =>
+    api.delete(`/cache/macos-isos/${encodeURIComponent(version)}`),
+
   // Windows ISO Downloads
   downloadWindowsISO: (version: string, url?: string, arch?: 'x86_64' | 'arm64') =>
     api.post<WindowsISODownloadResponse>('/cache/isos/download', { version, url, arch: arch || 'x86_64' }),
@@ -723,6 +734,14 @@ export const cacheApi = {
     formData.append('file', file)
     formData.append('distro', distro)
     return api.post<ISOUploadResponse>('/cache/linux-isos/upload', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  },
+  uploadMacOSISO: (file: File, version: string) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('version', version)
+    return api.post<ISOUploadResponse>('/cache/macos-isos/upload', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     })
   },

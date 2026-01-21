@@ -15,6 +15,9 @@ import type {
   LinuxVersionsResponse,
   LinuxVersion,
   LinuxISODownloadStatus,
+  MacOSVersionsResponse,
+  MacOSVersion,
+  MacOSISODownloadStatus,
 } from '../types'
 import {
   HardDrive,
@@ -42,7 +45,7 @@ import { ConfirmDialog } from '../components/common/ConfirmDialog'
 import { toast } from '../stores/toastStore'
 import { FileBrowser } from '../components/files/FileBrowser'
 
-type TabType = 'overview' | 'docker' | 'build' | 'files' | 'isos' | 'linux-isos' | 'custom-isos'
+type TabType = 'overview' | 'docker' | 'build' | 'files' | 'isos' | 'linux-isos' | 'macos-isos' | 'custom-isos'
 
 export default function ImageCache() {
   const { user } = useAuthStore()
@@ -53,6 +56,7 @@ export default function ImageCache() {
   const [recommended, setRecommended] = useState<RecommendedImages | null>(null)
   const [windowsVersions, setWindowsVersions] = useState<WindowsVersionsResponse | null>(null)
   const [linuxVersions, setLinuxVersions] = useState<LinuxVersionsResponse | null>(null)
+  const [macosVersions, setMacosVersions] = useState<MacOSVersionsResponse | null>(null)
   const [customISOs, setCustomISOs] = useState<CustomISOList | null>(null)
   const [loading, setLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
@@ -69,8 +73,12 @@ export default function ImageCache() {
   const [customISOName, setCustomISOName] = useState('')
   const [customISOUrl, setCustomISOUrl] = useState('')
 
+  // macOS download modal state (for custom URL downloads)
+  const [showMacOSDownloadModal, setShowMacOSDownloadModal] = useState<MacOSVersion | null>(null)
+  const [macosDownloadUrl, setMacosDownloadUrl] = useState('')
+
   // Upload modal state
-  const [showUploadModal, setShowUploadModal] = useState<'windows' | 'linux' | 'custom' | null>(null)
+  const [showUploadModal, setShowUploadModal] = useState<'windows' | 'linux' | 'macos' | 'custom' | null>(null)
   const [uploadFile, setUploadFile] = useState<File | null>(null)
   const [uploadVersion, setUploadVersion] = useState('')
   const [uploadName, setUploadName] = useState('')
@@ -80,6 +88,8 @@ export default function ImageCache() {
   const [downloadStatus, setDownloadStatus] = useState<Record<string, WindowsISODownloadStatus>>({})
   // Download state for tracking Linux ISO downloads
   const [linuxDownloadStatus, setLinuxDownloadStatus] = useState<Record<string, LinuxISODownloadStatus>>({})
+  // Download state for tracking macOS ISO downloads
+  const [macosDownloadStatus, setMacosDownloadStatus] = useState<Record<string, MacOSISODownloadStatus>>({})
   // Download state for tracking Custom ISO downloads
   const [customISODownloadStatus, setCustomISODownloadStatus] = useState<Record<string, CustomISOStatusResponse>>({})
   // Pull state for tracking Docker image pulls
@@ -90,7 +100,7 @@ export default function ImageCache() {
 
   // Delete confirmation state
   const [deleteConfirm, setDeleteConfirm] = useState<{
-    type: 'docker' | 'windows-iso' | 'linux-iso' | 'custom-iso' | null
+    type: 'docker' | 'windows-iso' | 'linux-iso' | 'macos-iso' | 'custom-iso' | null
     name: string
     id?: string
     arch?: string  // For linux-iso architecture-specific delete
@@ -105,12 +115,13 @@ export default function ImageCache() {
     setLoading(true)
     setError(null)
     try {
-      const [statsRes, imagesRes, recommendedRes, windowsRes, linuxRes, customISOsRes, buildableRes] = await Promise.all([
+      const [statsRes, imagesRes, recommendedRes, windowsRes, linuxRes, macosRes, customISOsRes, buildableRes] = await Promise.all([
         cacheApi.getStats(),
         cacheApi.listImages(),
         cacheApi.getRecommendedImages(),
         cacheApi.getWindowsVersions(),
         cacheApi.getLinuxVersions(),
+        cacheApi.getMacOSVersions(),
         cacheApi.listCustomISOs(),
         cacheApi.listBuildableImages(),
       ])
@@ -119,6 +130,7 @@ export default function ImageCache() {
       setRecommended(recommendedRes.data)
       setWindowsVersions(windowsRes.data)
       setLinuxVersions(linuxRes.data)
+      setMacosVersions(macosRes.data)
       setCustomISOs(customISOsRes.data)
       setBuildableImages(buildableRes.data.images || [])
     } catch (err: any) {
@@ -874,6 +886,17 @@ export default function ImageCache() {
             toast.success(`Deleted Linux ISO: ${deleteConfirm.name}`)
           }
           break
+        case 'macos-iso':
+          if (deleteConfirm.id) {
+            await cacheApi.deleteMacOSISO(deleteConfirm.id)
+            setMacosDownloadStatus(prev => {
+              const newStatus = { ...prev }
+              delete newStatus[deleteConfirm.id!]
+              return newStatus
+            })
+            toast.success(`Deleted macOS ISO: ${deleteConfirm.name}`)
+          }
+          break
       }
       setDeleteConfirm({ type: null, name: '', isLoading: false })
       await loadData()
@@ -921,6 +944,78 @@ export default function ImageCache() {
     }
   }
 
+  // macOS ISO handlers
+  const handleDownloadMacOSISO = async (version: MacOSVersion, customUrl?: string) => {
+    setActionLoading(`download-macos-${version.version}`)
+    setError(null)
+
+    try {
+      await cacheApi.downloadMacOSISO(version.version, customUrl)
+
+      // Start polling for download status
+      setMacosDownloadStatus(prev => ({
+        ...prev,
+        [version.version]: { status: 'downloading', version: version.version, progress_gb: 0 }
+      }))
+
+      // Poll for status
+      const pollInterval = setInterval(async () => {
+        try {
+          const statusRes = await cacheApi.getMacOSISODownloadStatus(version.version)
+          setMacosDownloadStatus(prev => ({
+            ...prev,
+            [version.version]: statusRes.data
+          }))
+
+          if (statusRes.data.status === 'completed' || statusRes.data.status === 'failed' || statusRes.data.status === 'cancelled') {
+            clearInterval(pollInterval)
+            if (statusRes.data.status === 'completed') {
+              toast.success(`Downloaded macOS ${version.name} ISO`)
+              loadData()
+            } else if (statusRes.data.status === 'failed') {
+              toast.error(`Failed to download macOS ${version.name}: ${statusRes.data.error || 'Unknown error'}`)
+            }
+          }
+        } catch (pollErr) {
+          console.error('Error polling macOS ISO status:', pollErr)
+        }
+      }, 2000)
+
+      setSuccess(`Started downloading macOS ${version.name}`)
+    } catch (err: any) {
+      const detail = err.response?.data?.detail
+      if (typeof detail === 'object') {
+        setError(detail.message || detail.detail || 'Failed to start download')
+      } else {
+        setError(detail || 'Failed to start download')
+      }
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
+  const handleDeleteMacOSISO = (version: string) => {
+    setDeleteConfirm({ type: 'macos-iso', name: version, id: version, isLoading: false })
+  }
+
+  const handleCancelMacOSDownload = async (version: string) => {
+    setActionLoading(`cancel-macos-${version}`)
+    setError(null)
+    try {
+      await cacheApi.cancelMacOSISODownload(version)
+      setSuccess(`Cancelled download for macOS ${version}`)
+      setMacosDownloadStatus(prev => {
+        const newStatus = { ...prev }
+        delete newStatus[version]
+        return newStatus
+      })
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Failed to cancel download')
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
   const handleUploadISO = async () => {
     if (!uploadFile) return
 
@@ -943,6 +1038,14 @@ export default function ImageCache() {
         }
         await cacheApi.uploadLinuxISO(uploadFile, uploadVersion)
         setSuccess(`Uploaded Linux ${uploadVersion} ISO`)
+      } else if (showUploadModal === 'macos') {
+        if (!uploadVersion) {
+          setError('Please select a macOS version')
+          setActionLoading(null)
+          return
+        }
+        await cacheApi.uploadMacOSISO(uploadFile, uploadVersion)
+        setSuccess(`Uploaded macOS ${uploadVersion} ISO`)
       } else {
         if (!uploadName) {
           setError('Please enter a name for the ISO')
@@ -971,6 +1074,7 @@ export default function ImageCache() {
     { id: 'files' as const, name: 'Image Files', icon: FolderEdit },
     { id: 'isos' as const, name: 'Windows ISOs', icon: Monitor },
     { id: 'linux-isos' as const, name: 'Linux ISOs', icon: Terminal },
+    { id: 'macos-isos' as const, name: 'macOS ISOs', icon: Monitor },
     { id: 'custom-isos' as const, name: 'Custom ISOs', icon: Download },
   ]
 
@@ -1085,7 +1189,7 @@ export default function ImageCache() {
       {/* Overview Tab */}
       {activeTab === 'overview' && stats && (
         <div className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4">
             <div className="bg-white rounded-lg shadow p-6">
               <div className="flex items-center">
                 <Server className="h-8 w-8 text-blue-500" />
@@ -1124,6 +1228,18 @@ export default function ImageCache() {
             </div>
             <div className="bg-white rounded-lg shadow p-6">
               <div className="flex items-center">
+                <Monitor className="h-8 w-8 text-gray-500" />
+                <div className="ml-4">
+                  <p className="text-sm font-medium text-gray-500">macOS ISOs</p>
+                  <p className="text-2xl font-semibold text-gray-900">
+                    {macosVersions?.cached_count || 0}/{macosVersions?.total_count || 5}
+                  </p>
+                  <p className="text-sm text-gray-500">x86_64 only</p>
+                </div>
+              </div>
+            </div>
+            <div className="bg-white rounded-lg shadow p-6">
+              <div className="flex items-center">
                 <Download className="h-8 w-8 text-teal-500" />
                 <div className="ml-4">
                   <p className="text-sm font-medium text-gray-500">Custom ISOs</p>
@@ -1154,6 +1270,7 @@ export default function ImageCache() {
                 Object.keys(dockerBuildStatus).some(k => dockerBuildStatus[k].status === 'building') ||
                 Object.keys(downloadStatus).some(k => downloadStatus[k].status === 'downloading') ||
                 Object.keys(linuxDownloadStatus).some(k => linuxDownloadStatus[k].status === 'downloading') ||
+                Object.keys(macosDownloadStatus).some(k => macosDownloadStatus[k].status === 'downloading') ||
                 Object.keys(customISODownloadStatus).some(k => customISODownloadStatus[k].status === 'downloading')) && (
                 <div className="flex items-center text-sm text-blue-600">
                   <Loader2 className="h-4 w-4 animate-spin mr-2" />
@@ -1167,6 +1284,8 @@ export default function ImageCache() {
                         `${Object.values(downloadStatus).filter(s => s.status === 'downloading').length} downloading`,
                       Object.values(linuxDownloadStatus).filter(s => s.status === 'downloading').length > 0 &&
                         `${Object.values(linuxDownloadStatus).filter(s => s.status === 'downloading').length} Linux ISOs`,
+                      Object.values(macosDownloadStatus).filter(s => s.status === 'downloading').length > 0 &&
+                        `${Object.values(macosDownloadStatus).filter(s => s.status === 'downloading').length} macOS ISOs`,
                       Object.values(customISODownloadStatus).filter(s => s.status === 'downloading').length > 0 &&
                         `${Object.values(customISODownloadStatus).filter(s => s.status === 'downloading').length} custom ISOs`,
                     ].filter(Boolean).join(', ')}
@@ -1210,6 +1329,13 @@ export default function ImageCache() {
                   >
                     <Upload className="h-4 w-4 mr-2" />
                     Upload Linux ISO
+                  </button>
+                  <button
+                    onClick={() => setShowUploadModal('macos')}
+                    className="inline-flex items-center px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700"
+                  >
+                    <Upload className="h-4 w-4 mr-2" />
+                    Upload macOS ISO
                   </button>
                   <button
                     onClick={() => setShowUploadModal('custom')}
@@ -1704,6 +1830,15 @@ export default function ImageCache() {
                 )}
               </p>
             </div>
+            {isAdmin && (
+              <button
+                onClick={() => setShowUploadModal('linux')}
+                className="inline-flex items-center px-3 py-2 bg-emerald-600 text-white rounded-md hover:bg-emerald-700 text-sm"
+              >
+                <Upload className="h-4 w-4 mr-2" />
+                Upload ISO
+              </button>
+            )}
           </div>
 
           {/* Cache Directory Info */}
@@ -1771,6 +1906,153 @@ export default function ImageCache() {
             isAdmin={isAdmin}
             hostArch={linuxVersions.host_arch}
           />
+        </div>
+      )}
+
+      {/* macOS ISOs Tab */}
+      {activeTab === 'macos-isos' && macosVersions && (
+        <div className="space-y-6">
+          <div className="flex justify-between items-center">
+            <div>
+              <h3 className="text-lg font-medium text-gray-900">macOS ISOs</h3>
+              <p className="text-sm text-gray-500">
+                Pre-cache macOS ISOs for dockur/macos VMs ({macosVersions.cached_count}/{macosVersions.total_count} cached)
+              </p>
+              {/* x86_64 only warning */}
+              {macosVersions.host_arch === 'arm64' && (
+                <div className="mt-2 flex items-center text-sm text-yellow-600">
+                  <AlertCircle className="h-4 w-4 mr-1" />
+                  macOS VMs only work on x86_64 hosts. Your host is ARM64.
+                </div>
+              )}
+            </div>
+            {isAdmin && (
+              <button
+                onClick={() => setShowUploadModal('macos')}
+                className="inline-flex items-center px-3 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 text-sm"
+              >
+                <Upload className="h-4 w-4 mr-2" />
+                Upload macOS ISO
+              </button>
+            )}
+          </div>
+
+          {/* macOS info banner */}
+          <div className="bg-blue-50 border border-blue-200 rounded-md p-4">
+            <div className="flex">
+              <Info className="h-5 w-5 text-blue-400 mt-0.5" />
+              <div className="ml-3 text-sm text-blue-700">
+                <p className="font-medium">About macOS ISOs</p>
+                <p className="mt-1">
+                  dockur/macos downloads macOS images at runtime if not pre-cached.
+                  Pre-caching is optional but speeds up first boot. macOS VMs require x86_64 hosts with KVM support.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* macOS Versions Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {macosVersions.versions.map((version) => {
+              const downloadStatusData = macosDownloadStatus[version.version]
+              const isDownloading = downloadStatusData?.status === 'downloading'
+              const isCached = version.cached
+
+              return (
+                <div
+                  key={version.version}
+                  className={clsx(
+                    'bg-white rounded-lg shadow p-4 border-2',
+                    isCached ? 'border-green-200' : 'border-transparent'
+                  )}
+                >
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-center">
+                      <Monitor className={clsx('h-8 w-8', isCached ? 'text-green-500' : 'text-gray-400')} />
+                      <div className="ml-3">
+                        <h4 className="font-medium text-gray-900">{version.name}</h4>
+                        <p className="text-sm text-gray-500">Version {version.version}</p>
+                      </div>
+                    </div>
+                    {isCached && (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
+                        <Check className="h-3 w-3 mr-1" />
+                        Cached
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="mt-3 text-sm text-gray-500">
+                    <p>~{version.size_gb} GB</p>
+                    {version.note && <p className="text-xs text-gray-400 mt-1">{version.note}</p>}
+                  </div>
+
+                  {/* Download Progress */}
+                  {isDownloading && downloadStatusData && (
+                    <div className="mt-3">
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-blue-600">Downloading...</span>
+                        <span className="text-gray-500">
+                          {downloadStatusData.progress_gb?.toFixed(2) || 0} GB
+                          {downloadStatusData.total_gb && ` / ${downloadStatusData.total_gb.toFixed(2)} GB`}
+                        </span>
+                      </div>
+                      {downloadStatusData.progress_percent !== undefined && (
+                        <div className="mt-1 h-2 bg-gray-200 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-blue-500 transition-all duration-300"
+                            style={{ width: `${downloadStatusData.progress_percent}%` }}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Actions */}
+                  {isAdmin && (
+                    <div className="mt-3 flex gap-2">
+                      {isCached ? (
+                        <button
+                          onClick={() => handleDeleteMacOSISO(version.version)}
+                          disabled={actionLoading === `delete-macos-${version.version}`}
+                          className="inline-flex items-center px-2 py-1 text-xs font-medium text-red-700 bg-red-50 rounded hover:bg-red-100"
+                        >
+                          <Trash2 className="h-3 w-3 mr-1" />
+                          Delete
+                        </button>
+                      ) : isDownloading ? (
+                        <button
+                          onClick={() => handleCancelMacOSDownload(version.version)}
+                          disabled={actionLoading === `cancel-macos-${version.version}`}
+                          className="inline-flex items-center px-2 py-1 text-xs font-medium text-red-700 bg-red-50 rounded hover:bg-red-100"
+                        >
+                          <X className="h-3 w-3 mr-1" />
+                          Cancel
+                        </button>
+                      ) : (
+                        <>
+                          <button
+                            onClick={() => setShowUploadModal('macos')}
+                            className="inline-flex items-center px-2 py-1 text-xs font-medium text-gray-700 bg-gray-50 rounded hover:bg-gray-100"
+                          >
+                            <Upload className="h-3 w-3 mr-1" />
+                            Upload
+                          </button>
+                          <button
+                            onClick={() => setShowMacOSDownloadModal(version)}
+                            className="inline-flex items-center px-2 py-1 text-xs font-medium text-blue-700 bg-blue-50 rounded hover:bg-blue-100"
+                          >
+                            <Download className="h-3 w-3 mr-1" />
+                            URL
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
         </div>
       )}
 
@@ -1958,7 +2240,7 @@ export default function ImageCache() {
             <div className="relative bg-white rounded-lg shadow-xl max-w-lg w-full">
               <div className="px-6 py-4 border-b border-gray-200">
                 <h3 className="text-lg font-medium text-gray-900">
-                  Upload {showUploadModal === 'windows' ? 'Windows' : showUploadModal === 'linux' ? 'Linux' : 'Custom'} ISO
+                  Upload {showUploadModal === 'windows' ? 'Windows' : showUploadModal === 'linux' ? 'Linux' : showUploadModal === 'macos' ? 'macOS' : 'Custom'} ISO
                 </h3>
               </div>
               <div className="px-6 py-4 space-y-4">
@@ -2017,6 +2299,27 @@ export default function ImageCache() {
                     </select>
                     <p className="mt-1 text-xs text-gray-500">
                       Select a distribution to associate with the uploaded ISO
+                    </p>
+                  </div>
+                )}
+
+                {showUploadModal === 'macos' && macosVersions && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">macOS Version</label>
+                    <select
+                      value={uploadVersion}
+                      onChange={(e) => setUploadVersion(e.target.value)}
+                      className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                    >
+                      <option value="">Select version...</option>
+                      {macosVersions.versions.filter(v => !v.cached).map(v => (
+                        <option key={v.version} value={v.version}>
+                          {v.name} ({v.version}){v.note ? ` - ${v.note}` : ''}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="mt-1 text-xs text-gray-500">
+                      macOS VMs only work on x86_64 hosts
                     </p>
                   </div>
                 )}
@@ -2085,7 +2388,7 @@ export default function ImageCache() {
                 </button>
                 <button
                   onClick={handleUploadISO}
-                  disabled={actionLoading === 'upload' || !uploadFile || (showUploadModal === 'windows' || showUploadModal === 'linux' ? !uploadVersion : !uploadName)}
+                  disabled={actionLoading === 'upload' || !uploadFile || (showUploadModal === 'windows' || showUploadModal === 'linux' || showUploadModal === 'macos' ? !uploadVersion : !uploadName)}
                   className="px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-md hover:bg-primary-700 disabled:opacity-50"
                 >
                   {actionLoading === 'upload' ? (
@@ -2150,6 +2453,66 @@ export default function ImageCache() {
                   className="px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-md hover:bg-primary-700 disabled:opacity-50"
                 >
                   {actionLoading === 'custom-iso-download' ? (
+                    <><Loader2 className="inline h-4 w-4 mr-2 animate-spin" />Starting...</>
+                  ) : (
+                    <><Download className="inline h-4 w-4 mr-2" />Download</>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* macOS ISO Download Modal */}
+      {showMacOSDownloadModal && (
+        <div className="fixed inset-0 z-50 overflow-y-auto">
+          <div className="flex items-center justify-center min-h-screen px-4">
+            <div className="fixed inset-0 bg-gray-500 bg-opacity-75" onClick={() => setShowMacOSDownloadModal(null)} />
+            <div className="relative bg-white rounded-lg shadow-xl max-w-lg w-full">
+              <div className="px-6 py-4 border-b border-gray-200">
+                <h3 className="text-lg font-medium text-gray-900">Download macOS ISO from URL</h3>
+                <p className="text-sm text-gray-500 mt-1">
+                  {showMacOSDownloadModal.name} ({showMacOSDownloadModal.version})
+                </p>
+              </div>
+              <div className="px-6 py-4 space-y-4">
+                <div className="bg-yellow-50 border border-yellow-200 rounded-md p-3">
+                  <p className="text-sm text-yellow-700">
+                    macOS ISOs typically don't have direct download URLs. You'll need to provide a URL
+                    from a trusted source. Alternatively, upload an ISO file directly.
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">ISO URL</label>
+                  <input
+                    type="url"
+                    value={macosDownloadUrl}
+                    onChange={(e) => setMacosDownloadUrl(e.target.value)}
+                    placeholder="https://example.com/macos-{version}.iso"
+                    className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                  />
+                </div>
+              </div>
+              <div className="px-6 py-4 border-t border-gray-200 flex justify-end space-x-3">
+                <button
+                  onClick={() => { setShowMacOSDownloadModal(null); setMacosDownloadUrl(''); }}
+                  className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={async () => {
+                    if (showMacOSDownloadModal && macosDownloadUrl) {
+                      await handleDownloadMacOSISO(showMacOSDownloadModal, macosDownloadUrl)
+                      setShowMacOSDownloadModal(null)
+                      setMacosDownloadUrl('')
+                    }
+                  }}
+                  disabled={actionLoading?.startsWith('download-macos') || !macosDownloadUrl}
+                  className="px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-md hover:bg-primary-700 disabled:opacity-50"
+                >
+                  {actionLoading?.startsWith('download-macos') ? (
                     <><Loader2 className="inline h-4 w-4 mr-2 animate-spin" />Starting...</>
                   ) : (
                     <><Download className="inline h-4 w-4 mr-2" />Download</>

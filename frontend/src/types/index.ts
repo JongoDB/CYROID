@@ -610,6 +610,53 @@ export interface ISOUploadResponse {
   size_gb: number
 }
 
+// macOS VM (dockur/macos) Types - x86_64 ONLY
+export interface MacOSVersion {
+  version: string
+  name: string
+  size_gb: number
+  category: 'desktop'
+  cached: boolean
+  download_url: string | null
+  precache_available: boolean
+  note?: string
+}
+
+export interface MacOSVersionsResponse {
+  versions: MacOSVersion[]
+  cache_dir: string
+  cached_count: number
+  total_count: number
+  host_arch: 'x86_64' | 'arm64'
+  x86_64_only: boolean
+  note: string
+}
+
+export interface MacOSISODownloadResponse {
+  status: 'downloading'
+  version: string
+  name: string
+  filename: string
+  destination: string
+  source_url: string
+  message: string
+}
+
+export interface MacOSISODownloadStatus {
+  status: 'downloading' | 'completed' | 'failed' | 'not_found' | 'cancelled'
+  version: string
+  filename?: string
+  path?: string
+  progress_bytes?: number
+  progress_gb?: number
+  total_bytes?: number
+  total_gb?: number
+  progress_percent?: number
+  size_bytes?: number
+  size_gb?: number
+  error?: string
+}
+
 // Custom ISO Types
 export interface CustomISO {
   name: string
