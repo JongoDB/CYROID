@@ -22,6 +22,9 @@ class VMConfig(BaseModel):
     base_image_id: Optional[str] = None
     golden_image_id: Optional[str] = None
     snapshot_id: Optional[str] = None
+    # Fallback fields for cross-environment portability (Issue #80)
+    base_image_name: Optional[str] = None
+    base_image_tag: Optional[str] = None
     # Deprecated: kept for backward compatibility with older blueprints
     template_name: Optional[str] = None
     cpu: int = 1

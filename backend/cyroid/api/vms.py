@@ -1796,6 +1796,9 @@ def get_range_vm_networks(range_id: UUID, db: DBSession, current_user: CurrentUs
     except Exception as e:
         logger.warning(f"Could not connect to Docker: {e}")
 
+    # Check if this is a DinD range (Issue #78)
+    is_dind_range = bool(range_obj.dind_container_id and range_obj.dind_docker_url)
+
     # Get networks for the range for matching
     networks = db.query(Network).filter(Network.range_id == range_id).all()
     network_map = {n.docker_network_id: n for n in networks if n.docker_network_id}
@@ -1811,7 +1814,16 @@ def get_range_vm_networks(range_id: UUID, db: DBSession, current_user: CurrentUs
 
         if vm.container_id and docker:
             try:
-                interfaces = docker.get_container_networks(vm.container_id)
+                # For DinD ranges, query the DinD container's Docker daemon (Issue #78)
+                if is_dind_range:
+                    interfaces = docker.get_container_networks_dind(
+                        str(range_id),
+                        range_obj.dind_docker_url,
+                        vm.container_id
+                    )
+                else:
+                    interfaces = docker.get_container_networks(vm.container_id)
+
                 if interfaces:
                     for iface in interfaces:
                         # Match with cyroid networks
@@ -1872,16 +1884,34 @@ def add_vm_network(
             detail="Network is not provisioned",
         )
 
+    # Get the range to check if it's DinD (Issue #79)
+    range_obj = db.query(Range).filter(Range.id == vm.range_id).first()
+    is_dind_range = bool(range_obj and range_obj.dind_container_id and range_obj.dind_docker_url)
+
     try:
         docker = get_docker_service()
-        docker.connect_container_to_network(
-            vm.container_id,
-            network.docker_network_id,
-            ip_address=ip_address
-        )
 
-        # Get updated interfaces
-        interfaces = docker.get_container_networks(vm.container_id)
+        # For DinD ranges, use network name instead of ID (Issue #79)
+        if is_dind_range:
+            docker.connect_container_to_network_dind(
+                str(range_obj.id),
+                range_obj.dind_docker_url,
+                vm.container_id,
+                network.name,
+                ip_address=ip_address
+            )
+            interfaces = docker.get_container_networks_dind(
+                str(range_obj.id),
+                range_obj.dind_docker_url,
+                vm.container_id
+            )
+        else:
+            docker.connect_container_to_network(
+                vm.container_id,
+                network.docker_network_id,
+                ip_address=ip_address
+            )
+            interfaces = docker.get_container_networks(vm.container_id)
 
         return {
             "success": True,
@@ -1944,15 +1974,32 @@ def remove_vm_network(
             detail="Cannot remove the primary network interface",
         )
 
+    # Get the range to check if it's DinD (Issue #79)
+    range_obj = db.query(Range).filter(Range.id == vm.range_id).first()
+    is_dind_range = bool(range_obj and range_obj.dind_container_id and range_obj.dind_docker_url)
+
     try:
         docker = get_docker_service()
-        docker.disconnect_container_from_network(
-            vm.container_id,
-            network.docker_network_id
-        )
 
-        # Get updated interfaces
-        interfaces = docker.get_container_networks(vm.container_id)
+        # For DinD ranges, use network name instead of ID (Issue #79)
+        if is_dind_range:
+            docker.disconnect_container_from_network_dind(
+                str(range_obj.id),
+                range_obj.dind_docker_url,
+                vm.container_id,
+                network.name
+            )
+            interfaces = docker.get_container_networks_dind(
+                str(range_obj.id),
+                range_obj.dind_docker_url,
+                vm.container_id
+            )
+        else:
+            docker.disconnect_container_from_network(
+                vm.container_id,
+                network.docker_network_id
+            )
+            interfaces = docker.get_container_networks(vm.container_id)
 
         return {
             "success": True,

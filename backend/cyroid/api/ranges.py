@@ -25,6 +25,7 @@ from cyroid.models.event_log import EventType
 from cyroid.models.msel import MSEL
 from cyroid.services.scenario_filesystem import get_scenario
 from cyroid.models.inject import Inject, InjectStatus
+from cyroid.models.blueprint import RangeInstance
 from cyroid.services.event_service import EventService
 from cyroid.schemas.range import (
     RangeCreate, RangeUpdate, RangeResponse, RangeDetailResponse,
@@ -317,6 +318,9 @@ def delete_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
     except Exception as e:
         logger.warning(f"Failed to cleanup Docker resources for range {range_id}: {e}")
         # Continue with database deletion even if Docker cleanup fails
+
+    # Delete associated range instances (from blueprint deployments) to avoid FK constraint (Issue #73)
+    db.query(RangeInstance).filter(RangeInstance.range_id == range_id).delete()
 
     db.delete(range_obj)
     db.commit()

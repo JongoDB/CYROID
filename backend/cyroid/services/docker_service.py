@@ -2601,6 +2601,141 @@ local-hostname: {name}
             if n.name not in ("bridge", "host", "none")
         ]
 
+    def get_container_networks_dind(
+        self,
+        range_id: str,
+        docker_url: str,
+        container_id: str
+    ) -> Optional[List[Dict[str, Any]]]:
+        """
+        Get all network interfaces for a container inside DinD.
+
+        This is the DinD-aware version of get_container_networks().
+        Issue #78: Network Interfaces panel didn't work for DinD ranges
+        because host Docker daemon can't see containers inside DinD.
+
+        Returns:
+            List of network interface dicts with:
+            - network_id: Docker network ID (inside DinD)
+            - network_name: Network name
+            - ip_address: IP address on this network
+            - mac_address: MAC address
+            - gateway: Gateway IP (if available)
+            - is_management: True if this is traefik-routing network
+        """
+        try:
+            range_client = self.get_range_client_sync(range_id, docker_url)
+            container = range_client.containers.get(container_id)
+            networks_settings = container.attrs.get("NetworkSettings", {}).get("Networks", {})
+
+            interfaces = []
+            for net_name, net_config in networks_settings.items():
+                interface = {
+                    "network_id": net_config.get("NetworkID", ""),
+                    "network_name": net_name,
+                    "ip_address": net_config.get("IPAddress", ""),
+                    "mac_address": net_config.get("MacAddress", ""),
+                    "gateway": net_config.get("Gateway", ""),
+                    "is_management": net_name == "traefik-routing",
+                }
+                interfaces.append(interface)
+
+            return interfaces
+        except NotFound:
+            return None
+        except APIError as e:
+            logger.error(f"Failed to get network interfaces for container {container_id} in DinD: {e}")
+            return None
+
+    def connect_container_to_network_dind(
+        self,
+        range_id: str,
+        docker_url: str,
+        container_id: str,
+        network_name: str,
+        ip_address: Optional[str] = None
+    ) -> bool:
+        """
+        Connect a container to a network inside DinD.
+
+        Issue #79: Uses network name instead of ID because DinD networks
+        have different IDs than what's stored in the database.
+
+        Args:
+            range_id: Range identifier
+            docker_url: Docker URL for the range's DinD
+            container_id: Container ID (inside DinD)
+            network_name: Network name to connect to
+            ip_address: Optional static IP address
+
+        Returns:
+            True if successful
+        """
+        try:
+            range_client = self.get_range_client_sync(range_id, docker_url)
+
+            # Find network by name inside DinD
+            networks = range_client.networks.list(names=[network_name])
+            if not networks:
+                logger.error(f"Network '{network_name}' not found in DinD range {range_id}")
+                return False
+
+            network = networks[0]
+            if ip_address:
+                network.connect(container_id, ipv4_address=ip_address)
+            else:
+                network.connect(container_id)
+            logger.info(f"Connected container {container_id[:12]} to network {network_name} in DinD with IP {ip_address or 'DHCP'}")
+            return True
+        except NotFound as e:
+            logger.error(f"Container or network not found in DinD: {e}")
+            return False
+        except APIError as e:
+            logger.error(f"Failed to connect container to network in DinD: {e}")
+            raise
+
+    def disconnect_container_from_network_dind(
+        self,
+        range_id: str,
+        docker_url: str,
+        container_id: str,
+        network_name: str
+    ) -> bool:
+        """
+        Disconnect a container from a network inside DinD.
+
+        Issue #79: Uses network name instead of ID because DinD networks
+        have different IDs than what's stored in the database.
+
+        Args:
+            range_id: Range identifier
+            docker_url: Docker URL for the range's DinD
+            container_id: Container ID (inside DinD)
+            network_name: Network name to disconnect from
+
+        Returns:
+            True if successful
+        """
+        try:
+            range_client = self.get_range_client_sync(range_id, docker_url)
+
+            # Find network by name inside DinD
+            networks = range_client.networks.list(names=[network_name])
+            if not networks:
+                logger.warning(f"Network '{network_name}' not found in DinD range {range_id}")
+                return False
+
+            network = networks[0]
+            network.disconnect(container_id)
+            logger.info(f"Disconnected container {container_id[:12]} from network {network_name} in DinD")
+            return True
+        except NotFound as e:
+            logger.warning(f"Container or network not found in DinD: {e}")
+            return False
+        except APIError as e:
+            logger.error(f"Failed to disconnect container from network in DinD: {e}")
+            raise
+
     async def create_range_container_dind(
         self,
         range_id: str,

@@ -41,6 +41,15 @@ def extract_config_from_range(db: Session, range_id: UUID) -> BlueprintConfig:
     vms = db.query(VM).filter(VM.range_id == range_id).all()
     vm_configs = []
     for vm in vms:
+        # Get fallback identifiers for cross-environment portability (Issue #80)
+        base_image_name = None
+        base_image_tag = None
+        if vm.base_image_id:
+            base_image = db.query(BaseImage).filter(BaseImage.id == vm.base_image_id).first()
+            if base_image:
+                base_image_name = base_image.name
+                base_image_tag = base_image.docker_image_tag
+
         vm_configs.append(
             VMConfig(
                 hostname=vm.hostname,
@@ -49,6 +58,8 @@ def extract_config_from_range(db: Session, range_id: UUID) -> BlueprintConfig:
                 base_image_id=str(vm.base_image_id) if vm.base_image_id else None,
                 golden_image_id=str(vm.golden_image_id) if vm.golden_image_id else None,
                 snapshot_id=str(vm.snapshot_id) if vm.snapshot_id else None,
+                base_image_name=base_image_name,
+                base_image_tag=base_image_tag,
                 cpu=vm.cpu,
                 ram_mb=vm.ram_mb,
                 disk_gb=vm.disk_gb,
@@ -175,14 +186,50 @@ def create_range_from_blueprint(
         if not network_id:
             continue  # Skip VMs with missing networks
 
-        # Resolve image source from vm_config
+        # Resolve image source from vm_config with fallback chain (Issue #80)
         from uuid import UUID as UUID_type
-        base_image_id = UUID_type(vm_config.base_image_id) if hasattr(vm_config, 'base_image_id') and vm_config.base_image_id else None
-        golden_image_id = UUID_type(vm_config.golden_image_id) if hasattr(vm_config, 'golden_image_id') and vm_config.golden_image_id else None
-        snapshot_id = UUID_type(vm_config.snapshot_id) if hasattr(vm_config, 'snapshot_id') and vm_config.snapshot_id else None
+        base_image_id = None
+        golden_image_id = None
+        snapshot_id = None
+
+        # Try base_image_id first
+        if vm_config.base_image_id:
+            try:
+                candidate_id = UUID_type(vm_config.base_image_id)
+                # Check if UUID exists in database
+                if db.query(BaseImage).filter(BaseImage.id == candidate_id).first():
+                    base_image_id = candidate_id
+            except (ValueError, TypeError):
+                pass
+
+        # Fallback: lookup by name if UUID didn't work (Issue #80)
+        if not base_image_id and hasattr(vm_config, 'base_image_name') and vm_config.base_image_name:
+            fallback_image = db.query(BaseImage).filter(BaseImage.name == vm_config.base_image_name).first()
+            if fallback_image:
+                base_image_id = fallback_image.id
+
+        # Fallback: lookup by docker image tag if name didn't work (Issue #80)
+        if not base_image_id and hasattr(vm_config, 'base_image_tag') and vm_config.base_image_tag:
+            fallback_image = db.query(BaseImage).filter(BaseImage.docker_image_tag == vm_config.base_image_tag).first()
+            if fallback_image:
+                base_image_id = fallback_image.id
+
+        # Try golden_image_id (no fallback chain yet)
+        if vm_config.golden_image_id:
+            try:
+                golden_image_id = UUID_type(vm_config.golden_image_id)
+            except (ValueError, TypeError):
+                pass
+
+        # Try snapshot_id (no fallback chain yet)
+        if vm_config.snapshot_id:
+            try:
+                snapshot_id = UUID_type(vm_config.snapshot_id)
+            except (ValueError, TypeError):
+                pass
 
         if not base_image_id and not golden_image_id and not snapshot_id:
-            continue  # Skip VMs with no image source
+            continue  # Skip VMs with no resolvable image source
 
         vm = VM(
             range_id=range_obj.id,
