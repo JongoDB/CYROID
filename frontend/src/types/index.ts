@@ -587,7 +587,7 @@ export interface RecommendedImage {
   image?: string
   version?: string
   description: string
-  category?: 'desktop' | 'server' | 'services'
+  category?: 'desktop' | 'server' | 'services' | 'cyroid'
   access?: 'web' | 'vnc' | 'rdp'  // Access method for desktop images
   cached?: boolean
 }
@@ -596,6 +596,7 @@ export interface RecommendedImages {
   desktop: RecommendedImage[]
   server: RecommendedImage[]
   services: RecommendedImage[]
+  cyroid: RecommendedImage[]
   linux: RecommendedImage[]
   windows: WindowsVersion[]
 }

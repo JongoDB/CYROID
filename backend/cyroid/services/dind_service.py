@@ -25,7 +25,7 @@ class DinDService:
     """Manages Docker-in-Docker containers for range isolation."""
 
     # Default DinD image - can be overridden in settings
-    DIND_IMAGE = "docker:24-dind"
+    DIND_IMAGE = "cyroid-dind:latest"
     DOCKER_PORT = 2375
     STARTUP_TIMEOUT = 60  # seconds
 

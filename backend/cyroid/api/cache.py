@@ -2887,6 +2887,12 @@ RECOMMENDED_DOCKER_IMAGES = {
         {"name": "MariaDB 11", "image": "mariadb:11", "description": "MariaDB 11 - MySQL-compatible database server", "category": "services"},
         {"name": "Elasticsearch 8", "image": "elasticsearch:8.11.0", "description": "Elasticsearch - Distributed search and analytics engine", "category": "services"},
     ],
+    "cyroid": [
+        # CYROID platform infrastructure images
+        {"name": "CYROID Proxy", "image": "cyroid-proxy:latest", "description": "Traefik reverse proxy for routing and SSL termination", "category": "cyroid"},
+        {"name": "CYROID DinD", "image": "cyroid-dind:latest", "description": "Docker-in-Docker for range network isolation", "category": "cyroid"},
+        {"name": "CYROID Storage", "image": "cyroid-storage:latest", "description": "MinIO S3-compatible object storage for artifacts", "category": "cyroid"},
+    ],
 }
 
 
@@ -2920,6 +2926,7 @@ def get_recommended_images(current_user: CurrentUser):
         "desktop": add_cached_status(RECOMMENDED_DOCKER_IMAGES["desktop"]),
         "server": add_cached_status(RECOMMENDED_DOCKER_IMAGES["server"]),
         "services": add_cached_status(RECOMMENDED_DOCKER_IMAGES["services"]),
+        "cyroid": add_cached_status(RECOMMENDED_DOCKER_IMAGES["cyroid"]),
         "linux": add_cached_status(RECOMMENDED_DOCKER_IMAGES["server"]),  # Backwards compat
         "windows": DOCKUR_WINDOWS_VERSIONS,
     }
@@ -3209,6 +3216,75 @@ async def upload_custom_iso(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to upload ISO: {str(e)}"
         )
+
+
+@router.post("/docker-images/upload", status_code=status.HTTP_201_CREATED)
+async def upload_docker_image(
+    file: UploadFile = File(...),
+    current_user: AdminUser = None,
+):
+    """
+    Upload a Docker image tar archive to load into host Docker daemon.
+    Supports: .tar, .tar.gz, .tgz
+    Admin only.
+    """
+    import tempfile
+
+    if not file.filename:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No file provided"
+        )
+
+    # Validate file type
+    filename_lower = file.filename.lower()
+    valid_extensions = ('.tar', '.tar.gz', '.tgz')
+    if not any(filename_lower.endswith(ext) for ext in valid_extensions):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"File must be a Docker image archive ({', '.join(valid_extensions)})"
+        )
+
+    docker = get_docker_service()
+    temp_path = None
+
+    try:
+        # Stream uploaded file to temp file (docker.images.load needs file handle)
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.tar') as tmp:
+            temp_path = tmp.name
+            while content := await file.read(1024 * 1024):  # 1MB chunks
+                tmp.write(content)
+
+        # Load image into Docker daemon
+        with open(temp_path, 'rb') as f:
+            loaded_images = docker.client.images.load(f)
+
+        # Collect info about loaded images
+        image_tags = []
+        total_size = 0
+        for img in loaded_images:
+            image_tags.extend(img.tags or [f"<untagged>:{img.short_id}"])
+            total_size += img.attrs.get('Size', 0)
+
+        logger.info(f"Loaded {len(loaded_images)} Docker image(s): {image_tags}")
+
+        return {
+            "status": "loaded",
+            "images": image_tags,
+            "count": len(loaded_images),
+            "size_bytes": total_size,
+            "size_gb": round(total_size / (1024**3), 2),
+        }
+    except Exception as e:
+        logger.error(f"Failed to load Docker image: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to load Docker image: {str(e)}"
+        )
+    finally:
+        # Clean up temp file
+        if temp_path and os.path.exists(temp_path):
+            os.remove(temp_path)
 
 
 @router.post("/isos/download/{version}/cancel")

@@ -753,6 +753,19 @@ export const cacheApi = {
       headers: { 'Content-Type': 'multipart/form-data' },
     })
   },
+  uploadDockerImage: (file: File) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    return api.post<{
+      status: string
+      images: string[]
+      count: number
+      size_bytes: number
+      size_gb: number
+    }>('/cache/docker-images/upload', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  },
   deleteWindowsISO: (version: string, arch?: 'x86_64' | 'arm64') =>
     api.delete(`/cache/isos/${encodeURIComponent(version)}${arch ? `?arch=${arch}` : ''}`),
 

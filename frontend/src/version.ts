@@ -1,2 +1,2 @@
 // Auto-generated version file - updated during release process
-export const APP_VERSION = '0.20.1';
+export const APP_VERSION = '0.20.2';

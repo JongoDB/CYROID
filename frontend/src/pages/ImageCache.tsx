@@ -39,6 +39,7 @@ import {
   Hammer,
   FolderEdit,
   Database,
+  Cog,
 } from 'lucide-react'
 import clsx from 'clsx'
 import { ConfirmDialog } from '../components/common/ConfirmDialog'
@@ -78,7 +79,7 @@ export default function ImageCache() {
   const [macosDownloadUrl, setMacosDownloadUrl] = useState('')
 
   // Upload modal state
-  const [showUploadModal, setShowUploadModal] = useState<'windows' | 'linux' | 'macos' | 'custom' | null>(null)
+  const [showUploadModal, setShowUploadModal] = useState<'windows' | 'linux' | 'macos' | 'custom' | 'docker' | null>(null)
   const [uploadFile, setUploadFile] = useState<File | null>(null)
   const [uploadVersion, setUploadVersion] = useState('')
   const [uploadName, setUploadName] = useState('')
@@ -1046,6 +1047,9 @@ export default function ImageCache() {
         }
         await cacheApi.uploadMacOSISO(uploadFile, uploadVersion)
         setSuccess(`Uploaded macOS ${uploadVersion} ISO`)
+      } else if (showUploadModal === 'docker') {
+        const result = await cacheApi.uploadDockerImage(uploadFile)
+        setSuccess(`Loaded ${result.data.count} image(s): ${result.data.images.join(', ')}`)
       } else {
         if (!uploadName) {
           setError('Please enter a name for the ISO')
@@ -1061,7 +1065,7 @@ export default function ImageCache() {
       setUploadName('')
       await loadData()
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to upload ISO')
+      setError(err.response?.data?.detail || `Failed to upload ${showUploadModal === 'docker' ? 'Docker image' : 'ISO'}`)
     } finally {
       setActionLoading(null)
     }
@@ -1081,9 +1085,11 @@ export default function ImageCache() {
     const desktop: CachedImage[] = []       // GUI desktop environments with VNC/RDP/web access
     const server: CachedImage[] = []        // Headless server/CLI images
     const services: CachedImage[] = []      // Purpose-built service containers
+    const cyroid: CachedImage[] = []        // CYROID platform infrastructure
     const other: CachedImage[] = []
 
     // Patterns for categorization
+    const cyroidPatterns = ['cyroid-proxy', 'cyroid-dind', 'cyroid-storage', 'cyroid-api', 'cyroid-frontend', 'cyroid-worker']
     const servicePatterns = ['nginx', 'httpd', 'apache', 'mysql', 'postgres', 'redis', 'mongo', 'mariadb', 'elasticsearch', 'rabbitmq', 'memcached']
     // Desktop = images with GUI/VNC/RDP/web access
     const desktopPatterns = ['webtop', 'vnc', 'xfce', 'kde', 'lxde', 'xrdp', 'kasm', 'guacamole', 'x11', 'desktop']
@@ -1096,7 +1102,10 @@ export default function ImageCache() {
         // Skip Windows images in Docker section
         return
       }
-      if (servicePatterns.some(p => tags.includes(p))) {
+      // Check cyroid first (before services to avoid nginx/postgres matching)
+      if (cyroidPatterns.some(p => tags.includes(p))) {
+        cyroid.push(img)
+      } else if (servicePatterns.some(p => tags.includes(p))) {
         services.push(img)
       } else if (desktopPatterns.some(p => tags.includes(p))) {
         desktop.push(img)
@@ -1107,7 +1116,7 @@ export default function ImageCache() {
       }
     })
 
-    return { desktop, server, services, other }
+    return { desktop, server, services, cyroid, other }
   }
 
   if (loading) {
@@ -1373,13 +1382,22 @@ export default function ImageCache() {
               </p>
             </div>
             {isAdmin && (
-              <button
-                onClick={() => setShowCacheModal(true)}
-                className="inline-flex items-center px-3 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 text-sm"
-              >
-                <Plus className="h-4 w-4 mr-2" />
-                Custom Image
-              </button>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setShowCacheModal(true)}
+                  className="inline-flex items-center px-3 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 text-sm"
+                >
+                  <Plus className="h-4 w-4 mr-2" />
+                  Pull Image
+                </button>
+                <button
+                  onClick={() => setShowUploadModal('docker')}
+                  className="inline-flex items-center px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+                >
+                  <Upload className="h-4 w-4 mr-2" />
+                  Upload Image
+                </button>
+              </div>
             )}
           </div>
 
@@ -1444,6 +1462,22 @@ export default function ImageCache() {
             isAdmin={isAdmin}
           />
 
+          {/* CYROID Services Section */}
+          <DockerImageSection
+            title="CYROID Services"
+            description="Platform infrastructure (proxy, storage, isolation)"
+            images={recommended.cyroid || []}
+            cachedImages={images}
+            icon={Cog}
+            colorClass="indigo"
+            onPull={handlePullDockerImage}
+            onRemove={handleRemoveImage}
+            onCancel={handleCancelDockerPull}
+            pullStatus={dockerPullStatus}
+            actionLoading={actionLoading}
+            isAdmin={isAdmin}
+          />
+
           {/* Cached Desktop Images (not in recommended list) - Issue #63 */}
           {categorizedImages.desktop.length > 0 && (
             <div className="bg-white shadow rounded-lg overflow-hidden">
@@ -1483,6 +1517,20 @@ export default function ImageCache() {
                 <p className="text-xs text-green-600 mt-1">Cached database and service containers</p>
               </div>
               <ImageTable images={categorizedImages.services} onRemove={handleRemoveImage} actionLoading={actionLoading} isAdmin={isAdmin} />
+            </div>
+          )}
+
+          {/* Cached CYROID Images (not in recommended list) */}
+          {categorizedImages.cyroid.length > 0 && (
+            <div className="bg-white shadow rounded-lg overflow-hidden">
+              <div className="px-6 py-4 border-b border-gray-200 bg-indigo-50">
+                <h4 className="text-sm font-medium text-indigo-800 flex items-center">
+                  <Cog className="h-4 w-4 mr-2" />
+                  Cached CYROID Services ({categorizedImages.cyroid.length})
+                </h4>
+                <p className="text-xs text-indigo-600 mt-1">Cached platform infrastructure images</p>
+              </div>
+              <ImageTable images={categorizedImages.cyroid} onRemove={handleRemoveImage} actionLoading={actionLoading} isAdmin={isAdmin} />
             </div>
           )}
 
@@ -2213,7 +2261,7 @@ export default function ImageCache() {
             <div className="relative bg-white rounded-lg shadow-xl max-w-lg w-full">
               <div className="px-6 py-4 border-b border-gray-200">
                 <h3 className="text-lg font-medium text-gray-900">
-                  Upload {showUploadModal === 'windows' ? 'Windows' : showUploadModal === 'linux' ? 'Linux' : showUploadModal === 'macos' ? 'macOS' : 'Custom'} ISO
+                  Upload {showUploadModal === 'docker' ? 'Docker Image' : showUploadModal === 'windows' ? 'Windows' : showUploadModal === 'linux' ? 'Linux' : showUploadModal === 'macos' ? 'macOS' : 'Custom'} {showUploadModal !== 'docker' && 'ISO'}
                 </h3>
               </div>
               <div className="px-6 py-4 space-y-4">
@@ -2310,13 +2358,24 @@ export default function ImageCache() {
                   </div>
                 )}
 
+                {showUploadModal === 'docker' && (
+                  <div className="bg-blue-50 border border-blue-200 rounded-md p-3">
+                    <p className="text-sm text-blue-700">
+                      Upload a Docker image archive (.tar or .tar.gz) to load into the host Docker daemon.
+                      The image will appear in "Other Cached" after loading.
+                    </p>
+                  </div>
+                )}
+
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">ISO File</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    {showUploadModal === 'docker' ? 'Docker Image Archive' : 'ISO File'}
+                  </label>
                   <div className="flex items-center gap-3">
                     <input
                       ref={fileInputRef}
                       type="file"
-                      accept=".iso"
+                      accept={showUploadModal === 'docker' ? '.tar,.tar.gz,.tgz' : '.iso'}
                       onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
                       className="hidden"
                     />
@@ -2342,7 +2401,7 @@ export default function ImageCache() {
                   <div className="flex">
                     <AlertCircle className="h-4 w-4 text-yellow-500 mt-0.5 mr-2" />
                     <p className="text-xs text-yellow-700">
-                      Large ISO files may take several minutes to upload depending on file size and connection speed.
+                      Large files may take several minutes to upload depending on file size and connection speed.
                     </p>
                   </div>
                 </div>
@@ -2361,7 +2420,7 @@ export default function ImageCache() {
                 </button>
                 <button
                   onClick={handleUploadISO}
-                  disabled={actionLoading === 'upload' || !uploadFile || (showUploadModal === 'windows' || showUploadModal === 'linux' || showUploadModal === 'macos' ? !uploadVersion : !uploadName)}
+                  disabled={actionLoading === 'upload' || !uploadFile || (showUploadModal === 'docker' ? false : showUploadModal === 'windows' || showUploadModal === 'linux' || showUploadModal === 'macos' ? !uploadVersion : !uploadName)}
                   className="px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-md hover:bg-primary-700 disabled:opacity-50"
                 >
                   {actionLoading === 'upload' ? (

@@ -97,7 +97,7 @@ class Settings(BaseSettings):
 
     # === DinD (Docker-in-Docker) Configuration ===
     # Each range runs in its own DinD container for network isolation
-    dind_image: str = "docker:24-dind"
+    dind_image: str = "cyroid-dind:latest"
     dind_startup_timeout: int = 60  # Seconds to wait for inner Docker daemon
     dind_docker_port: int = 2375  # Docker daemon port inside DinD
 

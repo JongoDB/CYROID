@@ -41,7 +41,7 @@ services:
       retries: 5
 
   minio:
-    image: minio/minio:latest
+    image: cyroid-storage:latest
     environment:
       MINIO_ROOT_USER: cyroid
       MINIO_ROOT_PASSWORD: cyroid123
@@ -75,7 +75,7 @@ services:
       VM_STORAGE_DIR: ${CYROID_DATA_DIR:-/data/cyroid}/vm-storage
       GLOBAL_SHARED_DIR: ${CYROID_DATA_DIR:-/data/cyroid}/shared
       # DinD Configuration (all ranges run in isolated DinD containers)
-      DIND_IMAGE: ${DIND_IMAGE:-docker:24-dind}
+      DIND_IMAGE: ${DIND_IMAGE:-cyroid-dind:latest}
       DIND_STARTUP_TIMEOUT: ${DIND_STARTUP_TIMEOUT:-60}
       DIND_DOCKER_PORT: ${DIND_DOCKER_PORT:-2375}
       CYROID_MGMT_NETWORK: cyroid-mgmt
@@ -153,7 +153,7 @@ services:
       VM_STORAGE_DIR: ${CYROID_DATA_DIR:-/data/cyroid}/vm-storage
       GLOBAL_SHARED_DIR: ${CYROID_DATA_DIR:-/data/cyroid}/shared
       # DinD Configuration (all ranges run in isolated DinD containers)
-      DIND_IMAGE: ${DIND_IMAGE:-docker:24-dind}
+      DIND_IMAGE: ${DIND_IMAGE:-cyroid-dind:latest}
       DIND_STARTUP_TIMEOUT: ${DIND_STARTUP_TIMEOUT:-60}
       DIND_DOCKER_PORT: ${DIND_DOCKER_PORT:-2375}
       CYROID_MGMT_NETWORK: cyroid-mgmt
@@ -211,7 +211,7 @@ services:
       - "traefik.http.routers.frontend-secure.service=frontend"
 
   traefik:
-    image: traefik:v2.11
+    image: cyroid-proxy:latest
     # Use static config file instead of command line args
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
