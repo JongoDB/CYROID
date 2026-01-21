@@ -2633,8 +2633,14 @@ function LinuxVersionSection({ title, versions, icon: Icon, colorClass, onDelete
           const arm64Status = downloadStatus[arm64Key]
           const isDownloadingX86 = x86Status?.status === 'downloading'
           const isDownloadingArm64 = arm64Status?.status === 'downloading'
-          const isLoading = actionLoading?.startsWith(`download-linux-${v.version}`) ||
-                           actionLoading?.startsWith(`delete-linux-${v.version}`)
+
+          // Architecture-specific loading states
+          const isLoadingX86 = actionLoading === `download-linux-${x86Key}` ||
+                              actionLoading === `delete-linux-${x86Key}` ||
+                              actionLoading === `download-linux-${v.version}` ||
+                              actionLoading === `delete-linux-${v.version}`
+          const isLoadingArm64 = actionLoading === `download-linux-${arm64Key}` ||
+                                actionLoading === `delete-linux-${arm64Key}`
 
           // Check cached status
           const cachedX86 = v.cached_x86_64 || (hostArch === 'x86_64' && v.cached)
@@ -2761,7 +2767,7 @@ function LinuxVersionSection({ title, versions, icon: Icon, colorClass, onDelete
                     {isAdmin && (
                       <button
                         onClick={() => onDelete(v.version, 'x86_64')}
-                        disabled={isLoading}
+                        disabled={isLoadingX86}
                         className="p-1 text-red-600 hover:bg-red-50 rounded"
                         title="Delete x86_64 ISO"
                       >
@@ -2778,10 +2784,10 @@ function LinuxVersionSection({ title, versions, icon: Icon, colorClass, onDelete
                   isAdmin && (
                     <button
                       onClick={() => onDownload(v, undefined, 'x86_64')}
-                      disabled={isLoading}
+                      disabled={isLoadingX86}
                       className="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-blue-50 text-blue-700 hover:bg-blue-100"
                     >
-                      {isLoading ? (
+                      {isLoadingX86 ? (
                         <Loader2 className="h-3 w-3 mr-1 animate-spin" />
                       ) : (
                         <Download className="h-3 w-3 mr-1" />
@@ -2803,7 +2809,7 @@ function LinuxVersionSection({ title, versions, icon: Icon, colorClass, onDelete
                         {isAdmin && (
                           <button
                             onClick={() => onDelete(v.version, 'arm64')}
-                            disabled={isLoading}
+                            disabled={isLoadingArm64}
                             className="p-1 text-red-600 hover:bg-red-50 rounded"
                             title="Delete ARM64 ISO"
                           >
@@ -2820,10 +2826,10 @@ function LinuxVersionSection({ title, versions, icon: Icon, colorClass, onDelete
                       isAdmin && (
                         <button
                           onClick={() => onDownload(v, undefined, 'arm64')}
-                          disabled={isLoading}
+                          disabled={isLoadingArm64}
                           className="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-purple-50 text-purple-700 hover:bg-purple-100"
                         >
-                          {isLoading ? (
+                          {isLoadingArm64 ? (
                             <Loader2 className="h-3 w-3 mr-1 animate-spin" />
                           ) : (
                             <Download className="h-3 w-3 mr-1" />
