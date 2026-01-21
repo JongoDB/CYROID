@@ -846,15 +846,25 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
                     iso_path = base_image_record.iso_path
 
                 if use_dind:
-                    # Create custom ISO VM inside DinD
-                    # Note: Local ISO mounts not available in DinD mode - use ISO URL if available
+                    # Create custom ISO VM inside DinD with qemux/qemu
                     custom_env = {
                         "DISK_SIZE": f"{vm.disk_gb or 40}G",
                         "CPU_CORES": str(vm.cpu or 2),
                         "RAM_SIZE": f"{vm.ram_mb or 4096}M",
                         "KVM": "N",  # DinD typically doesn't have KVM access
                     }
-                    if vm.iso_url:
+
+                    # Volume mounts for ISO
+                    volumes = {}
+
+                    # Priority: local ISO path > ISO URL
+                    # DinD container has ISO cache mounted, so local paths are accessible
+                    if iso_path and os.path.exists(iso_path):
+                        # Mount the cached ISO into the container at /boot.iso
+                        volumes[iso_path] = {"bind": "/boot.iso", "mode": "ro"}
+                        custom_env["BOOT"] = "/boot.iso"
+                        logger.info(f"Using cached ISO for custom VM {vm.hostname}: {iso_path}")
+                    elif vm.iso_url:
                         custom_env["BOOT"] = vm.iso_url
 
                     container_id = asyncio.run(docker.create_range_container_dind(
@@ -869,6 +879,7 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
                         hostname=vm.hostname,
                         labels=labels,
                         environment=custom_env,
+                        volumes=volumes if volumes else None,
                         privileged=True,
                         dns_servers=network.dns_servers,
                         dns_search=network.dns_search,

@@ -1118,8 +1118,9 @@ class DockerService:
             logger.info(f"Using local ISO: {iso_path}")
         elif not iso_url:
             # Check for default ISO in cache directory (only if no URL provided)
+            # Filename pattern: linux-{distro}.iso (e.g., linux-kali.iso)
             linux_iso_dir = os.path.join(settings.iso_cache_dir, "linux-isos")
-            cached_iso = os.path.join(linux_iso_dir, f"{linux_distro}.iso")
+            cached_iso = os.path.join(linux_iso_dir, f"linux-{linux_distro}.iso")
             if os.path.isfile(cached_iso):
                 binds.append(f"{cached_iso}:/boot.iso:ro")
                 logger.info(f"Using cached ISO: {cached_iso}")
