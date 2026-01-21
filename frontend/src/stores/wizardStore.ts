@@ -35,8 +35,9 @@ export interface NetworkSegment {
 export interface VMPlacement {
   id: string;
   hostname: string;
-  templateId: string;
-  templateName: string;
+  baseImageId?: string;      // New: Base Image ID for VM creation
+  templateId?: string;       // Deprecated: kept for backward compatibility
+  templateName: string;      // Display name (can match baseImage.name or docker_image_tag)
   networkId: string;
   ip: string;
   cpu: number;
@@ -44,8 +45,8 @@ export interface VMPlacement {
   diskGb: number;
   position: { x: number; y: number };
 
-  // OS family/version for template resolution
-  osFamily?: string;         // e.g., 'windows-server', 'ubuntu-server'
+  // OS family/version for service presets
+  osFamily?: string;         // e.g., 'windows', 'linux', 'network'
   osVersion?: string;        // e.g., '2022', '22.04'
 
   // OS-specific configuration (all optional)

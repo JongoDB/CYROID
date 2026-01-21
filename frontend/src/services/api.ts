@@ -161,20 +161,6 @@ export const usersApi = {
 
 import type { Range, Network, VM, EventLog, EventLogList, VMStatsResponse, VMLogsResponse, ResourceTagsResponse, Walkthrough, WalkthroughProgress, DeploymentStatusResponse, ScenarioDetail, ScenariosListResponse, ScenarioUpload, ApplyScenarioRequest, ApplyScenarioResponse } from '../types'
 
-// Templates API - DEPRECATED: Returns empty arrays for backward compatibility
-// TODO: Remove once Range Wizard is migrated to Base Images (see GitHub issue)
-export const templatesApi = {
-  list: () => Promise.resolve({ data: [] }),
-  get: (_id: string) => Promise.resolve({ data: null }),
-  create: (_data: unknown) => Promise.resolve({ data: null }),
-  update: (_id: string, _data: unknown) => Promise.resolve({ data: null }),
-  delete: (_id: string) => Promise.resolve({}),
-  clone: (_id: string) => Promise.resolve({ data: null }),
-  getTags: (_id: string) => Promise.resolve({ data: { tags: [] } }),
-  addTag: (_id: string, _tag: string) => Promise.resolve({}),
-  removeTag: (_id: string, _tag: string) => Promise.resolve({}),
-}
-
 // Ranges API
 export interface RangeCreate {
   name: string

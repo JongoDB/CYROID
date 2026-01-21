@@ -11,9 +11,9 @@ import {
   ConfigurationOptions,
   ReviewAndDeploy,
 } from './steps';
-import { rangesApi, networksApi, vmsApi, templatesApi } from '../../services/api';
+import { rangesApi, networksApi, vmsApi, imagesApi } from '../../services/api';
 import { toast } from '../../stores/toastStore';
-import type { VMTemplate } from '../../types';
+import type { BaseImage } from '../../types';
 
 interface Props {
   isOpen: boolean;
@@ -39,12 +39,16 @@ function WizardContent({ onClose }: { onClose: () => void }) {
   const handleDeploy = async () => {
     setDeploying(true);
     try {
-      // Fetch templates to map names to IDs
-      setDeployProgress('Loading templates...');
-      const templatesRes = await templatesApi.list();
-      const templateMap: Record<string, VMTemplate> = {};
-      templatesRes.data.forEach((t: VMTemplate) => {
-        templateMap[t.name] = t;
+      // Fetch base images to map names to IDs
+      setDeployProgress('Loading base images...');
+      const imagesRes = await imagesApi.listBase();
+      const imageMap: Record<string, BaseImage> = {};
+      imagesRes.data.forEach((img: BaseImage) => {
+        imageMap[img.name] = img;
+        // Also map by docker_image_tag for container images
+        if (img.docker_image_tag) {
+          imageMap[img.docker_image_tag] = img;
+        }
       });
 
       // Create range
@@ -74,21 +78,21 @@ function WizardContent({ onClose }: { onClose: () => void }) {
         for (const system of zone.systems.filter((s) => s.enabled)) {
           setDeployProgress(`Creating VM: ${system.name}...`);
 
-          const template = templateMap[system.templateName];
-          if (!template) {
-            toast.warning(`Template "${system.templateName}" not found, skipping ${system.name}`);
+          const baseImage = imageMap[system.templateName];
+          if (!baseImage) {
+            toast.warning(`Base image "${system.templateName}" not found, skipping ${system.name}`);
             continue;
           }
 
           await vmsApi.create({
             range_id: rangeId,
             network_id: networkIdMap[zone.id],
-            template_id: template.id,
+            base_image_id: baseImage.id,
             hostname: system.name.toLowerCase().replace(/\s+/g, '-'),
             ip_address: system.ip,
-            cpu: system.cpu || template.default_cpu,
-            ram_mb: system.ramMb || template.default_ram_mb,
-            disk_gb: system.diskGb || template.default_disk_gb,
+            cpu: system.cpu || baseImage.default_cpu,
+            ram_mb: system.ramMb || baseImage.default_ram_mb,
+            disk_gb: system.diskGb || baseImage.default_disk_gb,
             use_dhcp: false,
             gateway: zone.gateway,
           });

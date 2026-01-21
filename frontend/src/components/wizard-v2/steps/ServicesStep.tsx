@@ -10,16 +10,16 @@ import {
   OS_FAMILY_NAMES,
   resolveTemplateName,
 } from '../data/servicePresets';
-import { templatesApi } from '../../../services/api';
-import type { VMTemplate } from '../../../types';
+import { imagesApi } from '../../../services/api';
+import type { BaseImage } from '../../../types';
 
 // Track version overrides per service (serviceId -> version)
 type VersionOverrides = Record<string, string>;
 
 export function ServicesStep() {
   const { environment, services, toggleService, addCustomVM, removeCustomVM } = useWizardStore();
-  const [templates, setTemplates] = useState<VMTemplate[]>([]);
-  const [showTemplateModal, setShowTemplateModal] = useState(false);
+  const [baseImages, setBaseImages] = useState<BaseImage[]>([]);
+  const [showImageModal, setShowImageModal] = useState(false);
   const [expandedServices, setExpandedServices] = useState<Set<string>>(new Set());
   const [versionOverrides, setVersionOverrides] = useState<VersionOverrides>({});
 
@@ -43,9 +43,9 @@ export function ServicesStep() {
     return versionOverrides[serviceId] || defaultVersion;
   };
 
-  // Load templates on mount
+  // Load base images on mount
   useEffect(() => {
-    templatesApi.list().then(res => setTemplates(res.data));
+    imagesApi.listBase().then(res => setBaseImages(res.data));
   }, []);
 
   // Auto-select recommended services when environment changes
@@ -70,23 +70,23 @@ export function ServicesStep() {
   const totalRam = selectedServices.reduce((sum, s) => sum + (s.ramMb || 2048), 0) +
     services.customVMs.reduce((sum, v) => sum + v.ramMb, 0);
 
-  const handleAddCustomVM = (template: VMTemplate) => {
+  const handleAddCustomVM = (baseImage: BaseImage) => {
     const vm: VMPlacement = {
       id: `custom-${Date.now()}`,
-      hostname: template.name.toLowerCase().replace(/\s+/g, '-'),
-      templateId: template.id,
-      templateName: template.name,
+      hostname: baseImage.name.toLowerCase().replace(/\s+/g, '-'),
+      baseImageId: baseImage.id,
+      templateName: baseImage.name,
       networkId: '',
       ip: '',
-      cpu: template.default_cpu,
-      ramMb: template.default_ram_mb,
-      diskGb: template.default_disk_gb,
+      cpu: baseImage.default_cpu,
+      ramMb: baseImage.default_ram_mb,
+      diskGb: baseImage.default_disk_gb,
       position: { x: 0, y: 0 },
-      osFamily: template.os_family,
-      osVersion: template.os_version,
+      osFamily: baseImage.os_type,
+      osVersion: baseImage.iso_version || '',
     };
     addCustomVM(vm);
-    setShowTemplateModal(false);
+    setShowImageModal(false);
   };
 
   // Expose version overrides for use by NetworkStep when generating VMs
@@ -162,11 +162,11 @@ export function ServicesStep() {
           </div>
 
           <button
-            onClick={() => setShowTemplateModal(true)}
+            onClick={() => setShowImageModal(true)}
             className="mt-4 w-full inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-primary-600 bg-primary-50 rounded-lg hover:bg-primary-100"
           >
             <Plus className="h-4 w-4 mr-2" />
-            Add Custom Service
+            Add Custom VM
           </button>
         </div>
 
@@ -294,30 +294,37 @@ export function ServicesStep() {
         </div>
       </div>
 
-      {/* Template selection modal */}
-      {showTemplateModal && (
+      {/* Base Image selection modal */}
+      {showImageModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-md max-h-[80vh] overflow-hidden">
             <div className="flex items-center justify-between px-4 py-3 border-b">
-              <h3 className="text-lg font-semibold">Select Template</h3>
-              <button onClick={() => setShowTemplateModal(false)}>
+              <h3 className="text-lg font-semibold">Select Base Image</h3>
+              <button onClick={() => setShowImageModal(false)}>
                 <X className="h-5 w-5 text-gray-400 hover:text-gray-500" />
               </button>
             </div>
             <div className="p-4 overflow-y-auto max-h-[60vh]">
-              {templates.length === 0 ? (
-                <p className="text-gray-500 text-center py-4">Loading templates...</p>
+              {baseImages.length === 0 ? (
+                <p className="text-gray-500 text-center py-4">No base images available. Pull images from the Image Cache first.</p>
               ) : (
                 <div className="space-y-2">
-                  {templates.map((template) => (
+                  {baseImages.map((image) => (
                     <button
-                      key={template.id}
-                      onClick={() => handleAddCustomVM(template)}
+                      key={image.id}
+                      onClick={() => handleAddCustomVM(image)}
                       className="w-full text-left p-3 rounded-lg border border-gray-200 hover:bg-gray-50"
                     >
-                      <div className="text-sm font-medium text-gray-900">{template.name}</div>
+                      <div className="flex items-center gap-2">
+                        <div className="text-sm font-medium text-gray-900">{image.name}</div>
+                        <span className={`px-1.5 py-0.5 text-[10px] font-medium rounded ${
+                          image.image_type === 'container' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'
+                        }`}>
+                          {image.image_type}
+                        </span>
+                      </div>
                       <div className="text-xs text-gray-500">
-                        {template.os_type} | {template.default_cpu} CPU, {template.default_ram_mb}MB RAM
+                        {image.os_type} | {image.default_cpu} CPU, {image.default_ram_mb}MB RAM
                       </div>
                     </button>
                   ))}

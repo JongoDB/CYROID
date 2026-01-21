@@ -3,11 +3,11 @@ import { memo } from 'react'
 import { Handle, Position } from '@xyflow/react'
 import { Server } from 'lucide-react'
 import clsx from 'clsx'
-import type { VM, VMTemplate } from '../../../types'
+import type { VM, BaseImage } from '../../../types'
 
 interface VMNodeData {
   vm: VM
-  template?: VMTemplate
+  baseImage?: BaseImage
 }
 
 interface VMNodeProps {
@@ -15,7 +15,7 @@ interface VMNodeProps {
 }
 
 export const VMNode = memo(({ data }: VMNodeProps) => {
-  const { vm, template } = data
+  const { vm, baseImage } = data
 
   const statusColors: Record<string, string> = {
     running: 'border-green-500 bg-green-50',
@@ -33,11 +33,12 @@ export const VMNode = memo(({ data }: VMNodeProps) => {
       )}
     >
       <Handle type="target" position={Position.Top} className="w-2 h-2" />
-      
+
       <div className="flex items-center gap-2">
         <Server className={clsx(
           'w-4 h-4',
-          template?.os_type === 'linux' ? 'text-orange-600' : 'text-blue-600'
+          baseImage?.os_type === 'linux' ? 'text-orange-600' :
+          baseImage?.os_type === 'windows' ? 'text-blue-600' : 'text-gray-600'
         )} />
         <div className="flex-1 min-w-0">
           <div className="text-xs font-semibold text-gray-900 truncate">

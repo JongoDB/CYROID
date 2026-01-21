@@ -18,13 +18,13 @@ import '@xyflow/react/dist/style.css'
 import { VMNode } from './nodes/VMNode'
 import { NetworkNode } from './nodes/NetworkNode'
 import { ComponentPanel } from './ComponentPanel'
-import type { VM, Network, VMTemplate } from '../../types'
+import type { VM, Network, BaseImage } from '../../types'
 
 interface RangeBuilderProps {
   rangeId: string
   networks: Network[]
   vms: VM[]
-  templates: VMTemplate[]
+  baseImages: BaseImage[]
   onAddNetwork: (data: Partial<Network>) => Promise<void>
   onAddVM: (data: Partial<VM>) => Promise<void>
   onUpdateVM: (id: string, position: { x: number; y: number }) => Promise<void>
@@ -36,7 +36,7 @@ export function RangeBuilder({
   rangeId,
   networks,
   vms,
-  templates,
+  baseImages,
   onAddNetwork,
   onAddVM,
   onUpdateVM,
@@ -59,7 +59,7 @@ export function RangeBuilder({
       position: { x: vm.position_x || 100, y: vm.position_y || 200 },
       data: {
         vm,
-        template: templates.find(t => t.id === vm.template_id),
+        baseImage: baseImages.find(img => img.id === vm.base_image_id),
         network: networks.find(n => n.id === vm.network_id),
       },
       parentId: 'network-' + vm.network_id,
@@ -67,7 +67,7 @@ export function RangeBuilder({
     }))
 
     return [...networkNodes, ...vmNodes]
-  }, [networks, vms, templates])
+  }, [networks, vms, baseImages])
 
   // Create edges connecting VMs to networks
   const initialEdges: Edge[] = useMemo(() => {
@@ -125,7 +125,7 @@ export function RangeBuilder({
       event.preventDefault()
 
       const type = event.dataTransfer.getData('application/reactflow/type')
-      const templateId = event.dataTransfer.getData('application/reactflow/templateId')
+      const baseImageId = event.dataTransfer.getData('application/reactflow/baseImageId')
 
       if (!type) return
 
@@ -141,9 +141,9 @@ export function RangeBuilder({
           subnet: '10.0.' + newNetworkNum + '.0/24',
           gateway: '10.0.' + newNetworkNum + '.1',
         })
-      } else if (type === 'vm' && templateId) {
-        const template = templates.find(t => t.id === templateId)
-        if (template && networks.length > 0) {
+      } else if (type === 'vm' && baseImageId) {
+        const baseImage = baseImages.find(img => img.id === baseImageId)
+        if (baseImage && networks.length > 0) {
           const network = networks[0]
           const existingIps = vms
             .filter(v => v.network_id === network.id)
@@ -154,19 +154,19 @@ export function RangeBuilder({
           onAddVM({
             range_id: rangeId,
             network_id: network.id,
-            template_id: templateId,
-            hostname: template.name.toLowerCase().replace(/\s+/g, '-') + '-' + (vms.length + 1),
+            base_image_id: baseImageId,
+            hostname: baseImage.name.toLowerCase().replace(/\s+/g, '-') + '-' + (vms.length + 1),
             ip_address: subnetBase + '.' + nextIp,
-            cpu: template.default_cpu,
-            ram_mb: template.default_ram_mb,
-            disk_gb: template.default_disk_gb,
+            cpu: baseImage.default_cpu,
+            ram_mb: baseImage.default_ram_mb,
+            disk_gb: baseImage.default_disk_gb,
             position_x: position.x,
             position_y: position.y,
           })
         }
       }
     },
-    [networks, vms, templates, rangeId, onAddNetwork, onAddVM]
+    [networks, vms, baseImages, rangeId, onAddNetwork, onAddVM]
   )
 
   const onDragOver = useCallback((event: React.DragEvent) => {
@@ -176,7 +176,7 @@ export function RangeBuilder({
 
   return (
     <div className="flex h-[600px] border border-gray-200 rounded-lg overflow-hidden">
-      <ComponentPanel templates={templates} />
+      <ComponentPanel baseImages={baseImages} />
       <div className="flex-1">
         <ReactFlow
           nodes={nodes}

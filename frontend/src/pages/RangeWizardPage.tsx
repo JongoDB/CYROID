@@ -11,9 +11,9 @@ import {
   ReviewStep,
 } from '../components/wizard-v2/steps';
 import { useWizardStore } from '../stores/wizardStore';
-import { rangesApi, networksApi, vmsApi, templatesApi, blueprintsApi } from '../services/api';
+import { rangesApi, networksApi, vmsApi, imagesApi, blueprintsApi } from '../services/api';
 import { toast } from '../stores/toastStore';
-import type { VMTemplate } from '../types';
+import type { BaseImage } from '../types';
 
 const STEPS = [
   EnvironmentStep,
@@ -27,7 +27,7 @@ const STEPS = [
 export default function RangeWizardPage() {
   const navigate = useNavigate();
   const [isDeploying, setIsDeploying] = useState(false);
-  const [templates, setTemplates] = useState<VMTemplate[]>([]);
+  const [baseImages, setBaseImages] = useState<BaseImage[]>([]);
 
   const {
     currentStep,
@@ -37,17 +37,17 @@ export default function RangeWizardPage() {
     reset,
   } = useWizardStore();
 
-  // Load templates for mapping templateName to templateId
+  // Load base images for mapping to VM creation
   useEffect(() => {
-    const loadTemplates = async () => {
+    const loadBaseImages = async () => {
       try {
-        const response = await templatesApi.list();
-        setTemplates(response.data);
+        const response = await imagesApi.listBase();
+        setBaseImages(response.data);
       } catch (error) {
-        console.error('Failed to load templates:', error);
+        console.error('Failed to load base images:', error);
       }
     };
-    loadTemplates();
+    loadBaseImages();
   }, []);
 
   const handleDeploy = async () => {
@@ -77,20 +77,18 @@ export default function RangeWizardPage() {
 
       // Step 3: Create VMs
       for (const vm of networks.vms) {
-        // Find template by ID, name, or os_family + os_version combination
-        let template = templates.find((t) => t.id === vm.templateId);
-        if (!template) {
-          template = templates.find((t) => t.name === vm.templateName);
+        // Find base image by ID or name
+        let baseImage = baseImages.find((img) => img.id === vm.baseImageId);
+        if (!baseImage) {
+          baseImage = baseImages.find((img) => img.name === vm.templateName);
         }
-        if (!template && vm.osFamily && vm.osVersion) {
-          // Match by os_family and os_version for more precise resolution
-          template = templates.find(
-            (t) => t.os_family === vm.osFamily && t.os_version === vm.osVersion
-          );
+        // Fallback: match by docker_image_tag for container images
+        if (!baseImage && vm.templateName) {
+          baseImage = baseImages.find((img) => img.docker_image_tag === vm.templateName);
         }
-        if (!template) {
-          console.warn(`Template not found for VM ${vm.hostname}: ${vm.templateName} (osFamily: ${vm.osFamily}, osVersion: ${vm.osVersion})`);
-          toast.error(`Template not found: ${vm.templateName}. Please ensure the template exists.`);
+        if (!baseImage) {
+          console.warn(`Base image not found for VM ${vm.hostname}: ${vm.templateName || vm.baseImageId}`);
+          toast.error(`Base image not found: ${vm.templateName || 'Unknown'}. Please ensure the image is cached.`);
           continue;
         }
 
@@ -101,17 +99,17 @@ export default function RangeWizardPage() {
         }
 
         // Detect OS type for field mapping
-        const isWindows = template.os_type === 'windows';
+        const isWindows = baseImage.os_type === 'windows';
 
         await vmsApi.create({
           range_id: rangeId,
           network_id: networkId,
-          template_id: template.id,
+          base_image_id: baseImage.id,
           hostname: vm.hostname,
           ip_address: vm.ip,
-          cpu: vm.cpu,
-          ram_mb: vm.ramMb,
-          disk_gb: vm.diskGb,
+          cpu: vm.cpu || baseImage.default_cpu,
+          ram_mb: vm.ramMb || baseImage.default_ram_mb,
+          disk_gb: vm.diskGb || baseImage.default_disk_gb,
           position_x: vm.position.x,
           position_y: vm.position.y,
           // Credentials - mapped to OS-specific fields

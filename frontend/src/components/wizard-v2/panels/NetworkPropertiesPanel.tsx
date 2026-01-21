@@ -2,8 +2,8 @@
 import { useState, useEffect, useMemo } from 'react';
 import { X, Trash2, ChevronDown } from 'lucide-react';
 import { useWizardStore } from '../../../stores/wizardStore';
-import { templatesApi } from '../../../services/api';
-import type { VMTemplate } from '../../../types';
+import { imagesApi } from '../../../services/api';
+import type { BaseImage } from '../../../types';
 
 interface Props {
   selectedNetworkId: string | null;
@@ -50,35 +50,37 @@ const LANGUAGE_OPTIONS = [
 
 export function NetworkPropertiesPanel({ selectedNetworkId, selectedVmId, onClose }: Props) {
   const { networks, updateNetwork, removeNetwork, updateVM, removeVM } = useWizardStore();
-  const [templates, setTemplates] = useState<VMTemplate[]>([]);
+  const [baseImages, setBaseImages] = useState<BaseImage[]>([]);
 
   useEffect(() => {
-    templatesApi.list().then(res => setTemplates(res.data));
+    imagesApi.listBase().then(res => setBaseImages(res.data));
   }, []);
 
   const selectedNetwork = networks.segments.find(n => n.id === selectedNetworkId);
   const selectedVm = networks.vms.find(v => v.id === selectedVmId);
 
-  // Get template for selected VM
-  const vmTemplate = useMemo(() => {
+  // Get base image for selected VM
+  const vmBaseImage = useMemo(() => {
     if (!selectedVm) return null;
-    return templates.find(t => t.id === selectedVm.templateId);
-  }, [selectedVm, templates]);
+    // Try to find by baseImageId first, then by templateName (for backward compatibility)
+    return baseImages.find(img => img.id === selectedVm.baseImageId) ||
+           baseImages.find(img => img.name === selectedVm.templateName);
+  }, [selectedVm, baseImages]);
 
   // OS type detection
   const osInfo = useMemo(() => {
-    if (!vmTemplate) return { isWindows: false, isLinuxISO: false, isContainer: true };
+    if (!vmBaseImage) return { isWindows: false, isLinuxISO: false, isContainer: true };
 
-    const isWindows = vmTemplate.os_type === 'windows';
-    const baseImage = vmTemplate.base_image?.toLowerCase() || '';
-    const isLinuxISO = vmTemplate.os_type === 'linux' && vmTemplate.base_image?.startsWith('iso:');
-    const isKasmVNC = baseImage.includes('kasmweb/');
-    const isLinuxServer = baseImage.includes('linuxserver/') || baseImage.includes('lscr.io/linuxserver');
-    const isContainer = !isWindows && !isLinuxISO;
+    const isWindows = vmBaseImage.os_type === 'windows';
+    const dockerTag = vmBaseImage.docker_image_tag?.toLowerCase() || '';
+    const isLinuxISO = vmBaseImage.vm_type === 'linux_vm';
+    const isKasmVNC = dockerTag.includes('kasmweb/');
+    const isLinuxServer = dockerTag.includes('linuxserver/') || dockerTag.includes('lscr.io/linuxserver');
+    const isContainer = vmBaseImage.image_type === 'container';
     const needsCredentials = isWindows || isLinuxISO || isKasmVNC || isLinuxServer;
 
     return { isWindows, isLinuxISO, isContainer, isKasmVNC, isLinuxServer, needsCredentials };
-  }, [vmTemplate]);
+  }, [vmBaseImage]);
 
   if (!selectedNetwork && !selectedVm) {
     return null;
@@ -169,8 +171,8 @@ export function NetworkPropertiesPanel({ selectedNetworkId, selectedVmId, onClos
           <div>
             <h3 className="text-sm font-semibold text-gray-900">VM Properties</h3>
             <p className="text-xs text-gray-500">
-              {vmTemplate?.name || selectedVm.templateName}
-              {vmTemplate && ` (${vmTemplate.os_type === 'windows' ? 'Windows' : 'Linux'}${osInfo.isLinuxISO ? ' ISO' : osInfo.isContainer ? ' Container' : ''})`}
+              {vmBaseImage?.name || selectedVm.templateName}
+              {vmBaseImage && ` (${vmBaseImage.os_type === 'windows' ? 'Windows' : 'Linux'}${osInfo.isLinuxISO ? ' VM' : osInfo.isContainer ? ' Container' : ''})`}
             </p>
           </div>
           <div className="flex items-center gap-2">
