@@ -60,6 +60,12 @@ def get_dind_service():
     return _get_dind_service()
 
 
+def get_traefik_route_service():
+    """Lazy import for Traefik route service."""
+    from cyroid.services.traefik_route_service import get_traefik_route_service as _get_traefik_route_service
+    return _get_traefik_route_service()
+
+
 def compute_deployment_status(range_obj, events: list) -> DeploymentStatusResponse:
     """Compute per-resource deployment status from events."""
     from datetime import timezone
@@ -710,6 +716,230 @@ def repair_range_dind(range_id: UUID, db: DBSession, current_user: CurrentUser):
         "dind_mgmt_ip": dind_info["mgmt_ip"],
         "dind_docker_url": dind_info["docker_url"],
         "container_status": dind_info["status"],
+    }
+
+
+@router.get("/{range_id}/vnc-status")
+def get_vnc_status(range_id: UUID, db: DBSession, current_user: CurrentUser):
+    """Get detailed VNC status for all VMs in a range.
+
+    Returns diagnostic information about VNC configuration including:
+    - Database VNC mappings
+    - Traefik route file status
+    - iptables rules (for DinD ranges)
+    - Per-VM VNC access URLs
+
+    Use this endpoint to diagnose VNC connectivity issues.
+    """
+    import asyncio
+    from pathlib import Path
+
+    range_obj = db.query(Range).options(
+        joinedload(Range.vms)
+    ).filter(Range.id == range_id).first()
+
+    if not range_obj:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Range not found",
+        )
+
+    settings = get_settings()
+    base_url = settings.EXTERNAL_URL or f"http://localhost"
+
+    # Get VNC mappings from database
+    vnc_mappings = range_obj.vnc_proxy_mappings or {}
+
+    # Check Traefik route file
+    traefik_route_file = Path(f"/app/traefik/dynamic/range-{str(range_id)[:8]}.yml")
+    traefik_routes_exist = traefik_route_file.exists()
+    traefik_routes_content = None
+    if traefik_routes_exist:
+        try:
+            traefik_routes_content = traefik_route_file.read_text()
+        except:
+            traefik_routes_content = "Error reading file"
+
+    # Build per-VM VNC status
+    vm_vnc_status = []
+    for vm in range_obj.vms:
+        vm_id_str = str(vm.id)
+        mapping = vnc_mappings.get(vm_id_str)
+
+        status_info = {
+            "vm_id": vm_id_str,
+            "hostname": vm.hostname,
+            "vm_status": vm.status.value if vm.status else "unknown",
+            "container_id": vm.container_id[:12] if vm.container_id else None,
+            "ip_address": vm.ip_address,
+            "has_db_mapping": mapping is not None,
+            "vnc_url": None,
+            "proxy_port": None,
+            "proxy_host": None,
+            "original_port": None,
+            "issues": [],
+        }
+
+        if mapping:
+            status_info["proxy_port"] = mapping.get("proxy_port")
+            status_info["proxy_host"] = mapping.get("proxy_host")
+            status_info["original_port"] = mapping.get("original_port")
+            status_info["vnc_url"] = f"{base_url}/vnc/{vm_id_str}"
+
+            # Check if route exists in Traefik file
+            if traefik_routes_content and vm_id_str[:12] not in traefik_routes_content:
+                status_info["issues"].append("VNC route not found in Traefik config")
+        else:
+            status_info["issues"].append("No VNC mapping in database")
+
+        if not vm.container_id:
+            status_info["issues"].append("VM has no container ID")
+        if not vm.ip_address:
+            status_info["issues"].append("VM has no IP address")
+
+        vm_vnc_status.append(status_info)
+
+    # Check iptables rules for DinD ranges
+    iptables_rules = []
+    if range_obj.dind_container_id and range_obj.dind_docker_url:
+        try:
+            docker = get_docker_service()
+            host_client = docker.client
+            dind_container = host_client.containers.get(range_obj.dind_container_id)
+
+            # Get DNAT rules from DinD container
+            exec_result = dind_container.exec_run(
+                "iptables -t nat -L PREROUTING -n -v",
+                user="root"
+            )
+            if exec_result.exit_code == 0:
+                iptables_rules = exec_result.output.decode("utf-8").split("\n")
+        except Exception as e:
+            iptables_rules = [f"Error getting iptables rules: {str(e)}"]
+
+    return {
+        "range_id": str(range_id),
+        "range_name": range_obj.name,
+        "is_dind": bool(range_obj.dind_container_id),
+        "dind_container_id": range_obj.dind_container_id[:12] if range_obj.dind_container_id else None,
+        "dind_docker_url": range_obj.dind_docker_url,
+        "dind_mgmt_ip": range_obj.dind_mgmt_ip,
+        "vnc_mappings_count": len(vnc_mappings),
+        "traefik_routes_exist": traefik_routes_exist,
+        "traefik_route_file": str(traefik_route_file),
+        "iptables_rules": iptables_rules,
+        "vms": vm_vnc_status,
+        "summary": {
+            "total_vms": len(range_obj.vms),
+            "vms_with_vnc": len([v for v in vm_vnc_status if v["has_db_mapping"]]),
+            "vms_with_issues": len([v for v in vm_vnc_status if v["issues"]]),
+        }
+    }
+
+
+@router.post("/{range_id}/repair-vnc")
+def repair_vnc_for_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
+    """Repair VNC configuration for all VMs in a range.
+
+    This endpoint:
+    1. Re-creates iptables DNAT rules for VNC port forwarding
+    2. Re-generates Traefik routing configuration
+    3. Updates database with VNC mappings
+
+    Use this when VMs are running but VNC console is not accessible.
+    """
+    import asyncio
+    from sqlalchemy.orm.attributes import flag_modified
+
+    range_obj = db.query(Range).options(
+        joinedload(Range.vms)
+    ).filter(Range.id == range_id).first()
+
+    if not range_obj:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Range not found",
+        )
+
+    if not range_obj.dind_container_id or not range_obj.dind_docker_url:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Range is not using DinD isolation - VNC repair not needed",
+        )
+
+    dind = get_dind_service()
+    traefik_service = get_traefik_route_service()
+
+    # Collect VM VNC port info
+    vm_ports = []
+    for vm in range_obj.vms:
+        if not vm.container_id or not vm.ip_address:
+            continue
+
+        # Determine VNC port based on VM type and image
+        from cyroid.models.template import VMType
+        vnc_port = 8006  # Default for QEMU VMs
+
+        if vm.vm_type == VMType.CONTAINER:
+            # Container VMs have image-specific VNC ports
+            image = vm.base_image or vm.docker_image or ""
+            if "kasmweb" in image:
+                vnc_port = 6901  # KasmVNC (HTTPS)
+            elif "linuxserver/" in image or "lscr.io/linuxserver" in image:
+                vnc_port = 3000  # LinuxServer webtop (HTTP)
+            else:
+                vnc_port = 3000  # Default for other containers
+
+        vm_ports.append({
+            "vm_id": str(vm.id),
+            "hostname": vm.hostname,
+            "vnc_port": vnc_port,
+            "ip_address": vm.ip_address,
+        })
+
+    if not vm_ports:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No VMs with container IDs found to repair VNC for",
+        )
+
+    # Setup VNC port forwarding
+    try:
+        port_mappings = asyncio.run(dind.setup_vnc_port_forwarding(
+            range_id=str(range_id),
+            vm_ports=vm_ports,
+            existing_mappings={},  # Start fresh
+        ))
+    except Exception as e:
+        logger.error(f"Failed to setup VNC port forwarding: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to setup VNC port forwarding: {str(e)}",
+        )
+
+    # Update database
+    range_obj.vnc_proxy_mappings = port_mappings
+    flag_modified(range_obj, "vnc_proxy_mappings")
+    db.commit()
+    db.refresh(range_obj)
+
+    # Generate Traefik routes
+    route_file = traefik_service.generate_vnc_routes(str(range_id), port_mappings)
+
+    # Log event
+    event_service = EventService(db)
+    event_service.log_event(
+        range_id=range_id,
+        event_type=EventType.RANGE_UPDATED,
+        message=f"VNC configuration repaired for {len(port_mappings)} VMs",
+        user_id=current_user.id,
+    )
+
+    return {
+        "status": "repaired",
+        "message": f"VNC configuration repaired for {len(port_mappings)} VMs",
+        "vnc_mappings": port_mappings,
+        "traefik_route_file": str(route_file) if route_file else None,
     }
 
 

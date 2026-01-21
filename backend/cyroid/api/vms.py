@@ -7,6 +7,7 @@ import logging
 
 from fastapi import APIRouter, HTTPException, status, Request, Query
 from sqlalchemy.orm import joinedload, Session
+from sqlalchemy.orm.attributes import flag_modified
 
 from cyroid.api.deps import DBSession, CurrentUser
 from cyroid.models.vm import VM, VMStatus
@@ -663,6 +664,7 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
             )
 
         # Container already exists - just start it
+        container_id = vm.container_id  # Track for VNC setup
         if vm.container_id:
             if use_dind:
                 # Start container inside DinD
@@ -1278,58 +1280,133 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
         db.commit()
         db.refresh(vm)
 
-        # Set up VNC port forwarding for DinD ranges (for VMs created after deployment)
+        # Set up VNC port forwarding for DinD ranges (for VMs created after deployment or missing VNC)
+        logger.info(f"VNC check: use_dind={use_dind}, container_id={vm.container_id}, ip={vm.ip_address}, vm_type={vm_type}")
         if use_dind and vm.container_id and vm.ip_address:
-            try:
-                from cyroid.services.dind_service import get_dind_service
-                from cyroid.services.traefik_route_service import get_traefik_route_service
+            # Check if this VM already has VNC mapping
+            existing_mappings = range_obj.vnc_proxy_mappings or {}
+            vm_id_str = str(vm.id)
+            logger.info(f"VNC check for VM {vm_id_str}: existing mappings={list(existing_mappings.keys())}")
 
-                dind_service = get_dind_service()
-                traefik_service = get_traefik_route_service()
+            if vm_id_str not in existing_mappings:
+                logger.info(f"VNC mapping missing for VM {vm_id_str}, setting up...")
+                # VNC mapping missing - set it up
+                try:
+                    from cyroid.services.dind_service import get_dind_service
+                    from cyroid.services.traefik_route_service import get_traefik_route_service
 
-                # Determine VNC port based on VM type and image
-                # QEMU VMs (LINUX_VM, WINDOWS_VM) use port 8006 (noVNC)
-                # Containers use image-specific ports
-                vnc_port = 8006  # Default for QEMU VMs
-                if vm_type == VMType.CONTAINER:
-                    # Container VMs have image-specific VNC ports
-                    if "kasmweb" in (image_ref or ""):
-                        vnc_port = 6901  # KasmVNC (HTTPS)
-                    elif "linuxserver/" in (image_ref or "") or "lscr.io/linuxserver" in (image_ref or ""):
-                        vnc_port = 3000  # LinuxServer webtop (HTTP)
+                    dind_service = get_dind_service()
+                    traefik_service = get_traefik_route_service()
+
+                    # Determine VNC port based on VM type and image
+                    # QEMU VMs (LINUX_VM, WINDOWS_VM) use port 8006 (noVNC)
+                    # Containers use image-specific ports
+                    vnc_port = 8006  # Default for QEMU VMs
+                    if vm_type == VMType.CONTAINER:
+                        # Container VMs have image-specific VNC ports
+                        if "kasmweb" in (image_ref or ""):
+                            vnc_port = 6901  # KasmVNC (HTTPS)
+                        elif "linuxserver/" in (image_ref or "") or "lscr.io/linuxserver" in (image_ref or ""):
+                            vnc_port = 3000  # LinuxServer webtop (HTTP)
+                        else:
+                            vnc_port = 3000  # Default for other containers
+                    # LINUX_VM and WINDOWS_VM keep default 8006
+
+                    vm_ports = [{
+                        "vm_id": vm_id_str,
+                        "hostname": vm.hostname,
+                        "vnc_port": vnc_port,
+                        "ip_address": vm.ip_address,
+                    }]
+                    logger.info(f"VNC setup: calling setup_vnc_port_forwarding for {vm_id_str} with port {vnc_port}")
+
+                    # Log VNC setup event for frontend visibility
+                    event_service = EventService(db)
+                    event_service.log_event(
+                        range_id=vm.range_id,
+                        vm_id=vm.id,
+                        event_type=EventType.VM_STARTED,
+                        message=f"Setting up VNC port forwarding for {vm.hostname} (port {vnc_port})"
+                    )
+
+                    port_mappings = asyncio.run(dind_service.setup_vnc_port_forwarding(
+                        range_id=str(vm.range_id),
+                        vm_ports=vm_ports,
+                        existing_mappings=existing_mappings,
+                    ))
+                    logger.info(f"VNC setup: port_mappings returned: {port_mappings}")
+
+                    if port_mappings and vm_id_str in port_mappings:
+                        # Merge new port mappings with existing ones - create new dict to trigger SQLAlchemy change detection
+                        updated_mappings = dict(existing_mappings)
+                        updated_mappings.update(port_mappings)
+                        range_obj.vnc_proxy_mappings = updated_mappings
+                        flag_modified(range_obj, "vnc_proxy_mappings")
+                        db.commit()
+                        db.refresh(range_obj)
+                        logger.info(f"VNC setup: database updated with mappings for {vm_id_str}")
+
+                        # Verify the update persisted
+                        verified_mappings = range_obj.vnc_proxy_mappings or {}
+                        if vm_id_str in verified_mappings:
+                            logger.info(f"VNC setup: verified {vm_id_str} in database mappings")
+                            mapping_info = verified_mappings[vm_id_str]
+                            event_service.log_event(
+                                range_id=vm.range_id,
+                                vm_id=vm.id,
+                                event_type=EventType.VM_STARTED,
+                                message=f"VNC ready for {vm.hostname} at proxy port {mapping_info.get('proxy_port')}"
+                            )
+                        else:
+                            logger.error(f"VNC setup: FAILED to persist {vm_id_str} to database!")
+                            event_service.log_event(
+                                range_id=vm.range_id,
+                                vm_id=vm.id,
+                                event_type=EventType.ERROR,
+                                message=f"VNC database persistence failed for {vm.hostname}"
+                            )
+
+                        # Generate Traefik routes for VNC console access
+                        route_file = traefik_service.generate_vnc_routes(str(vm.range_id), updated_mappings)
+                        if route_file:
+                            logger.info(f"VNC setup: Traefik routes generated at {route_file}")
+                            event_service.log_event(
+                                range_id=vm.range_id,
+                                vm_id=vm.id,
+                                event_type=EventType.VM_STARTED,
+                                message=f"VNC routes configured for {vm.hostname}"
+                            )
+                        else:
+                            logger.warning(f"VNC setup: Failed to generate Traefik routes for {vm.hostname}")
+                            event_service.log_event(
+                                range_id=vm.range_id,
+                                vm_id=vm.id,
+                                event_type=EventType.ERROR,
+                                message=f"VNC route generation failed for {vm.hostname}"
+                            )
                     else:
-                        vnc_port = 3000  # Default for other containers
-                # LINUX_VM and WINDOWS_VM keep default 8006
+                        logger.error(f"VNC setup: No port mapping returned for {vm_id_str}")
+                        event_service.log_event(
+                            range_id=vm.range_id,
+                            vm_id=vm.id,
+                            event_type=EventType.ERROR,
+                            message=f"VNC port forwarding failed for {vm.hostname} - no mapping returned"
+                        )
 
-                vm_ports = [{
-                    "vm_id": str(vm.id),
-                    "hostname": vm.hostname,
-                    "vnc_port": vnc_port,
-                    "ip_address": vm.ip_address,
-                }]
-
-                # Get existing mappings to calculate next available port
-                existing_mappings = range_obj.vnc_proxy_mappings or {}
-
-                port_mappings = asyncio.run(dind_service.setup_vnc_port_forwarding(
-                    range_id=str(vm.range_id),
-                    vm_ports=vm_ports,
-                    existing_mappings=existing_mappings,
-                ))
-
-                # Merge new port mappings with existing ones
-                existing_mappings.update(port_mappings)
-                range_obj.vnc_proxy_mappings = existing_mappings
-                db.commit()
-
-                # Generate Traefik routes for VNC console access
-                route_file = traefik_service.generate_vnc_routes(str(vm.range_id), existing_mappings)
-                if route_file:
-                    logger.info(f"Set up VNC forwarding for VM {vm.hostname}")
-
-            except Exception as e:
-                logger.warning(f"Failed to set up VNC forwarding for VM {vm.hostname}: {e}")
-                # Don't fail the VM start if VNC forwarding fails
+                except Exception as e:
+                    logger.error(f"VNC setup: Failed for {vm.hostname}: {e}", exc_info=True)
+                    # Log error event for frontend visibility
+                    try:
+                        event_service = EventService(db)
+                        event_service.log_event(
+                            range_id=vm.range_id,
+                            vm_id=vm.id,
+                            event_type=EventType.ERROR,
+                            message=f"VNC setup error for {vm.hostname}: {str(e)[:200]}"
+                        )
+                    except:
+                        pass
+                    # Don't fail the VM start if VNC forwarding fails
 
         # Log event
         event_service = EventService(db)

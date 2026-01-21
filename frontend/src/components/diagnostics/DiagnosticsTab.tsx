@@ -6,6 +6,7 @@ import { ComponentHealth } from './ComponentHealth'
 import { ErrorTimeline } from './ErrorTimeline'
 import { LogViewer } from './LogViewer'
 import { RangeConsole } from '../console/RangeConsole'
+import { VncStatus } from './VncStatus'
 
 interface DiagnosticsTabProps {
   range: Range
@@ -60,6 +61,9 @@ export function DiagnosticsTab({ range, networks, vms }: DiagnosticsTabProps) {
           />
         </div>
       )}
+
+      {/* VNC Status - shows VNC configuration health */}
+      <VncStatus rangeId={range.id} />
 
       {/* Two-column layout for health and timeline */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">

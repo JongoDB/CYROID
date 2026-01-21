@@ -182,6 +182,51 @@ export interface SyncRangeResponse {
   }
 }
 
+// VNC Status and Repair types
+export interface VncVmStatus {
+  vm_id: string
+  hostname: string
+  vm_status: string
+  container_id: string | null
+  ip_address: string | null
+  has_db_mapping: boolean
+  vnc_url: string | null
+  proxy_port: number | null
+  proxy_host: string | null
+  original_port: number | null
+  issues: string[]
+}
+
+export interface VncStatusResponse {
+  range_id: string
+  range_name: string
+  is_dind: boolean
+  dind_container_id: string | null
+  dind_docker_url: string | null
+  dind_mgmt_ip: string | null
+  vnc_mappings_count: number
+  traefik_routes_exist: boolean
+  traefik_route_file: string
+  iptables_rules: string[]
+  vms: VncVmStatus[]
+  summary: {
+    total_vms: number
+    vms_with_vnc: number
+    vms_with_issues: number
+  }
+}
+
+export interface VncRepairResponse {
+  status: 'repaired'
+  message: string
+  vnc_mappings: Record<string, {
+    proxy_port: number
+    proxy_host: string
+    original_port: number
+  }>
+  traefik_route_file: string | null
+}
+
 import type {
   ExportRequest,
   ExportJobStatus,
@@ -231,6 +276,12 @@ export const rangesApi = {
   sync: (id: string) => api.post<SyncRangeResponse>(`/ranges/${id}/sync`),
   getDeploymentStatus: (rangeId: string) =>
     api.get<DeploymentStatusResponse>(`/ranges/${rangeId}/deployment-status`),
+
+  // VNC diagnostics and repair
+  getVncStatus: (rangeId: string) =>
+    api.get<VncStatusResponse>(`/ranges/${rangeId}/vnc-status`),
+  repairVnc: (rangeId: string) =>
+    api.post<VncRepairResponse>(`/ranges/${rangeId}/repair-vnc`),
 
   // Apply training scenario
   applyScenario: (rangeId: string, data: ApplyScenarioRequest) =>
