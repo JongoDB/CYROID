@@ -703,8 +703,9 @@ class DinDService:
                 - proxy_host: DinD management IP
                 - original_port: Original VNC port in VM container
         """
-        # Base port for VNC proxy - VMs will be mapped to 15900, 15901, 15902, etc.
-        VNC_PROXY_BASE_PORT = 15900
+        # Port range for VNC proxy allocation (1000 ports per range)
+        VNC_PROXY_PORT_MIN = 15900
+        VNC_PROXY_PORT_MAX = 16899
 
         # Find the DinD container by range_id label (name may include range name)
         dind_container = self._find_container_by_range_id(range_id)
@@ -720,21 +721,36 @@ class DinDService:
         if not dind_mgmt_ip:
             raise ValueError(f"Cannot get management IP for DinD container (range {range_id})")
 
-        # Calculate next available port based on existing mappings
-        next_port = VNC_PROXY_BASE_PORT
+        # Get set of currently allocated ports
+        allocated_ports = set()
         if existing_mappings:
-            used_ports = [m.get("proxy_port", 0) for m in existing_mappings.values()]
-            if used_ports:
-                next_port = max(used_ports) + 1
+            for mapping in existing_mappings.values():
+                if mapping and "proxy_port" in mapping:
+                    allocated_ports.add(mapping["proxy_port"])
+
+        def allocate_port() -> int:
+            """Find first available port in the range."""
+            for port in range(VNC_PROXY_PORT_MIN, VNC_PROXY_PORT_MAX + 1):
+                if port not in allocated_ports:
+                    allocated_ports.add(port)
+                    return port
+            raise ValueError(f"No available VNC ports in range {VNC_PROXY_PORT_MIN}-{VNC_PROXY_PORT_MAX}")
 
         port_mappings = {}
 
         # Build iptables rules for each VM
-        for idx, vm_info in enumerate(vm_ports):
+        for vm_info in vm_ports:
             vm_id = vm_info["vm_id"]
             vm_ip = vm_info["ip_address"]
             vnc_port = vm_info["vnc_port"]
-            external_port = next_port + idx
+
+            # Skip if this VM already has a mapping
+            if vm_id in (existing_mappings or {}):
+                logger.debug(f"VM {vm_id} already has VNC mapping, skipping")
+                continue
+
+            # Allocate next available port
+            external_port = allocate_port()
 
             # Record port mapping
             port_mappings[vm_id] = {
@@ -783,10 +799,12 @@ class DinDService:
         except Exception as e:
             logger.debug(f"Forward rule may already exist: {e}")
 
-        logger.info(
-            f"Set up VNC port forwarding for range {range_id}: "
-            f"{len(port_mappings)} ports via iptables DNAT (ports {next_port}-{next_port + len(port_mappings) - 1})"
-        )
+        if port_mappings:
+            allocated = [m["proxy_port"] for m in port_mappings.values()]
+            logger.info(
+                f"Set up VNC port forwarding for range {range_id}: "
+                f"{len(port_mappings)} ports via iptables DNAT (ports: {sorted(allocated)})"
+            )
 
         return port_mappings
 
