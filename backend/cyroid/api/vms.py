@@ -741,26 +741,37 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
                 # Version codes: 11, 11l, 11e, 10, 10l, 10e, 8e, 7u, vu, xp, 2k, 2025, 2022, 2019, 2016, 2012, 2008, 2003
                 windows_version = vm.windows_version or "11"
 
-                # Check if trying to run x86 Windows on ARM host
+                # Check architecture compatibility
+                # dockur/windows and dockur/windows-arm both use KVM (no cross-arch emulation)
                 from cyroid.utils.arch import HOST_ARCH
-                # Windows 10/11 have ARM64 support via dockur/windows-arm
-                WINDOWS_ARM64_VERSIONS = {"11", "11e", "11l", "10", "10e", "10l"}
+                # Only Windows 11 has ARM64 support (Win10 ARM requires UUP build - not supported)
+                WINDOWS_ARM64_VERSIONS = {"11", "11e", "11l"}
 
                 target_arch = vm.arch or HOST_ARCH
+
+                # Block x86 Windows on ARM hosts
                 if HOST_ARCH == "arm64" and target_arch == "x86_64":
-                    # User explicitly requested x86 emulation - not supported
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
                         detail="x86 Windows emulation on ARM hosts is not supported. "
-                               "Please use ARM64-native Windows 10/11, or run on an x86 host."
+                               "Please use Windows 11 ARM64, or run on an x86 host."
                     )
+
+                # Block non-Win11 versions on ARM hosts
                 if HOST_ARCH == "arm64" and windows_version not in WINDOWS_ARM64_VERSIONS:
-                    # Windows version doesn't have ARM64 support (Server/legacy editions)
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
                         detail=f"Windows version '{windows_version}' is not available for ARM64. "
-                               f"Only Windows 10/11 support ARM64 hosts. "
-                               f"Server editions (2022, 2019, etc.) and legacy Windows (8, 7, XP) require an x86 host."
+                               f"Only Windows 11 (11, 11e, 11l) supports ARM64 hosts. "
+                               f"All other versions require an x86 host."
+                    )
+
+                # Block ARM64 Windows on x86 hosts
+                if HOST_ARCH == "x86_64" and target_arch == "arm64":
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="ARM64 Windows emulation on x86 hosts is not supported. "
+                               "Please use x86 Windows, or run on an ARM host."
                     )
 
                 # Determine ISO path from VM or base_image
