@@ -743,6 +743,17 @@ class DinDService:
                 "original_port": vnc_port,
             }
 
+            # First, remove any existing rules for this port to avoid duplicates
+            # This handles cases where VMs were restarted and got different IPs
+            cleanup_cmd = (
+                f"iptables -t nat -S PREROUTING | grep -E 'dport {external_port}' | "
+                f"sed 's/-A /-D /' | while read rule; do iptables -t nat $rule 2>/dev/null; done"
+            )
+            try:
+                dind_container.exec_run(["sh", "-c", cleanup_cmd], privileged=True)
+            except Exception:
+                pass  # Ignore cleanup errors
+
             # DNAT rule: forward traffic from external_port to vm_ip:vnc_port
             # -d {dind_mgmt_ip} matches traffic destined for DinD's management IP
             dnat_rule = (
