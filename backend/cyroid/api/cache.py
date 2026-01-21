@@ -1072,9 +1072,12 @@ def get_cache_stats(current_user: CurrentUser):
 # Note: dl.bobpony.com was previously used but now returns 403 Forbidden.
 # The download_urls list supports fallback - first working URL is used.
 
-# Note: files.dog MSDN mirror has intermittent availability issues.
-# Microsoft official URLs are preferred where available.
-# For broken mirrors, dockur will download at runtime using its own fallback logic.
+# Windows ISO download URLs
+# Sources (in order of preference):
+# 1. Microsoft official (software-static.download.prss.microsoft.com, software-download.microsoft.com)
+# 2. Internet Archive (archive.org) - verified working copies
+# 3. files.dog MSDN mirror (intermittent availability)
+# 4. Buzzheavier (massgrave.dev mirror) - verified hashes
 DOCKUR_WINDOWS_VERSIONS = [
     # Desktop versions - Windows 11 (Microsoft official - stable)
     {
@@ -1090,43 +1093,47 @@ DOCKUR_WINDOWS_VERSIONS = [
     {
         "version": "11e",
         "name": "Windows 11 Enterprise",
-        "size_gb": 5.8,
+        "size_gb": 6.5,
         "category": "desktop",
-        # Note: No stable direct URL - dockur will download from Microsoft at runtime
-        "download_url": None,
-        "download_urls": [],
-        "note": "Pre-caching unavailable - dockur downloads from Microsoft at runtime",
+        # Buzzheavier mirror (massgrave.dev) - verified hash
+        "download_url": "https://buzzheavier.com/mwg5iewuuudq",
+        "download_urls": [
+            "https://buzzheavier.com/mwg5iewuuudq",
+        ],
     },
-    # Desktop versions - Windows 10 (mirrors may be unavailable)
+    # Desktop versions - Windows 10 (archive.org verified copies)
     {
         "version": "10",
         "name": "Windows 10 Pro",
-        "size_gb": 5.7,
+        "size_gb": 4.6,
         "category": "desktop",
-        # Note: files.dog mirror currently broken - dockur will download at runtime
-        "download_url": None,
-        "download_urls": [],
-        "note": "Pre-caching unavailable - dockur downloads from Microsoft at runtime",
+        # Archive.org - Consumer editions (includes Pro)
+        "download_url": "https://archive.org/download/windows-10-22h2-en-us/Windows%2010%2022H2%20x64%20en-us.iso",
+        "download_urls": [
+            "https://archive.org/download/windows-10-22h2-en-us/Windows%2010%2022H2%20x64%20en-us.iso",
+        ],
     },
     {
         "version": "10e",
         "name": "Windows 10 Enterprise",
-        "size_gb": 5.5,
+        "size_gb": 6.5,
         "category": "desktop",
-        # Note: files.dog mirror currently broken - dockur will download at runtime
-        "download_url": None,
-        "download_urls": [],
-        "note": "Pre-caching unavailable - dockur downloads from Microsoft at runtime",
+        # Archive.org - Business editions (includes Enterprise)
+        "download_url": "https://archive.org/download/Windows-10-22H2-August-2024-64-bit-DVD-English/en-us_windows_10_business_editions_version_22h2_updated_aug_2024_x64_dvd_633dcd07.iso",
+        "download_urls": [
+            "https://archive.org/download/Windows-10-22H2-August-2024-64-bit-DVD-English/en-us_windows_10_business_editions_version_22h2_updated_aug_2024_x64_dvd_633dcd07.iso",
+        ],
     },
     {
         "version": "10l",
         "name": "Windows 10 LTSC 2021",
         "size_gb": 4.6,
         "category": "desktop",
-        # Note: files.dog mirror currently broken - dockur will download at runtime
-        "download_url": None,
-        "download_urls": [],
-        "note": "Pre-caching unavailable - dockur downloads from Microsoft at runtime",
+        # Archive.org - Enterprise LTSC 2021
+        "download_url": "https://archive.org/download/en-us_windows_10_enterprise_ltsc_2021_x64_dvd_d289cf96/en-us_windows_10_enterprise_ltsc_2021_x64_dvd_d289cf96.iso",
+        "download_urls": [
+            "https://archive.org/download/en-us_windows_10_enterprise_ltsc_2021_x64_dvd_d289cf96/en-us_windows_10_enterprise_ltsc_2021_x64_dvd_d289cf96.iso",
+        ],
     },
     # Desktop versions - Windows 8.1
     {
@@ -1139,16 +1146,17 @@ DOCKUR_WINDOWS_VERSIONS = [
             "https://files.dog/MSDN/Windows%208.1%20with%20Update/en_windows_8.1_with_update_x64_dvd_6051480.iso",
         ],
     },
-    # Desktop versions - Legacy (mirrors may be unavailable)
+    # Desktop versions - Legacy (archive.org verified copies)
     {
         "version": "7",
         "name": "Windows 7 Ultimate SP1",
         "size_gb": 3.1,
         "category": "legacy",
-        # Note: files.dog and archive.org mirrors currently unreliable
-        "download_url": None,
-        "download_urls": [],
-        "note": "Pre-caching unavailable - dockur downloads at runtime with fallback",
+        # Archive.org - unmodified SP1 ISO
+        "download_url": "https://archive.org/download/windows-7-ultimate-sp1-x86-x64/Windows%207%20Ultimate%20SP1%20x64.iso",
+        "download_urls": [
+            "https://archive.org/download/windows-7-ultimate-sp1-x86-x64/Windows%207%20Ultimate%20SP1%20x64.iso",
+        ],
     },
     {
         "version": "vista",
@@ -1158,7 +1166,6 @@ DOCKUR_WINDOWS_VERSIONS = [
         "download_url": "https://files.dog/MSDN/Windows%20Vista/en_windows_vista_sp2_x64_dvd_342267.iso",
         "download_urls": [
             "https://files.dog/MSDN/Windows%20Vista/en_windows_vista_sp2_x64_dvd_342267.iso",
-            "https://archive.org/download/windows-vista-sp2-x64/en_windows_vista_sp2_x64_dvd_342267.iso",
         ],
     },
     {
@@ -1169,18 +1176,18 @@ DOCKUR_WINDOWS_VERSIONS = [
         "download_url": "https://files.dog/MSDN/Windows%20XP/en_windows_xp_professional_with_service_pack_3_x86_cd_x14-80428.iso",
         "download_urls": [
             "https://files.dog/MSDN/Windows%20XP/en_windows_xp_professional_with_service_pack_3_x86_cd_x14-80428.iso",
-            "https://archive.org/download/WinXPProSP3x86/en_windows_xp_professional_with_service_pack_3_x86_cd_x14-80428.iso",
         ],
     },
     {
         "version": "2k",
         "name": "Windows 2000 Professional SP4",
-        "size_gb": 0.3,
+        "size_gb": 0.4,
         "category": "legacy",
-        # Note: archive.org currently unreliable (503)
-        "download_url": None,
-        "download_urls": [],
-        "note": "Pre-caching unavailable - dockur downloads at runtime with fallback",
+        # Archive.org - SP4 Retail Full Install
+        "download_url": "https://archive.org/download/enwin2000prosp4_202001/EN_WIN2000_PRO_SP4.ISO",
+        "download_urls": [
+            "https://archive.org/download/enwin2000prosp4_202001/EN_WIN2000_PRO_SP4.ISO",
+        ],
     },
     # Server versions - Modern (Microsoft Evaluation Center - 180-day eval)
     {
@@ -1223,36 +1230,39 @@ DOCKUR_WINDOWS_VERSIONS = [
             "https://software-static.download.prss.microsoft.com/pr/download/Windows_Server_2016_Datacenter_EVAL_en-us_14393_refresh.ISO",
         ],
     },
-    # Server versions - Legacy (mirrors currently unreliable)
+    # Server versions - Legacy (Microsoft and archive.org)
     {
         "version": "2012",
-        "name": "Windows Server 2012 R2",
-        "size_gb": 4.3,
+        "name": "Windows Server 2012 R2 (Eval)",
+        "size_gb": 4.4,
         "category": "server",
-        # Note: files.dog mirror currently unreliable
-        "download_url": None,
-        "download_urls": [],
-        "note": "Pre-caching unavailable - dockur downloads at runtime with fallback",
+        # Microsoft Download Center - Evaluation ISO
+        "download_url": "http://download.microsoft.com/download/6/2/A/62A76ABB-9990-4EFC-A4FE-C7D698DAEB96/9600.17050.WINBLUE_REFRESH.140317-1640_X64FRE_SERVER_EVAL_EN-US-IR3_SSS_X64FREE_EN-US_DV9.ISO",
+        "download_urls": [
+            "http://download.microsoft.com/download/6/2/A/62A76ABB-9990-4EFC-A4FE-C7D698DAEB96/9600.17050.WINBLUE_REFRESH.140317-1640_X64FRE_SERVER_EVAL_EN-US-IR3_SSS_X64FREE_EN-US_DV9.ISO",
+        ],
     },
     {
         "version": "2008",
         "name": "Windows Server 2008 R2 SP1",
-        "size_gb": 3.0,
+        "size_gb": 2.9,
         "category": "server",
-        # Note: files.dog and archive.org mirrors currently unreliable
-        "download_url": None,
-        "download_urls": [],
-        "note": "Pre-caching unavailable - dockur downloads at runtime with fallback",
+        # Archive.org - Standard/Enterprise/Datacenter SP1
+        "download_url": "https://archive.org/download/english-windows-server-2008-r-2-standard-enterprise-datacenter-sp-1-x-64/English_windows_server_2008_r2_standard_enterprise_datacenter_sp1_x64.iso",
+        "download_urls": [
+            "https://archive.org/download/english-windows-server-2008-r-2-standard-enterprise-datacenter-sp-1-x-64/English_windows_server_2008_r2_standard_enterprise_datacenter_sp1_x64.iso",
+        ],
     },
     {
         "version": "2003",
-        "name": "Windows Server 2003 R2",
+        "name": "Windows Server 2003 R2 Enterprise",
         "size_gb": 0.6,
         "category": "legacy",
-        # Note: archive.org currently unreliable
-        "download_url": None,
-        "download_urls": [],
-        "note": "Pre-caching unavailable - dockur downloads at runtime with fallback",
+        # Archive.org - Enterprise x64 with SP2 (CD1 of 2)
+        "download_url": "https://archive.org/download/en_win_srv_2003_r2_enterprise_x64_with_sp2_vl/en_win_srv_2003_r2_enterprise_x64_with_sp2_vl_cd1_x13-48614.iso",
+        "download_urls": [
+            "https://archive.org/download/en_win_srv_2003_r2_enterprise_x64_with_sp2_vl/en_win_srv_2003_r2_enterprise_x64_with_sp2_vl_cd1_x13-48614.iso",
+        ],
     },
 ]
 
