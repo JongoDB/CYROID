@@ -471,6 +471,20 @@ def delete_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
     range_obj = db.query(Range).filter(Range.id == vm.range_id).first()
     use_dind = bool(range_obj and range_obj.dind_docker_url)
 
+    # Try to recover DinD info if missing (ensures VNC cleanup works)
+    if range_obj and not use_dind:
+        from cyroid.services.dind_service import get_dind_service
+        dind_service = get_dind_service()
+        dind_info = asyncio.run(dind_service.get_container_info(str(range_obj.id)))
+        if dind_info and dind_info.get("docker_url"):
+            logger.info(f"Auto-recovering DinD info for range {range_obj.id} during VM delete")
+            range_obj.dind_container_id = dind_info["container_id"]
+            range_obj.dind_container_name = dind_info["container_name"]
+            range_obj.dind_mgmt_ip = dind_info["mgmt_ip"]
+            range_obj.dind_docker_url = dind_info["docker_url"]
+            db.commit()
+            use_dind = True
+
     # Remove VNC port forwarding for DinD ranges
     if use_dind and range_obj.vnc_proxy_mappings:
         vm_id_str = str(vm_id)
@@ -559,6 +573,21 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
         # Get range to check for DinD mode
         range_obj = db.query(Range).filter(Range.id == vm.range_id).first()
         use_dind = bool(range_obj and range_obj.dind_docker_url)
+
+        # Try to recover DinD info if missing but container might exist
+        if range_obj and not use_dind:
+            from cyroid.services.dind_service import get_dind_service
+            dind_service = get_dind_service()
+            dind_info = asyncio.run(dind_service.get_container_info(str(range_obj.id)))
+            if dind_info and dind_info.get("docker_url"):
+                # Found a DinD container - recover the info
+                logger.info(f"Auto-recovering DinD info for range {range_obj.id} during VM start")
+                range_obj.dind_container_id = dind_info["container_id"]
+                range_obj.dind_container_name = dind_info["container_name"]
+                range_obj.dind_mgmt_ip = dind_info["mgmt_ip"]
+                range_obj.dind_docker_url = dind_info["docker_url"]
+                db.commit()
+                use_dind = True
 
         # Validate network is provisioned
         if not use_dind and not network.docker_network_id:

@@ -638,6 +638,81 @@ def sync_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
         )
 
 
+@router.post("/{range_id}/repair-dind")
+def repair_range_dind(range_id: UUID, db: DBSession, current_user: CurrentUser):
+    """Admin recovery tool for DinD configuration.
+
+    Note: This endpoint is rarely needed. DinD info is automatically recovered
+    when starting/deleting VMs if the container exists but database info is missing.
+
+    This endpoint is for manual recovery scenarios:
+    - When you need to manually verify/refresh DinD configuration
+    - For debugging purposes
+
+    Returns the recovered DinD info or an error if no container is found.
+    """
+    import asyncio
+
+    range_obj = db.query(Range).filter(Range.id == range_id).first()
+    if not range_obj:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Range not found",
+        )
+
+    # Check if DinD info is already populated
+    if range_obj.dind_container_id and range_obj.dind_docker_url:
+        return {
+            "status": "already_configured",
+            "message": "Range already has DinD configuration",
+            "dind_container_id": range_obj.dind_container_id,
+            "dind_docker_url": range_obj.dind_docker_url,
+        }
+
+    # Try to find a running DinD container for this range
+    dind = get_dind_service()
+    dind_info = asyncio.run(dind.get_container_info(str(range_id)))
+
+    if not dind_info:
+        return {
+            "status": "no_container",
+            "message": "No DinD container found for this range. You may need to deploy the range.",
+        }
+
+    # Recover DinD info
+    range_obj.dind_container_id = dind_info["container_id"]
+    range_obj.dind_container_name = dind_info["container_name"]
+    range_obj.dind_mgmt_ip = dind_info["mgmt_ip"]
+    range_obj.dind_docker_url = dind_info["docker_url"]
+
+    # Update status to RUNNING if container is running
+    if dind_info["status"] == "running":
+        range_obj.status = RangeStatus.RUNNING
+    elif dind_info["status"] == "exited":
+        range_obj.status = RangeStatus.STOPPED
+
+    db.commit()
+
+    # Log the recovery event
+    event_service = EventService(db)
+    event_service.log_event(
+        range_id=range_id,
+        event_type=EventType.RANGE_UPDATED,
+        message=f"Recovered DinD configuration for range {range_obj.name}",
+        user_id=current_user.id,
+    )
+
+    return {
+        "status": "recovered",
+        "message": "DinD configuration recovered successfully",
+        "dind_container_id": dind_info["container_id"],
+        "dind_container_name": dind_info["container_name"],
+        "dind_mgmt_ip": dind_info["mgmt_ip"],
+        "dind_docker_url": dind_info["docker_url"],
+        "container_status": dind_info["status"],
+    }
+
+
 @router.post("/{range_id}/start", response_model=RangeResponse)
 def start_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
     """Start all VMs and router in a stopped range.
@@ -715,12 +790,49 @@ def start_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
                         logger.warning(f"Failed to start VM {vm.hostname}: {e}")
 
         else:
-            # Range must have both dind_container_id and dind_docker_url to start
-            # If either is missing, the range needs to be redeployed
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Range is missing DinD configuration. Please redeploy the range.",
-            )
+            # Try to auto-recover DinD info if a container exists
+            dind_info = asyncio.run(dind.get_container_info(str(range_id)))
+            if dind_info:
+                # Found a DinD container - recover the info
+                logger.info(f"Auto-recovering DinD info for range {range_id}")
+                range_obj.dind_container_id = dind_info["container_id"]
+                range_obj.dind_container_name = dind_info["container_name"]
+                range_obj.dind_mgmt_ip = dind_info["mgmt_ip"]
+                range_obj.dind_docker_url = dind_info["docker_url"]
+                db.commit()
+
+                # Now try to start with the recovered info
+                if dind_info["status"] != "running":
+                    # Start the DinD container first
+                    start_info = asyncio.run(dind.start_range_container(str(range_id)))
+                    if start_info.get("docker_url"):
+                        range_obj.dind_docker_url = start_info["docker_url"]
+                        range_obj.dind_mgmt_ip = start_info.get("mgmt_ip")
+                        db.commit()
+
+                # Start VMs inside DinD
+                range_client = docker.get_range_client_sync(
+                    str(range_id),
+                    range_obj.dind_docker_url
+                )
+
+                vms = db.query(VM).filter(VM.range_id == range_id).all()
+                for vm in vms:
+                    if vm.container_id:
+                        try:
+                            container = range_client.containers.get(vm.container_id)
+                            container.start()
+                            vm.status = VMStatus.RUNNING
+                            db.commit()
+                            logger.info(f"Started VM {vm.hostname} inside recovered DinD")
+                        except Exception as e:
+                            logger.warning(f"Failed to start VM {vm.hostname}: {e}")
+            else:
+                # No DinD container found - truly needs redeployment
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Range is missing DinD configuration and no container found. Please redeploy the range.",
+                )
 
         range_obj.status = RangeStatus.RUNNING
         # Set lifecycle timestamp

@@ -310,7 +310,7 @@ class DinDService:
             mgmt_ip = networks.get(self.ranges_network, {}).get("IPAddress")
 
             return {
-                "container_name": container_name,
+                "container_name": container.name,
                 "container_id": container.id,
                 "status": container.status,
                 "mgmt_ip": mgmt_ip,
