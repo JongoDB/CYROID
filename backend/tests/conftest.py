@@ -73,6 +73,8 @@ def mock_docker_service(mock_dind_service):
     mock_service.create_network.return_value = "mock-network-id-12345"
     mock_service.create_container.return_value = "mock-container-id-12345"
     mock_service.create_windows_container.return_value = "mock-container-id-12345"
+    mock_service.create_macos_container.return_value = "mock-container-id-12345"
+    mock_service.create_linux_vm_container.return_value = "mock-container-id-12345"
     mock_service.start_container.return_value = True
     mock_service.stop_container.return_value = True
     mock_service.restart_container.return_value = True
@@ -81,6 +83,12 @@ def mock_docker_service(mock_dind_service):
     mock_service.cleanup_range.return_value = {"containers": 0, "networks": 0}
     mock_service.get_container_status.return_value = "running"
     mock_service.exec_command.return_value = (0, "")
+
+    # Cache prune method
+    mock_service.prune_images.return_value = {
+        "images_deleted": 0,
+        "space_reclaimed": 0
+    }
 
     # DinD-related methods
     mock_range_client = MagicMock()
