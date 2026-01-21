@@ -2024,6 +2024,34 @@ local-hostname: {name}
             if img.tags  # Only show tagged images
         ]
 
+    def prune_images(self) -> Dict[str, Any]:
+        """
+        Prune unused Docker images (dangling and unreferenced images).
+
+        Returns:
+            Dict with images_deleted count and space_reclaimed bytes
+        """
+        try:
+            # Prune dangling images first
+            result = self.client.images.prune(filters={"dangling": True})
+            images_deleted = len(result.get("ImagesDeleted", []) or [])
+            space_reclaimed = result.get("SpaceReclaimed", 0)
+
+            # Also prune unused images (not used by containers)
+            result2 = self.client.images.prune(filters={"dangling": False})
+            images_deleted += len(result2.get("ImagesDeleted", []) or [])
+            space_reclaimed += result2.get("SpaceReclaimed", 0)
+
+            logger.info(f"Pruned {images_deleted} images, reclaimed {space_reclaimed / (1024**3):.2f} GB")
+
+            return {
+                "images_deleted": images_deleted,
+                "space_reclaimed": space_reclaimed
+            }
+        except Exception as e:
+            logger.error(f"Failed to prune images: {e}")
+            raise
+
     def get_windows_iso_cache_status(self) -> Dict[str, Any]:
         """
         Check status of cached Windows ISOs.

@@ -448,6 +448,13 @@ export interface CacheStats {
   total_cache_size_gb: number
 }
 
+export interface PruneResult {
+  status: string
+  images_deleted: number
+  space_reclaimed_bytes: number
+  space_reclaimed_gb: number
+}
+
 export interface RecommendedImage {
   image?: string
   version?: string

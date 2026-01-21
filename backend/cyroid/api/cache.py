@@ -1059,6 +1059,35 @@ def get_cache_stats(current_user: CurrentUser):
     }
 
 
+@router.post("/prune", status_code=status.HTTP_200_OK)
+def prune_unused_images(current_user: CurrentUser):
+    """
+    Prune unused Docker images (dangling images and unreferenced images).
+
+    This removes:
+    - Dangling images (untagged layers)
+    - Images not used by any container
+
+    Returns the amount of space reclaimed.
+    """
+    require_role(current_user, ["admin"])
+    docker = get_docker_service()
+
+    try:
+        result = docker.prune_images()
+        return {
+            "status": "success",
+            "images_deleted": result.get("images_deleted", 0),
+            "space_reclaimed_bytes": result.get("space_reclaimed", 0),
+            "space_reclaimed_gb": round(result.get("space_reclaimed", 0) / (1024**3), 2)
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to prune images: {str(e)}"
+        )
+
+
 # Dockur/Windows supported versions
 # These are auto-downloaded by dockur/windows when the container starts
 # See: https://github.com/dockur/windows

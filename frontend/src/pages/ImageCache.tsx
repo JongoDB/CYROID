@@ -97,6 +97,10 @@ export default function ImageCache() {
     isLoading: boolean
   }>({ type: null, name: '', isLoading: false })
 
+  // Prune state
+  const [isPruning, setIsPruning] = useState(false)
+  const [isRefreshing, setIsRefreshing] = useState(false)
+
   const loadData = async () => {
     setLoading(true)
     setError(null)
@@ -121,6 +125,38 @@ export default function ImageCache() {
       setError(err.response?.data?.detail || 'Failed to load cache data')
     } finally {
       setLoading(false)
+    }
+  }
+
+  // Handler for refreshing all data
+  const handleRefreshAll = async () => {
+    setIsRefreshing(true)
+    try {
+      await loadData()
+      toast.success('Cache data refreshed')
+    } catch {
+      toast.error('Failed to refresh data')
+    } finally {
+      setIsRefreshing(false)
+    }
+  }
+
+  // Handler for pruning unused Docker images
+  const handlePruneImages = async () => {
+    setIsPruning(true)
+    try {
+      const result = await cacheApi.pruneImages()
+      const { images_deleted, space_reclaimed_gb } = result.data
+      if (images_deleted > 0) {
+        toast.success(`Pruned ${images_deleted} image${images_deleted !== 1 ? 's' : ''}, reclaimed ${space_reclaimed_gb} GB`)
+        await loadData() // Refresh to show updated state
+      } else {
+        toast.info('No unused images to prune')
+      }
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || 'Failed to prune images')
+    } finally {
+      setIsPruning(false)
     }
   }
 
@@ -1075,34 +1111,89 @@ export default function ImageCache() {
             </div>
           </div>
 
-          {isAdmin && (
+          {/* Quick Actions Section */}
           <div className="bg-white rounded-lg shadow p-6">
-            <h3 className="text-lg font-medium text-gray-900 mb-4">Quick Actions</h3>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-medium text-gray-900">Quick Actions</h3>
+              {/* Active Operations Indicator */}
+              {(Object.keys(dockerPullStatus).some(k => dockerPullStatus[k].status === 'pulling') ||
+                Object.keys(dockerBuildStatus).some(k => dockerBuildStatus[k].status === 'building') ||
+                Object.keys(downloadStatus).some(k => downloadStatus[k].status === 'downloading') ||
+                Object.keys(linuxDownloadStatus).some(k => linuxDownloadStatus[k].status === 'downloading') ||
+                Object.keys(customISODownloadStatus).some(k => customISODownloadStatus[k].status === 'downloading')) && (
+                <div className="flex items-center text-sm text-blue-600">
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  <span>
+                    {[
+                      Object.values(dockerPullStatus).filter(s => s.status === 'pulling').length > 0 &&
+                        `${Object.values(dockerPullStatus).filter(s => s.status === 'pulling').length} pulling`,
+                      Object.values(dockerBuildStatus).filter(s => s.status === 'building').length > 0 &&
+                        `${Object.values(dockerBuildStatus).filter(s => s.status === 'building').length} building`,
+                      Object.values(downloadStatus).filter(s => s.status === 'downloading').length > 0 &&
+                        `${Object.values(downloadStatus).filter(s => s.status === 'downloading').length} downloading`,
+                      Object.values(linuxDownloadStatus).filter(s => s.status === 'downloading').length > 0 &&
+                        `${Object.values(linuxDownloadStatus).filter(s => s.status === 'downloading').length} Linux ISOs`,
+                      Object.values(customISODownloadStatus).filter(s => s.status === 'downloading').length > 0 &&
+                        `${Object.values(customISODownloadStatus).filter(s => s.status === 'downloading').length} custom ISOs`,
+                    ].filter(Boolean).join(', ')}
+                  </span>
+                </div>
+              )}
+            </div>
             <div className="flex flex-wrap gap-3">
+              {/* Refresh All Button */}
               <button
-                onClick={() => setShowCacheModal(true)}
-                className="inline-flex items-center px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700"
+                onClick={handleRefreshAll}
+                disabled={isRefreshing}
+                className="inline-flex items-center px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 disabled:opacity-50"
               >
-                <Plus className="h-4 w-4 mr-2" />
-                Cache Docker Images
+                {isRefreshing ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                )}
+                Refresh All
               </button>
-              <button
-                onClick={() => setShowUploadModal('windows')}
-                className="inline-flex items-center px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700"
-              >
-                <Upload className="h-4 w-4 mr-2" />
-                Upload Windows ISO
-              </button>
-              <button
-                onClick={() => setShowUploadModal('custom')}
-                className="inline-flex items-center px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700"
-              >
-                <Upload className="h-4 w-4 mr-2" />
-                Upload Custom ISO
-              </button>
+              {isAdmin && (
+                <>
+                  <button
+                    onClick={() => setShowCacheModal(true)}
+                    className="inline-flex items-center px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700"
+                  >
+                    <Plus className="h-4 w-4 mr-2" />
+                    Cache Docker Images
+                  </button>
+                  <button
+                    onClick={() => setShowUploadModal('windows')}
+                    className="inline-flex items-center px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700"
+                  >
+                    <Upload className="h-4 w-4 mr-2" />
+                    Upload Windows ISO
+                  </button>
+                  <button
+                    onClick={() => setShowUploadModal('custom')}
+                    className="inline-flex items-center px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700"
+                  >
+                    <Upload className="h-4 w-4 mr-2" />
+                    Upload Custom ISO
+                  </button>
+                  <button
+                    onClick={handlePruneImages}
+                    disabled={isPruning}
+                    className="inline-flex items-center px-4 py-2 bg-orange-600 text-white rounded-md hover:bg-orange-700 disabled:opacity-50"
+                    title="Remove dangling and unused Docker images"
+                  >
+                    {isPruning ? (
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    ) : (
+                      <Trash2 className="h-4 w-4 mr-2" />
+                    )}
+                    Prune Unused Images
+                  </button>
+                </>
+              )}
             </div>
           </div>
-          )}
         </div>
       )}
 

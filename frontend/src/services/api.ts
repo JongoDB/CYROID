@@ -513,7 +513,7 @@ export const connectionsApi = {
 }
 
 // Cache API
-import type { CachedImage, ISOCacheStatus, GoldenImagesStatus, CacheStats, RecommendedImages, WindowsVersionsResponse, LinuxVersionsResponse, LinuxISODownloadResponse, LinuxISODownloadStatus, CustomISOList, CustomISODownloadResponse, CustomISOStatusResponse, ISOUploadResponse, WindowsISODownloadResponse, WindowsISODownloadStatus, AllSnapshotsStatus, SnapshotResponse } from '../types'
+import type { CachedImage, ISOCacheStatus, GoldenImagesStatus, CacheStats, PruneResult, RecommendedImages, WindowsVersionsResponse, LinuxVersionsResponse, LinuxISODownloadResponse, LinuxISODownloadStatus, CustomISOList, CustomISODownloadResponse, CustomISOStatusResponse, ISOUploadResponse, WindowsISODownloadResponse, WindowsISODownloadStatus, AllSnapshotsStatus, SnapshotResponse } from '../types'
 
 export interface DockerPullStatus {
   status: 'pulling' | 'completed' | 'failed' | 'cancelled' | 'not_found' | 'already_cached' | 'already_pulling'
@@ -681,6 +681,9 @@ export const cacheApi = {
   // Stats and info
   getStats: () => api.get<CacheStats>('/cache/stats'),
   getRecommendedImages: () => api.get<RecommendedImages>('/cache/recommended-images'),
+
+  // Maintenance
+  pruneImages: () => api.post<PruneResult>('/cache/prune'),
 }
 
 // Walkthrough API

@@ -234,7 +234,10 @@
       "WebFetch(domain:mirror.lstn.net)",
       "WebFetch(domain:massgrave.dev)",
       "WebFetch(domain:msdl.gravesoft.dev)",
-      "WebFetch(domain:mirror.mika.moe)"
+      "WebFetch(domain:mirror.mika.moe)",
+      "WebFetch(domain:www.microsoft.com)",
+      "WebFetch(domain:gist.github.com)",
+      "WebFetch(domain:archive.org)"
     ]
   },
   "enableAllProjectMcpServers": true,
