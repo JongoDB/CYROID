@@ -2615,6 +2615,76 @@ async def upload_windows_iso(
         )
 
 
+@router.post("/linux-isos/upload", status_code=status.HTTP_201_CREATED)
+async def upload_linux_iso(
+    file: UploadFile = File(...),
+    distro: str = Form(...),
+    current_user: AdminUser = None,
+):
+    """
+    Upload a Linux ISO file to the cache.
+    The distro should match a supported Linux distribution code (e.g., 'ubuntu', 'kali', 'debian').
+    Admin only.
+    """
+    import os
+    import aiofiles
+    from cyroid.utils.arch import HOST_ARCH
+
+    # Validate distro
+    valid_distros = [v["version"] for v in QEMU_LINUX_VERSIONS]
+    if distro not in valid_distros:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid distro '{distro}'. Valid distros: {', '.join(valid_distros)}"
+        )
+
+    # Validate file type
+    if not file.filename or not file.filename.lower().endswith('.iso'):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File must be an ISO file"
+        )
+
+    linux_iso_dir = get_linux_iso_dir()
+    os.makedirs(linux_iso_dir, exist_ok=True)
+
+    # Save with standardized name including architecture
+    arch_suffix = HOST_ARCH  # Use host architecture
+    filename = f"linux-{distro}-{arch_suffix}.iso"
+    filepath = os.path.join(linux_iso_dir, filename)
+
+    # Check if already exists
+    if os.path.exists(filepath):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"ISO for distro '{distro}' ({arch_suffix}) already exists. Delete it first to replace."
+        )
+
+    try:
+        async with aiofiles.open(filepath, 'wb') as out_file:
+            while content := await file.read(1024 * 1024):  # 1MB chunks
+                await out_file.write(content)
+
+        file_size = os.path.getsize(filepath)
+        return {
+            "status": "uploaded",
+            "distro": distro,
+            "arch": arch_suffix,
+            "filename": filename,
+            "path": filepath,
+            "size_bytes": file_size,
+            "size_gb": round(file_size / (1024**3), 2)
+        }
+    except Exception as e:
+        # Clean up on failure
+        if os.path.exists(filepath):
+            os.remove(filepath)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to upload ISO: {str(e)}"
+        )
+
+
 @router.post("/custom-isos/upload", status_code=status.HTTP_201_CREATED)
 async def upload_custom_iso(
     file: UploadFile = File(...),

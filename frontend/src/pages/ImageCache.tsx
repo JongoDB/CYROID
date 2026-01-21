@@ -70,7 +70,7 @@ export default function ImageCache() {
   const [customISOUrl, setCustomISOUrl] = useState('')
 
   // Upload modal state
-  const [showUploadModal, setShowUploadModal] = useState<'windows' | 'custom' | null>(null)
+  const [showUploadModal, setShowUploadModal] = useState<'windows' | 'linux' | 'custom' | null>(null)
   const [uploadFile, setUploadFile] = useState<File | null>(null)
   const [uploadVersion, setUploadVersion] = useState('')
   const [uploadName, setUploadName] = useState('')
@@ -935,6 +935,14 @@ export default function ImageCache() {
         }
         await cacheApi.uploadWindowsISO(uploadFile, uploadVersion)
         setSuccess(`Uploaded Windows ${uploadVersion} ISO`)
+      } else if (showUploadModal === 'linux') {
+        if (!uploadVersion) {
+          setError('Please select a Linux distribution')
+          setActionLoading(null)
+          return
+        }
+        await cacheApi.uploadLinuxISO(uploadFile, uploadVersion)
+        setSuccess(`Uploaded Linux ${uploadVersion} ISO`)
       } else {
         if (!uploadName) {
           setError('Please enter a name for the ISO')
@@ -1077,7 +1085,7 @@ export default function ImageCache() {
       {/* Overview Tab */}
       {activeTab === 'overview' && stats && (
         <div className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
             <div className="bg-white rounded-lg shadow p-6">
               <div className="flex items-center">
                 <Server className="h-8 w-8 text-blue-500" />
@@ -1097,6 +1105,32 @@ export default function ImageCache() {
                     {windowsVersions?.cached_count || 0}/{windowsVersions?.total_count || 17}
                   </p>
                   <p className="text-sm text-gray-500">{stats.windows_isos.total_size_gb} GB cached</p>
+                </div>
+              </div>
+            </div>
+            <div className="bg-white rounded-lg shadow p-6">
+              <div className="flex items-center">
+                <Terminal className="h-8 w-8 text-green-500" />
+                <div className="ml-4">
+                  <p className="text-sm font-medium text-gray-500">Linux ISOs</p>
+                  <p className="text-2xl font-semibold text-gray-900">
+                    {linuxVersions?.cached_count || 0}/{linuxVersions?.total_count || 0}
+                  </p>
+                  <p className="text-sm text-gray-500">
+                    {linuxVersions?.host_arch === 'arm64' ? 'ARM64' : 'x86_64'} host
+                  </p>
+                </div>
+              </div>
+            </div>
+            <div className="bg-white rounded-lg shadow p-6">
+              <div className="flex items-center">
+                <Download className="h-8 w-8 text-teal-500" />
+                <div className="ml-4">
+                  <p className="text-sm font-medium text-gray-500">Custom ISOs</p>
+                  <p className="text-2xl font-semibold text-gray-900">
+                    {customISOs?.total_count || 0}
+                  </p>
+                  <p className="text-sm text-gray-500">uploaded</p>
                 </div>
               </div>
             </div>
@@ -1169,6 +1203,13 @@ export default function ImageCache() {
                   >
                     <Upload className="h-4 w-4 mr-2" />
                     Upload Windows ISO
+                  </button>
+                  <button
+                    onClick={() => setShowUploadModal('linux')}
+                    className="inline-flex items-center px-4 py-2 bg-emerald-600 text-white rounded-md hover:bg-emerald-700"
+                  >
+                    <Upload className="h-4 w-4 mr-2" />
+                    Upload Linux ISO
                   </button>
                   <button
                     onClick={() => setShowUploadModal('custom')}
@@ -1875,7 +1916,7 @@ export default function ImageCache() {
             <div className="relative bg-white rounded-lg shadow-xl max-w-lg w-full">
               <div className="px-6 py-4 border-b border-gray-200">
                 <h3 className="text-lg font-medium text-gray-900">
-                  Upload {showUploadModal === 'windows' ? 'Windows' : 'Custom'} ISO
+                  Upload {showUploadModal === 'windows' ? 'Windows' : showUploadModal === 'linux' ? 'Linux' : 'Custom'} ISO
                 </h3>
               </div>
               <div className="px-6 py-4 space-y-4">
@@ -1904,6 +1945,37 @@ export default function ImageCache() {
                         ))}
                       </optgroup>
                     </select>
+                  </div>
+                )}
+
+                {showUploadModal === 'linux' && linuxVersions && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Linux Distribution</label>
+                    <select
+                      value={uploadVersion}
+                      onChange={(e) => setUploadVersion(e.target.value)}
+                      className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                    >
+                      <option value="">Select distribution...</option>
+                      <optgroup label="Desktop">
+                        {linuxVersions.desktop.filter(v => !v.cached).map(v => (
+                          <option key={v.version} value={v.version}>{v.name}</option>
+                        ))}
+                      </optgroup>
+                      <optgroup label="Security">
+                        {linuxVersions.security.filter(v => !v.cached).map(v => (
+                          <option key={v.version} value={v.version}>{v.name}</option>
+                        ))}
+                      </optgroup>
+                      <optgroup label="Server">
+                        {linuxVersions.server.filter(v => !v.cached).map(v => (
+                          <option key={v.version} value={v.version}>{v.name}</option>
+                        ))}
+                      </optgroup>
+                    </select>
+                    <p className="mt-1 text-xs text-gray-500">
+                      Select a distribution to associate with the uploaded ISO
+                    </p>
                   </div>
                 )}
 
@@ -1971,7 +2043,7 @@ export default function ImageCache() {
                 </button>
                 <button
                   onClick={handleUploadISO}
-                  disabled={actionLoading === 'upload' || !uploadFile || (showUploadModal === 'windows' ? !uploadVersion : !uploadName)}
+                  disabled={actionLoading === 'upload' || !uploadFile || (showUploadModal === 'windows' || showUploadModal === 'linux' ? !uploadVersion : !uploadName)}
                   className="px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-md hover:bg-primary-700 disabled:opacity-50"
                 >
                   {actionLoading === 'upload' ? (
