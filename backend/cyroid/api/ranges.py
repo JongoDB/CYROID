@@ -744,9 +744,6 @@ def get_vnc_status(range_id: UUID, db: DBSession, current_user: CurrentUser):
             detail="Range not found",
         )
 
-    settings = get_settings()
-    base_url = settings.EXTERNAL_URL or f"http://localhost"
-
     # Get VNC mappings from database
     vnc_mappings = range_obj.vnc_proxy_mappings or {}
 
@@ -784,7 +781,7 @@ def get_vnc_status(range_id: UUID, db: DBSession, current_user: CurrentUser):
             status_info["proxy_port"] = mapping.get("proxy_port")
             status_info["proxy_host"] = mapping.get("proxy_host")
             status_info["original_port"] = mapping.get("original_port")
-            status_info["vnc_url"] = f"{base_url}/vnc/{vm_id_str}"
+            status_info["vnc_url"] = f"/vnc/{vm_id_str}"
 
             # Check if route exists in Traefik file
             if traefik_routes_content and vm_id_str[:12] not in traefik_routes_content:
