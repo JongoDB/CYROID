@@ -160,9 +160,15 @@ def compute_emulation_status(
         vm_type = VMType(snapshot.vm_type) if snapshot.vm_type else None
         os_type = OSType(snapshot.os_type) if snapshot.os_type else None
 
-    # Windows VMs are always x86
+    # Windows VMs - now support ARM64 with dockur/windows-arm
+    # When vm.arch is NULL (host default), docker_service selects the native image:
+    # - ARM host → dockur/windows-arm (native)
+    # - x86 host → dockur/windows (native)
+    # So no emulation warning needed when vm.arch is NULL
     if vm_type == VMType.WINDOWS_VM or os_type == OSType.WINDOWS:
-        return True, "Windows VMs run via x86 emulation on ARM hosts. Performance may be reduced."
+        # If we got here, vm.arch is NULL and we're on ARM host
+        # docker_service will use dockur/windows-arm → native, no emulation
+        return False, None
 
     # Linux VMs - check if distro has ARM64 support
     if vm_type == VMType.LINUX_VM:
@@ -839,6 +845,8 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
                         keyboard=vm.keyboard,
                         region=vm.region,
                         manual_install=vm.manual_install,
+                        # Architecture selection
+                        arch=vm.arch,
                     )
             elif os_type == OSType.CUSTOM:
                 # Custom ISO VMs use qemux/qemu with the custom ISO

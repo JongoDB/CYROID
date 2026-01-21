@@ -712,14 +712,15 @@ class DockerService:
         region: Optional[str] = None,
         manual_install: bool = False,
         oem_script_path: Optional[str] = None,
+        # Target architecture (x86_64 or arm64, defaults to host)
+        arch: Optional[str] = None,
     ) -> str:
         """
-        Create a Windows VM container using dockur/windows.
+        Create a Windows VM container using dockur/windows or dockur/windows-arm.
 
-        Supported Windows versions (dockur/windows auto-downloads):
-        - Desktop: 11, 11l (LTSC), 11e (Enterprise), 10, 10l, 10e, 8e
-        - Server: 2025, 2022, 2019, 2016, 2012, 2008
-        - Legacy: 7u, vu, xp, 2k, 2003
+        Supported Windows versions:
+        - x86_64 (dockur/windows): 11, 11l, 11e, 10, 10l, 10e, 8e, 2025, 2022, 2019, 2016, 2012, 2008, 7u, vu, xp, 2k, 2003
+        - arm64 (dockur/windows-arm): 11, 11pro, 11ent, 11ltsc, 10, 10pro, 10ent, 10ltsc
 
         Args:
             name: Container name
@@ -759,7 +760,15 @@ class DockerService:
         from cyroid.config import get_settings
         settings = get_settings()
 
-        image = "dockurr/windows"
+        # Determine target architecture (use specified arch or default to host)
+        target_arch = arch or HOST_ARCH
+
+        # Select image based on target architecture
+        if target_arch == "arm64":
+            image = "dockurr/windows-arm"
+        else:
+            image = "dockurr/windows"
+
         self._ensure_image(image)
 
         try:
@@ -836,18 +845,20 @@ class DockerService:
         # Check if KVM is available for hardware acceleration
         kvm_available = os.path.exists("/dev/kvm")
 
-        # Check if emulation is required (x86 VM on ARM host)
-        emulated = IS_ARM  # Windows VMs are always x86
+        # Check if emulation is required (target arch differs from host arch)
+        emulated = requires_emulation(target_arch)
 
         if kvm_available and not emulated:
             environment["KVM"] = "Y"
-            logger.info("KVM acceleration enabled for Windows VM")
+            logger.info(f"KVM acceleration enabled for Windows VM (native {target_arch})")
         else:
             environment["KVM"] = "N"
             if emulated:
+                arch_display = "ARM64" if target_arch == "arm64" else "x86_64"
+                host_display = "ARM64" if IS_ARM else "x86_64"
                 logger.warning(
-                    f"Windows VM '{name}' will run via x86 emulation on ARM host. "
-                    "Expect significantly slower performance (10-20x)."
+                    f"Windows VM '{name}' targets {arch_display} but host is {host_display}. "
+                    "Running via emulation. Expect significantly slower performance (10-20x)."
                 )
             else:
                 logger.warning("KVM not available, Windows VM will run in software emulation mode")
