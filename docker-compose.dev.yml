@@ -1,0 +1,75 @@
+# docker-compose.dev.yml
+#
+# Development configuration for CYROID
+#
+# This file provides local builds and hot-reload for development.
+#
+# Usage:
+#   docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
+#   docker-compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+#
+# Or copy to docker-compose.override.yml for automatic loading:
+#   cp docker-compose.dev.yml docker-compose.override.yml
+#   docker-compose up
+#
+services:
+  # Use local MinIO image (run scripts/retag-infrastructure.sh first)
+  minio:
+    image: cyroid-storage:latest
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: cyroid-api:latest
+    environment:
+      # Use local DinD image for development
+      DIND_IMAGE: ${DIND_IMAGE:-cyroid-dind:latest}
+    volumes:
+      # Mount source code for hot-reload
+      - ./backend:/app
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${CYROID_DATA_DIR:-/data/cyroid}/iso-cache:${CYROID_DATA_DIR:-/data/cyroid}/iso-cache
+      - ${CYROID_DATA_DIR:-/data/cyroid}/template-storage:${CYROID_DATA_DIR:-/data/cyroid}/template-storage
+      - ${CYROID_DATA_DIR:-/data/cyroid}/vm-storage:${CYROID_DATA_DIR:-/data/cyroid}/vm-storage
+      - ${CYROID_DATA_DIR:-/data/cyroid}/shared:${CYROID_DATA_DIR:-/data/cyroid}/shared
+      - ./data/seed-templates:/data/seed-templates:ro
+      - ./data/seed-blueprints:/data/seed-blueprints:ro
+      - ./data/scenarios:/data/scenarios
+      - ./data/images:/data/images
+      - ./traefik/dynamic:/app/traefik/dynamic
+    # Enable hot-reload in development
+    command: bash -c "alembic upgrade head && uvicorn cyroid.main:app --host 0.0.0.0 --port 8000 --reload"
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: cyroid-worker:latest
+    environment:
+      # Use local DinD image for development
+      DIND_IMAGE: ${DIND_IMAGE:-cyroid-dind:latest}
+    volumes:
+      # Mount source code for hot-reload
+      - ./backend:/app
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${CYROID_DATA_DIR:-/data/cyroid}/iso-cache:${CYROID_DATA_DIR:-/data/cyroid}/iso-cache
+      - ${CYROID_DATA_DIR:-/data/cyroid}/template-storage:${CYROID_DATA_DIR:-/data/cyroid}/template-storage
+      - ${CYROID_DATA_DIR:-/data/cyroid}/vm-storage:${CYROID_DATA_DIR:-/data/cyroid}/vm-storage
+      - ${CYROID_DATA_DIR:-/data/cyroid}/shared:${CYROID_DATA_DIR:-/data/cyroid}/shared
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: cyroid-frontend:latest
+    volumes:
+      # Mount source code for hot-reload
+      - ./frontend:/app
+      - frontend_node_modules:/app/node_modules
+    environment:
+      - CHOKIDAR_USEPOLLING=true
+
+  # Use local Traefik image (run scripts/retag-infrastructure.sh first)
+  traefik:
+    image: cyroid-proxy:latest

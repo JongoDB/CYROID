@@ -2888,10 +2888,13 @@ RECOMMENDED_DOCKER_IMAGES = {
         {"name": "Elasticsearch 8", "image": "elasticsearch:8.11.0", "description": "Elasticsearch - Distributed search and analytics engine", "category": "services"},
     ],
     "cyroid": [
-        # CYROID platform infrastructure images
-        {"name": "CYROID Proxy", "image": "cyroid-proxy:latest", "description": "Traefik reverse proxy for routing and SSL termination", "category": "cyroid"},
-        {"name": "CYROID DinD", "image": "cyroid-dind:latest", "description": "Docker-in-Docker for range network isolation", "category": "cyroid"},
-        {"name": "CYROID Storage", "image": "cyroid-storage:latest", "description": "MinIO S3-compatible object storage for artifacts", "category": "cyroid"},
+        # CYROID platform infrastructure images (from GitHub Container Registry)
+        {"name": "CYROID Proxy", "image": "ghcr.io/jongodb/cyroid-proxy:latest", "description": "Traefik reverse proxy for routing and SSL termination", "category": "cyroid"},
+        {"name": "CYROID DinD", "image": "ghcr.io/jongodb/cyroid-dind:latest", "description": "Docker-in-Docker for range network isolation", "category": "cyroid"},
+        {"name": "CYROID Storage", "image": "ghcr.io/jongodb/cyroid-storage:latest", "description": "MinIO S3-compatible object storage for artifacts", "category": "cyroid"},
+        {"name": "CYROID API", "image": "ghcr.io/jongodb/cyroid-api:latest", "description": "FastAPI backend for range orchestration", "category": "cyroid"},
+        {"name": "CYROID Frontend", "image": "ghcr.io/jongodb/cyroid-frontend:latest", "description": "React web interface", "category": "cyroid"},
+        {"name": "CYROID Worker", "image": "ghcr.io/jongodb/cyroid-worker:latest", "description": "Dramatiq task worker for async operations", "category": "cyroid"},
     ],
 }
 

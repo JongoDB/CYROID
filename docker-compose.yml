@@ -1,6 +1,12 @@
 # docker-compose.yml
 #
-# CYROID Docker Compose Configuration
+# CYROID Docker Compose Configuration (Production)
+#
+# For development with local builds and hot-reload, use with docker-compose.override.yml:
+#   docker-compose up
+#
+# For production with pre-built GHCR images:
+#   docker-compose -f docker-compose.yml up
 #
 # Networks:
 #   - cyroid-mgmt (172.30.0.0/24): CYROID infrastructure services
@@ -41,7 +47,7 @@ services:
       retries: 5
 
   minio:
-    image: cyroid-storage:latest
+    image: ghcr.io/jongodb/cyroid-storage:latest
     environment:
       MINIO_ROOT_USER: cyroid
       MINIO_ROOT_PASSWORD: cyroid123
@@ -61,9 +67,7 @@ services:
       retries: 5
 
   api:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    image: ghcr.io/jongodb/cyroid-api:latest
     environment:
       DATABASE_URL: postgresql://cyroid:cyroid@172.30.0.11:5432/cyroid
       REDIS_URL: redis://172.30.0.12:6379/0
@@ -75,7 +79,7 @@ services:
       VM_STORAGE_DIR: ${CYROID_DATA_DIR:-/data/cyroid}/vm-storage
       GLOBAL_SHARED_DIR: ${CYROID_DATA_DIR:-/data/cyroid}/shared
       # DinD Configuration (all ranges run in isolated DinD containers)
-      DIND_IMAGE: ${DIND_IMAGE:-cyroid-dind:latest}
+      DIND_IMAGE: ${DIND_IMAGE:-ghcr.io/jongodb/cyroid-dind:latest}
       DIND_STARTUP_TIMEOUT: ${DIND_STARTUP_TIMEOUT:-60}
       DIND_DOCKER_PORT: ${DIND_DOCKER_PORT:-2375}
       CYROID_MGMT_NETWORK: cyroid-mgmt
@@ -85,7 +89,6 @@ services:
       # Traefik dynamic config directory (shared with Traefik for DinD VNC routing)
       TRAEFIK_VNC_ROUTES_DIR: /app/traefik/dynamic
     volumes:
-      - ./backend:/app
       # Mount Docker socket to manage DinD containers on host
       - /var/run/docker.sock:/var/run/docker.sock
       # Use bind mounts so spawned VM containers can access these paths
@@ -114,7 +117,7 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    command: bash -c "alembic upgrade head && uvicorn cyroid.main:app --host 0.0.0.0 --port 8000 --reload"
+    command: bash -c "alembic upgrade head && uvicorn cyroid.main:app --host 0.0.0.0 --port 8000"
     labels:
       - "traefik.enable=true"
       # API service
@@ -139,9 +142,7 @@ services:
       - "traefik.http.routers.ws-secure.service=api"
 
   worker:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    image: ghcr.io/jongodb/cyroid-worker:latest
     environment:
       DATABASE_URL: postgresql://cyroid:cyroid@172.30.0.11:5432/cyroid
       REDIS_URL: redis://172.30.0.12:6379/0
@@ -153,7 +154,7 @@ services:
       VM_STORAGE_DIR: ${CYROID_DATA_DIR:-/data/cyroid}/vm-storage
       GLOBAL_SHARED_DIR: ${CYROID_DATA_DIR:-/data/cyroid}/shared
       # DinD Configuration (all ranges run in isolated DinD containers)
-      DIND_IMAGE: ${DIND_IMAGE:-cyroid-dind:latest}
+      DIND_IMAGE: ${DIND_IMAGE:-ghcr.io/jongodb/cyroid-dind:latest}
       DIND_STARTUP_TIMEOUT: ${DIND_STARTUP_TIMEOUT:-60}
       DIND_DOCKER_PORT: ${DIND_DOCKER_PORT:-2375}
       CYROID_MGMT_NETWORK: cyroid-mgmt
@@ -161,7 +162,6 @@ services:
       CYROID_RANGES_NETWORK: cyroid-ranges
       CYROID_RANGES_SUBNET: 172.30.1.0/24
     volumes:
-      - ./backend:/app
       # Mount Docker socket to manage DinD containers
       - /var/run/docker.sock:/var/run/docker.sock
       # Use bind mounts so spawned VM containers can access these paths
@@ -181,19 +181,12 @@ services:
     command: dramatiq cyroid.tasks --processes 2 --threads 4
 
   frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    volumes:
-      - ./frontend:/app
-      - frontend_node_modules:/app/node_modules
+    image: ghcr.io/jongodb/cyroid-frontend:latest
     expose:
       - "5173"
     networks:
       cyroid-mgmt:
         ipv4_address: 172.30.0.20
-    environment:
-      - CHOKIDAR_USEPOLLING=true
     labels:
       - "traefik.enable=true"
       # Frontend service
@@ -211,7 +204,7 @@ services:
       - "traefik.http.routers.frontend-secure.service=frontend"
 
   traefik:
-    image: cyroid-proxy:latest
+    image: ghcr.io/jongodb/cyroid-proxy:latest
     # Use static config file instead of command line args
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
