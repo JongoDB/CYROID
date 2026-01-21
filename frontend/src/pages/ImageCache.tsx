@@ -4,7 +4,6 @@ import { cacheApi, DockerPullStatus, DockerBuildStatus, BuildableImage } from '.
 import { useAuthStore } from '../stores/authStore'
 import type {
   CachedImage,
-  AllSnapshotsStatus,
   CacheStats,
   RecommendedImages,
   RecommendedImage,
@@ -24,7 +23,6 @@ import {
   Plus,
   Server,
   Monitor,
-  Database,
   AlertCircle,
   CheckCircle,
   Loader2,
@@ -37,13 +35,14 @@ import {
   Terminal,
   Hammer,
   FolderEdit,
+  Database,
 } from 'lucide-react'
 import clsx from 'clsx'
 import { ConfirmDialog } from '../components/common/ConfirmDialog'
 import { toast } from '../stores/toastStore'
 import { FileBrowser } from '../components/files/FileBrowser'
 
-type TabType = 'overview' | 'docker' | 'build' | 'files' | 'isos' | 'linux-isos' | 'custom-isos' | 'snapshots'
+type TabType = 'overview' | 'docker' | 'build' | 'files' | 'isos' | 'linux-isos' | 'custom-isos'
 
 export default function ImageCache() {
   const { user } = useAuthStore()
@@ -51,7 +50,6 @@ export default function ImageCache() {
   const [activeTab, setActiveTab] = useState<TabType>('overview')
   const [stats, setStats] = useState<CacheStats | null>(null)
   const [images, setImages] = useState<CachedImage[]>([])
-  const [allSnapshots, setAllSnapshots] = useState<AllSnapshotsStatus | null>(null)
   const [recommended, setRecommended] = useState<RecommendedImages | null>(null)
   const [windowsVersions, setWindowsVersions] = useState<WindowsVersionsResponse | null>(null)
   const [linuxVersions, setLinuxVersions] = useState<LinuxVersionsResponse | null>(null)
@@ -92,7 +90,7 @@ export default function ImageCache() {
 
   // Delete confirmation state
   const [deleteConfirm, setDeleteConfirm] = useState<{
-    type: 'docker' | 'snapshot' | 'windows-iso' | 'linux-iso' | 'custom-iso' | null
+    type: 'docker' | 'windows-iso' | 'linux-iso' | 'custom-iso' | null
     name: string
     id?: string
     arch?: string  // For linux-iso architecture-specific delete
@@ -103,10 +101,9 @@ export default function ImageCache() {
     setLoading(true)
     setError(null)
     try {
-      const [statsRes, imagesRes, snapshotsRes, recommendedRes, windowsRes, linuxRes, customISOsRes, buildableRes] = await Promise.all([
+      const [statsRes, imagesRes, recommendedRes, windowsRes, linuxRes, customISOsRes, buildableRes] = await Promise.all([
         cacheApi.getStats(),
         cacheApi.listImages(),
-        cacheApi.getAllSnapshots(),
         cacheApi.getRecommendedImages(),
         cacheApi.getWindowsVersions(),
         cacheApi.getLinuxVersions(),
@@ -115,7 +112,6 @@ export default function ImageCache() {
       ])
       setStats(statsRes.data)
       setImages(imagesRes.data)
-      setAllSnapshots(snapshotsRes.data)
       setRecommended(recommendedRes.data)
       setWindowsVersions(windowsRes.data)
       setLinuxVersions(linuxRes.data)
@@ -589,10 +585,6 @@ export default function ImageCache() {
     setDeleteConfirm({ type: 'docker', name: tag, id: imageId, isLoading: false })
   }
 
-  const handleDeleteSnapshot = (snapshotType: 'windows' | 'docker', name: string) => {
-    setDeleteConfirm({ type: 'snapshot', name: `${snapshotType}:${name}`, isLoading: false })
-  }
-
   const handleDownloadCustomISO = async () => {
     if (!customISOName || !customISOUrl) return
 
@@ -809,12 +801,6 @@ export default function ImageCache() {
             toast.success(`Removed ${deleteConfirm.name}`)
           }
           break
-        case 'snapshot': {
-          const [snapshotType, name] = deleteConfirm.name.split(':')
-          await cacheApi.deleteSnapshot(snapshotType as 'windows' | 'docker', name)
-          toast.success(`Deleted snapshot: ${name}`)
-          break
-        }
         case 'custom-iso':
           if (deleteConfirm.id) {
             await cacheApi.deleteCustomISO(deleteConfirm.id)
@@ -942,7 +928,6 @@ export default function ImageCache() {
     { id: 'isos' as const, name: 'Windows ISOs', icon: Monitor },
     { id: 'linux-isos' as const, name: 'Linux ISOs', icon: Terminal },
     { id: 'custom-isos' as const, name: 'Custom ISOs', icon: Download },
-    { id: 'snapshots' as const, name: 'Snapshots', icon: Database },
   ]
 
   // Categorize cached Docker images
@@ -1076,20 +1061,6 @@ export default function ImageCache() {
                     {windowsVersions?.cached_count || 0}/{windowsVersions?.total_count || 17}
                   </p>
                   <p className="text-sm text-gray-500">{stats.windows_isos.total_size_gb} GB cached</p>
-                </div>
-              </div>
-            </div>
-            <div className="bg-white rounded-lg shadow p-6">
-              <div className="flex items-center">
-                <Database className="h-8 w-8 text-green-500" />
-                <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-500">Snapshots</p>
-                  <p className="text-2xl font-semibold text-gray-900">
-                    {(allSnapshots?.total_windows || 0) + (allSnapshots?.total_docker || 0)}
-                  </p>
-                  <p className="text-sm text-gray-500">
-                    {allSnapshots?.total_windows || 0} Windows, {allSnapshots?.total_docker || 0} Docker
-                  </p>
                 </div>
               </div>
             </div>
@@ -1805,164 +1776,6 @@ export default function ImageCache() {
         </div>
       )}
 
-      {/* Snapshots Tab - Both Windows Golden Images and Docker Snapshots */}
-      {activeTab === 'snapshots' && allSnapshots && (
-        <div className="space-y-6">
-          <div className="flex justify-between items-center">
-            <div>
-              <h3 className="text-lg font-medium text-gray-900">VM Snapshots</h3>
-              <p className="text-sm text-gray-500">
-                Pre-configured VM templates for instant deployment
-              </p>
-            </div>
-          </div>
-
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-            <div className="flex">
-              <Info className="h-5 w-5 text-blue-500 mt-0.5 mr-3" />
-              <div>
-                <h4 className="text-sm font-medium text-blue-800">Creating Snapshots</h4>
-                <ol className="mt-2 text-sm text-blue-700 list-decimal list-inside space-y-1">
-                  <li>Deploy and configure a VM (Windows or Linux)</li>
-                  <li>Install required software and configure settings</li>
-                  <li>From the VM details page, use "Create Snapshot" action</li>
-                  <li>New VMs can be instantly cloned from the snapshot</li>
-                </ol>
-              </div>
-            </div>
-          </div>
-
-          {/* Windows Golden Images Section */}
-          <div className="bg-white shadow rounded-lg overflow-hidden">
-            <div className="px-6 py-4 border-b border-gray-200 bg-purple-50">
-              <h4 className="text-sm font-medium text-purple-800 flex items-center">
-                <Monitor className="h-4 w-4 mr-2" />
-                Windows Golden Images ({allSnapshots.total_windows})
-              </h4>
-              <p className="text-xs text-purple-600 mt-1">Full disk snapshots for Windows VMs</p>
-            </div>
-            {allSnapshots.windows_golden_images.length > 0 ? (
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Size</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Path</th>
-                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {allSnapshots.windows_golden_images.map((golden) => (
-                    <tr key={golden.name}>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                        {golden.name}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                        {golden.size_gb} GB
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 font-mono text-xs">
-                        {golden.path}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-right">
-                        {isAdmin && (
-                          <button
-                            onClick={() => handleDeleteSnapshot('windows', golden.name)}
-                            disabled={actionLoading === `snapshot-windows-${golden.name}`}
-                            className="text-red-600 hover:text-red-900 disabled:opacity-50"
-                            title="Delete snapshot"
-                          >
-                            {actionLoading === `snapshot-windows-${golden.name}` ? (
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                            ) : (
-                              <Trash2 className="h-4 w-4" />
-                            )}
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            ) : (
-              <div className="px-6 py-8 text-center text-gray-500">
-                <Monitor className="h-10 w-10 text-gray-300 mx-auto mb-2" />
-                No Windows golden images yet. Create one from a running Windows VM.
-              </div>
-            )}
-          </div>
-
-          {/* Docker Container Snapshots Section */}
-          <div className="bg-white shadow rounded-lg overflow-hidden">
-            <div className="px-6 py-4 border-b border-gray-200 bg-green-50">
-              <h4 className="text-sm font-medium text-green-800 flex items-center">
-                <Server className="h-4 w-4 mr-2" />
-                Docker Snapshots ({allSnapshots.total_docker})
-              </h4>
-              <p className="text-xs text-green-600 mt-1">Container commits for Linux VMs and custom containers</p>
-            </div>
-            {allSnapshots.docker_snapshots.length > 0 ? (
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Image ID</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Size</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Created</th>
-                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {allSnapshots.docker_snapshots.map((snapshot) => {
-                    // Extract name from tags (e.g., "cyroid/snapshot/my-snapshot:latest" -> "my-snapshot")
-                    const fullTag = snapshot.tags[0] || snapshot.short_id
-                    const snapshotName = fullTag.includes('cyroid/snapshot/')
-                      ? fullTag.replace('cyroid/snapshot/', '').replace(':latest', '')
-                      : fullTag
-                    return (
-                      <tr key={snapshot.id}>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                          {snapshotName}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 font-mono">
-                          {snapshot.short_id}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                          {snapshot.size_gb} GB
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                          {snapshot.created ? new Date(snapshot.created).toLocaleDateString() : 'Unknown'}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-right">
-                          {isAdmin && (
-                            <button
-                              onClick={() => handleDeleteSnapshot('docker', snapshotName)}
-                              disabled={actionLoading === `snapshot-docker-${snapshotName}`}
-                              className="text-red-600 hover:text-red-900 disabled:opacity-50"
-                              title="Delete snapshot"
-                            >
-                              {actionLoading === `snapshot-docker-${snapshotName}` ? (
-                                <Loader2 className="h-4 w-4 animate-spin" />
-                              ) : (
-                                <Trash2 className="h-4 w-4" />
-                              )}
-                            </button>
-                          )}
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            ) : (
-              <div className="px-6 py-8 text-center text-gray-500">
-                <Server className="h-10 w-10 text-gray-300 mx-auto mb-2" />
-                No Docker snapshots yet. Create one from a running Linux VM or container.
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
       {/* Upload ISO Modal */}
       {showUploadModal && (
         <div className="fixed inset-0 z-50 overflow-y-auto">
@@ -2231,7 +2044,6 @@ export default function ImageCache() {
         isOpen={deleteConfirm.type !== null}
         title={
           deleteConfirm.type === 'docker' ? 'Remove Docker Image' :
-          deleteConfirm.type === 'snapshot' ? 'Delete Snapshot' :
           deleteConfirm.type === 'windows-iso' ? 'Delete Windows ISO' :
           deleteConfirm.type === 'linux-iso' ? 'Delete Linux ISO' :
           deleteConfirm.type === 'custom-iso' ? 'Delete Custom ISO' : 'Delete'
