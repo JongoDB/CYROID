@@ -976,6 +976,148 @@ class DockerService:
             logger.error(f"Failed to create Windows container {name}: {e}")
             raise
 
+    def create_macos_container(
+        self,
+        name: str,
+        network_id: str,
+        ip_address: str,
+        cpu_limit: int = 4,
+        memory_limit_mb: int = 8192,
+        disk_size_gb: int = 64,
+        macos_version: str = "sequoia",
+        labels: Optional[Dict[str, str]] = None,
+        storage_path: Optional[str] = None,
+        display_type: str = "desktop",
+    ) -> str:
+        """
+        Create a macOS VM container using dockur/macos.
+
+        Supported macOS versions:
+        - sequoia (macOS 15 - latest)
+        - sonoma (macOS 14)
+        - ventura (macOS 13)
+        - monterey (macOS 12)
+        - big-sur (macOS 11)
+        - catalina (macOS 10.15)
+        - mojave (macOS 10.14)
+        - high-sierra (macOS 10.13)
+
+        Note: macOS VMs require KVM and only work on x86_64 hosts.
+        ARM (Apple Silicon) macOS is not supported via dockur/macos.
+
+        Args:
+            name: Container name
+            network_id: Network to attach to
+            ip_address: Static IP address
+            cpu_limit: CPU core limit (minimum 4 recommended)
+            memory_limit_mb: Memory limit in MB (minimum 8192 recommended)
+            disk_size_gb: Virtual disk size in GB
+            macos_version: macOS version code
+            labels: Container labels
+            storage_path: Path to persistent storage for macOS installation
+            display_type: Display mode - 'desktop' (VNC/web console)
+
+        Returns:
+            Container ID
+        """
+        import os
+        from cyroid.config import get_settings
+        settings = get_settings()
+
+        # macOS via dockur/macos only works on x86_64 hosts
+        if HOST_ARCH == "arm64":
+            raise ValueError(
+                "macOS VMs are only supported on x86_64 hosts. "
+                "ARM hosts cannot run macOS VMs via dockur/macos."
+            )
+
+        image = "dockurr/macos"
+        self._ensure_image(image)
+
+        try:
+            network = self.client.networks.get(network_id)
+        except NotFound:
+            raise ValueError(f"Network not found: {network_id}")
+
+        # Create networking config
+        networking_config = self.client.api.create_networking_config({
+            network.name: self.client.api.create_endpoint_config(
+                ipv4_address=ip_address
+            )
+        })
+
+        # Environment for dockur/macos
+        # See: https://github.com/dockur/macos for full documentation
+        environment = {
+            "VERSION": macos_version,
+            "DISK_SIZE": f"{disk_size_gb}G",
+            "CPU_CORES": str(cpu_limit),
+            "RAM_SIZE": f"{memory_limit_mb}M"
+        }
+
+        # Display type - macOS always uses web VNC
+        environment["DISPLAY"] = "web"
+        logger.info(f"macOS VM {name} configured with web VNC console")
+
+        # Check if KVM is available for hardware acceleration
+        kvm_available = os.path.exists("/dev/kvm")
+        if kvm_available:
+            environment["KVM"] = "Y"
+            logger.info(f"KVM acceleration enabled for macOS VM")
+        else:
+            environment["KVM"] = "N"
+            logger.warning(
+                "KVM not available, macOS VM will run in software emulation mode. "
+                "Performance will be severely degraded."
+            )
+
+        # Setup volume bindings
+        binds = []
+
+        # Setup persistent storage
+        if storage_path:
+            os.makedirs(storage_path, exist_ok=True)
+            binds.append(f"{storage_path}:/storage")
+            logger.info(f"Using persistent storage: {storage_path}")
+
+        # Parse DNS configuration
+        dns_list = ["8.8.8.8", "8.8.4.4"]  # Default external DNS
+
+        # macOS containers need privileged mode for KVM
+        try:
+            host_config_args = {
+                "cpu_count": cpu_limit,
+                "mem_limit": f"{memory_limit_mb}m",
+                "privileged": True,
+                "cap_add": ["NET_ADMIN"],
+                "restart_policy": {"Name": "unless-stopped"},
+                "dns": dns_list
+            }
+            if kvm_available:
+                host_config_args["devices"] = ["/dev/kvm:/dev/kvm"]
+            if binds:
+                host_config_args["binds"] = binds
+
+            container = self.client.api.create_container(
+                image=image,
+                name=name,
+                hostname=name,
+                detach=True,
+                tty=True,
+                stdin_open=True,
+                networking_config=networking_config,
+                host_config=self.client.api.create_host_config(**host_config_args),
+                environment=environment,
+                labels=labels or {}
+            )
+            container_id = container["Id"]
+            logger.info(f"Created macOS container: {name} ({container_id[:12]}) on range network")
+
+            return container_id
+        except APIError as e:
+            logger.error(f"Failed to create macOS container {name}: {e}")
+            raise
+
     def create_linux_vm_container(
         self,
         name: str,

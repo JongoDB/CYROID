@@ -13,6 +13,7 @@ from enum import Enum
 class OSType(str, Enum):
     WINDOWS = "windows"
     LINUX = "linux"
+    MACOS = "macos"  # macOS via dockur/macos
     NETWORK = "network"  # For network devices (VyOS, OPNsense, pfSense, etc.)
     CUSTOM = "custom"  # For custom ISOs
 
@@ -22,6 +23,7 @@ class VMType(str, Enum):
     CONTAINER = "container"      # Basic Docker container (lightweight Linux)
     LINUX_VM = "linux_vm"        # Full Linux VM via qemux/qemu
     WINDOWS_VM = "windows_vm"    # Full Windows VM via dockur/windows
+    MACOS_VM = "macos_vm"        # Full macOS VM via dockur/macos
 
 
 class LinuxDistro(str, Enum):

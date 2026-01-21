@@ -12,8 +12,8 @@ class GoldenImageBase(BaseModel):
     """Base schema with common fields."""
     name: str = Field(..., min_length=1, max_length=100)
     description: Optional[str] = None
-    os_type: Literal["windows", "linux", "network", "custom"]
-    vm_type: Literal["container", "linux_vm", "windows_vm"]
+    os_type: Literal["windows", "linux", "macos", "network", "custom"]
+    vm_type: Literal["container", "linux_vm", "windows_vm", "macos_vm"]
     native_arch: str = Field(default="x86_64", max_length=20)
     default_cpu: int = Field(default=2, ge=1, le=32)
     default_ram_mb: int = Field(default=4096, ge=512, le=131072)
@@ -34,7 +34,7 @@ class GoldenImageUpdate(BaseModel):
     """Schema for updating a GoldenImage."""
     name: Optional[str] = Field(None, min_length=1, max_length=100)
     description: Optional[str] = None
-    os_type: Optional[Literal["windows", "linux", "network", "custom"]] = None
+    os_type: Optional[Literal["windows", "linux", "macos", "network", "custom"]] = None
     native_arch: Optional[str] = Field(None, max_length=20)
     default_cpu: Optional[int] = Field(None, ge=1, le=32)
     default_ram_mb: Optional[int] = Field(None, ge=512, le=131072)
@@ -91,8 +91,8 @@ class GoldenImageImportRequest(BaseModel):
     """Schema for importing an OVA/QCOW2/VMDK file as a GoldenImage."""
     name: str = Field(..., min_length=1, max_length=100)
     description: Optional[str] = None
-    os_type: Literal["windows", "linux", "network", "custom"]
-    vm_type: Literal["container", "linux_vm", "windows_vm"]
+    os_type: Literal["windows", "linux", "macos", "network", "custom"]
+    vm_type: Literal["container", "linux_vm", "windows_vm", "macos_vm"]
     native_arch: str = Field(default="x86_64", max_length=20)
     default_cpu: int = Field(default=2, ge=1, le=32)
     default_ram_mb: int = Field(default=4096, ge=512, le=131072)

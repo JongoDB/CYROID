@@ -20,7 +20,7 @@ export interface VMTemplate {
   id: string
   name: string
   description: string | null
-  os_type: 'windows' | 'linux' | 'custom' | 'network'
+  os_type: 'windows' | 'linux' | 'macos' | 'custom' | 'network'
   os_variant: string
   base_image: string
   default_cpu: number
@@ -124,6 +124,8 @@ export interface VM {
   iso_url: string | null
   iso_path: string | null
   display_type: 'desktop' | 'server' | 'headless' | null
+  // macOS-specific settings (for dockur/macos VMs)
+  macos_version: string | null
   // Extended dockur/windows configuration
   use_dhcp: boolean
   disk2_gb: number | null
@@ -875,8 +877,8 @@ export interface BaseImage {
   iso_source: string | null
   iso_version: string | null
   // Metadata
-  os_type: 'windows' | 'linux' | 'network' | 'custom'
-  vm_type: 'container' | 'linux_vm' | 'windows_vm'
+  os_type: 'windows' | 'linux' | 'macos' | 'network' | 'custom'
+  vm_type: 'container' | 'linux_vm' | 'windows_vm' | 'macos_vm'
   native_arch: string
   // Resource defaults
   default_cpu: number
@@ -900,8 +902,8 @@ export interface BaseImageCreate {
   iso_path?: string | null
   iso_source?: string | null
   iso_version?: string | null
-  os_type: 'windows' | 'linux' | 'network' | 'custom'
-  vm_type: 'container' | 'linux_vm' | 'windows_vm'
+  os_type: 'windows' | 'linux' | 'macos' | 'network' | 'custom'
+  vm_type: 'container' | 'linux_vm' | 'windows_vm' | 'macos_vm'
   native_arch?: string
   default_cpu?: number
   default_ram_mb?: number
@@ -937,8 +939,8 @@ export interface GoldenImageLibrary {
   disk_image_path: string | null
   import_format: string | null  // ova, qcow2, vmdk
   // Metadata
-  os_type: 'windows' | 'linux' | 'network' | 'custom'
-  vm_type: 'container' | 'linux_vm' | 'windows_vm'
+  os_type: 'windows' | 'linux' | 'macos' | 'network' | 'custom'
+  vm_type: 'container' | 'linux_vm' | 'windows_vm' | 'macos_vm'
   native_arch: string
   // Resource defaults
   default_cpu: number
@@ -961,8 +963,8 @@ export interface GoldenImageCreate {
   description?: string | null
   source: GoldenImageSource
   base_image_id?: string | null
-  os_type: 'windows' | 'linux' | 'network' | 'custom'
-  vm_type: 'container' | 'linux_vm' | 'windows_vm'
+  os_type: 'windows' | 'linux' | 'macos' | 'network' | 'custom'
+  vm_type: 'container' | 'linux_vm' | 'windows_vm' | 'macos_vm'
   native_arch?: string
   default_cpu?: number
   default_ram_mb?: number

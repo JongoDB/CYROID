@@ -170,6 +170,13 @@ def compute_emulation_status(
         # docker_service will use dockur/windows-arm → native, no emulation
         return False, None
 
+    # macOS VMs - only supported on x86_64 hosts (no ARM support via dockur/macos)
+    if vm_type == VMType.MACOS_VM or os_type == OSType.MACOS:
+        from cyroid.utils.arch import HOST_ARCH
+        if HOST_ARCH == "arm64":
+            return True, "macOS VMs are only supported on x86_64 hosts. Not available on ARM."
+        return False, None
+
     # Linux VMs - check if distro has ARM64 support
     if vm_type == VMType.LINUX_VM:
         linux_distro = vm.linux_distro
@@ -963,6 +970,73 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
                         dns_search=network.dns_search,
                         # Architecture selection
                         arch=vm.arch,
+                    )
+            elif os_type == OSType.MACOS:
+                # macOS VM using dockur/macos
+                settings = get_settings()
+
+                # Setup VM-specific storage path
+                vm_storage_path = os.path.join(
+                    settings.vm_storage_dir,
+                    str(vm.range_id),
+                    str(vm.id),
+                    "storage"
+                )
+
+                # Determine macOS version (VM setting takes priority)
+                # Version codes: sequoia, sonoma, ventura, monterey, big-sur, catalina, mojave, high-sierra
+                macos_version = vm.macos_version or "sequoia"
+
+                # Check architecture compatibility
+                # dockur/macos requires KVM and runs on x86_64 hosts
+                # ARM (Apple Silicon) macOS is not supported via dockur/macos
+                from cyroid.utils.arch import HOST_ARCH
+                if HOST_ARCH == "arm64":
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="macOS VMs are only supported on x86_64 hosts due to KVM requirements. "
+                               "ARM hosts cannot run macOS VMs via dockur/macos."
+                    )
+
+                if use_dind:
+                    # Create macOS VM inside DinD with dockur/macos
+                    macos_env = {
+                        "VERSION": macos_version,
+                        "DISK_SIZE": f"{vm.disk_gb or 64}G",
+                        "CPU_CORES": str(vm.cpu or 4),
+                        "RAM_SIZE": f"{vm.ram_mb or 8192}M",
+                        "DISPLAY": "web",  # macOS uses web VNC display
+                        "KVM": "N",  # DinD typically doesn't have KVM access
+                    }
+
+                    container_id = asyncio.run(docker.create_range_container_dind(
+                        range_id=str(vm.range_id),
+                        docker_url=range_obj.dind_docker_url,
+                        name=vm.hostname,
+                        image="dockurr/macos",
+                        network_name=network.name,
+                        ip_address=vm.ip_address,
+                        cpu_limit=vm.cpu or 4,
+                        memory_limit_mb=vm.ram_mb or 8192,
+                        hostname=vm.hostname,
+                        labels=labels,
+                        environment=macos_env,
+                        privileged=True,
+                        dns_servers=network.dns_servers,
+                        dns_search=network.dns_search,
+                    ))
+                else:
+                    container_id = docker.create_macos_container(
+                        name=f"cyroid-{vm.hostname}-{str(vm.id)[:8]}",
+                        network_id=network.docker_network_id,
+                        ip_address=vm.ip_address,
+                        cpu_limit=vm.cpu,
+                        memory_limit_mb=vm.ram_mb,
+                        disk_size_gb=vm.disk_gb,
+                        macos_version=macos_version,
+                        labels=labels,
+                        storage_path=vm_storage_path,
+                        display_type=vm.display_type or "desktop",
                     )
             elif vm_type == VMType.LINUX_VM:
                 # Linux VM using qemux/qemu (ISO-based Linux installation)

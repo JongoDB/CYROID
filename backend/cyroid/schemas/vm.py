@@ -66,6 +66,10 @@ class VMCreate(BaseModel):
     iso_path: Optional[str] = Field(None, max_length=512, description="Local ISO path for bind mount")
     display_type: Optional[str] = Field("desktop", description="Display type: 'desktop' (VNC/web console) or 'server' (RDP only)")
 
+    # macOS-specific settings (for dockur/macos VMs)
+    # Version codes: sequoia, sonoma, ventura, monterey, big-sur, catalina, mojave, high-sierra
+    macos_version: Optional[str] = Field(None, max_length=20, description="macOS version code for dockur/macos")
+
     # Network configuration
     use_dhcp: bool = Field(default=False, description="Use DHCP instead of static IP assignment")
     gateway: Optional[str] = Field(None, pattern=r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", description="Gateway IP address")
@@ -123,6 +127,8 @@ class VMUpdate(BaseModel):
     iso_url: Optional[str] = Field(None, max_length=512)
     iso_path: Optional[str] = Field(None, max_length=512)
     display_type: Optional[str] = Field(None, max_length=20)
+    # macOS settings
+    macos_version: Optional[str] = Field(None, max_length=20)
     # Network configuration
     use_dhcp: Optional[bool] = None
     gateway: Optional[str] = Field(None, pattern=r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$")
@@ -164,6 +170,8 @@ class VMResponse(VMBase):
     iso_url: Optional[str] = None
     iso_path: Optional[str] = None
     display_type: Optional[str] = "desktop"
+    # macOS-specific fields
+    macos_version: Optional[str] = None
     # Network configuration
     use_dhcp: bool = False
     gateway: Optional[str] = None
