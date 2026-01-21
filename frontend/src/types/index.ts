@@ -460,7 +460,9 @@ export interface WindowsVersion {
   size_gb: number
   category: 'desktop' | 'server' | 'legacy'
   cached?: boolean
-  download_url: string  // All versions now have direct download URLs
+  download_url: string | null  // Null if no direct download available (dockur downloads at runtime)
+  note?: string  // Note about pre-caching availability
+  precache_available?: boolean  // Whether pre-caching is available for this version
   // Architecture-specific fields
   cached_x86_64?: boolean
   cached_arm64?: boolean
