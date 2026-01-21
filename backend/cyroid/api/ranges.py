@@ -703,7 +703,7 @@ def repair_range_dind(range_id: UUID, db: DBSession, current_user: CurrentUser):
     event_service = EventService(db)
     event_service.log_event(
         range_id=range_id,
-        event_type=EventType.RANGE_UPDATED,
+        event_type=EventType.DEPLOYMENT_STEP,
         message=f"Recovered DinD configuration for range {range_obj.name}",
         user_id=current_user.id,
     )
@@ -940,7 +940,7 @@ def repair_vnc_for_range(range_id: UUID, db: DBSession, current_user: CurrentUse
     event_service = EventService(db)
     event_service.log_event(
         range_id=range_id,
-        event_type=EventType.RANGE_UPDATED,
+        event_type=EventType.DEPLOYMENT_STEP,
         message=f"VNC configuration repaired for {len(port_mappings)} VMs",
         user_id=current_user.id,
     )
