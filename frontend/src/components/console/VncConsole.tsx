@@ -53,11 +53,10 @@ export function VncConsole({ vmId, vmHostname, token, onClose }: VncConsoleProps
         const origin = window.location.origin
 
         // Build VNC URL with proper WebSocket path
-        // The WebSocket path must include the traefik prefix (vnc/{vm_id}) so routing works correctly
+        // noVNC resolves the path relative to its location, so we just need the websocket endpoint name
+        // If noVNC is served from /vnc/{uuid}/ and path=websockify, it connects to /vnc/{uuid}/websockify
         const websocketPath = data.websocket_path ?? 'websockify'
-        const basePath = data.path.replace(/^\//, '')
-        const fullWsPath = websocketPath ? `${basePath}/${websocketPath}` : basePath
-        const vncUrl = `${origin}${data.path}/?autoconnect=1&resize=scale&path=${fullWsPath}`
+        const vncUrl = `${origin}${data.path}/?autoconnect=1&resize=scale&path=${websocketPath}`
 
         setVncInfo({
           url: vncUrl,
