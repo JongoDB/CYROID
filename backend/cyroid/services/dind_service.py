@@ -799,6 +799,25 @@ class DinDService:
         except Exception as e:
             logger.debug(f"Forward rule may already exist: {e}")
 
+        # Ensure MASQUERADE is set for return traffic from VMs
+        # This is required so that VMs can respond to VNC traffic that was DNATed
+        # The rule masquerades traffic from the management network going to internal bridges
+        try:
+            # Check if MASQUERADE rule already exists
+            exit_code, output = dind_container.exec_run(
+                "iptables -t nat -C POSTROUTING -s 172.30.0.0/16 -o br-+ -j MASQUERADE",
+                privileged=True
+            )
+            if exit_code != 0:
+                # Rule doesn't exist, add it
+                dind_container.exec_run(
+                    "iptables -t nat -A POSTROUTING -s 172.30.0.0/16 -o br-+ -j MASQUERADE",
+                    privileged=True
+                )
+                logger.debug("Added MASQUERADE rule for VNC return traffic")
+        except Exception as e:
+            logger.debug(f"MASQUERADE rule setup: {e}")
+
         if port_mappings:
             allocated = [m["proxy_port"] for m in port_mappings.values()]
             logger.info(
