@@ -1239,16 +1239,40 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
                 # KasmVNC uses 'kasm-user' as the default user
                 username = vm.linux_username or "kasm-user"
                 if vm.linux_password:
-                    docker.set_linux_user_password(container_id, username, vm.linux_password)
+                    if use_dind:
+                        docker.set_linux_user_password_dind(
+                            str(vm.range_id), range_obj.dind_docker_url,
+                            container_id, username, vm.linux_password
+                        )
+                    else:
+                        docker.set_linux_user_password(container_id, username, vm.linux_password)
                 if vm.linux_user_sudo:
-                    docker.grant_sudo_privileges(container_id, username)
+                    if use_dind:
+                        docker.grant_sudo_privileges_dind(
+                            str(vm.range_id), range_obj.dind_docker_url,
+                            container_id, username
+                        )
+                    else:
+                        docker.grant_sudo_privileges(container_id, username)
             elif "linuxserver/" in image_for_check or "lscr.io/linuxserver" in image_for_check:
                 # LinuxServer containers use 'abc' as default user (or CUSTOM_USER from env)
                 username = vm.linux_username or "abc"
                 if vm.linux_password:
-                    docker.set_linux_user_password(container_id, username, vm.linux_password)
+                    if use_dind:
+                        docker.set_linux_user_password_dind(
+                            str(vm.range_id), range_obj.dind_docker_url,
+                            container_id, username, vm.linux_password
+                        )
+                    else:
+                        docker.set_linux_user_password(container_id, username, vm.linux_password)
                 if vm.linux_user_sudo:
-                    docker.grant_sudo_privileges(container_id, username)
+                    if use_dind:
+                        docker.grant_sudo_privileges_dind(
+                            str(vm.range_id), range_obj.dind_docker_url,
+                            container_id, username
+                        )
+                    else:
+                        docker.grant_sudo_privileges(container_id, username)
 
         vm.status = VMStatus.RUNNING
         db.commit()

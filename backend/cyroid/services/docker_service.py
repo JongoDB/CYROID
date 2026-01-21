@@ -2998,6 +2998,104 @@ local-hostname: {name}
             logger.error(f"Failed to copy to container in DinD: {e}")
             raise
 
+    def exec_in_range_container_dind(
+        self,
+        range_id: str,
+        docker_url: str,
+        container_id: str,
+        command: str,
+        user: str = "root",
+    ) -> tuple[int, str]:
+        """
+        Execute a command in a container running inside DinD.
+
+        Args:
+            range_id: Range UUID
+            docker_url: DinD Docker URL (tcp://host:port)
+            container_id: Container ID inside DinD
+            command: Command to execute
+            user: User to run command as (default: root)
+
+        Returns:
+            Tuple of (exit_code, output)
+        """
+        range_client = self.get_range_client_sync(range_id, docker_url)
+
+        try:
+            container = range_client.containers.get(container_id)
+            exec_result = container.exec_run(
+                command,
+                user=user,
+                demux=True
+            )
+            stdout = exec_result.output[0] or b""
+            stderr = exec_result.output[1] or b""
+            output = (stdout + stderr).decode("utf-8", errors="replace")
+            return exec_result.exit_code, output
+
+        except NotFound:
+            raise ValueError(f"Container not found in DinD: {container_id}")
+        except APIError as e:
+            logger.error(f"Failed to exec in container in DinD: {e}")
+            raise
+
+    def set_linux_user_password_dind(
+        self,
+        range_id: str,
+        docker_url: str,
+        container_id: str,
+        username: str,
+        password: str
+    ) -> bool:
+        """
+        Set the password for a Linux user in a container running inside DinD.
+        """
+        try:
+            command = f'/bin/sh -c \'echo "{username}:{password}" | chpasswd\''
+            exit_code, output = self.exec_in_range_container_dind(
+                range_id, docker_url, container_id, command, user="root"
+            )
+            if exit_code == 0:
+                logger.info(f"Set password for user {username} in DinD container {container_id[:12]}")
+                return True
+            else:
+                logger.warning(f"Failed to set password for {username} in DinD: {output}")
+                return False
+        except Exception as e:
+            logger.warning(f"Failed to set password for {username} in DinD {container_id[:12]}: {e}")
+            return False
+
+    def grant_sudo_privileges_dind(
+        self,
+        range_id: str,
+        docker_url: str,
+        container_id: str,
+        username: str,
+        nopasswd: bool = False
+    ) -> bool:
+        """
+        Grant sudo privileges to a Linux user in a container running inside DinD.
+        """
+        try:
+            if nopasswd:
+                sudoers_line = f'{username} ALL=(ALL) NOPASSWD: ALL'
+            else:
+                sudoers_line = f'{username} ALL=(ALL) ALL'
+
+            command = f'/bin/sh -c \'echo "{sudoers_line}" >> /etc/sudoers\''
+            exit_code, output = self.exec_in_range_container_dind(
+                range_id, docker_url, container_id, command, user="root"
+            )
+            if exit_code == 0:
+                logger.info(f"Granted sudo privileges to {username} in DinD container {container_id[:12]}")
+                return True
+            else:
+                logger.warning(f"Failed to grant sudo to {username} in DinD: {output}")
+                return False
+        except Exception as e:
+            logger.warning(f"Failed to grant sudo to {username} in DinD {container_id[:12]}: {e}")
+            return False
+
 
 # Singleton instance
 _docker_service: Optional[DockerService] = None
