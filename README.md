@@ -1,7 +1,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Status-Active%20Development-brightgreen" alt="Status">
   <img src="https://img.shields.io/badge/Phase-5%20of%207-blue" alt="Phase">
-  <img src="https://img.shields.io/badge/Version-0.20.2--alpha-orange" alt="Version">
+  <img src="https://img.shields.io/badge/Version-0.20.3--alpha-orange" alt="Version">
   <img src="https://img.shields.io/badge/License-Proprietary-red" alt="License">
   <img src="https://github.com/JongoDB/CYROID/actions/workflows/docker-publish.yml/badge.svg" alt="Docker Build">
 </p>
@@ -914,7 +914,8 @@ Proprietary - All Rights Reserved
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| 0.20.2 | 2026-01-21 | GHCR publishing, GitHub Actions CI/CD, Docker image upload, CYROID Services category |
+| 0.20.3 | 2026-01-21 | GHCR publishing, GitHub Actions CI/CD, pre-built container images |
+| 0.20.2 | 2026-01-21 | Docker image upload, CYROID Services category |
 | 0.20.1 | 2026-01-21 | Image Cache tab consolidation, macOS ISO support |
 | 0.20.0 | 2026-01-21 | Major refactor: consolidated Image Cache, improved UX |
 | 0.13.17 | 2026-01-20 | Cross-platform support (macOS Docker Desktop), auto-directory creation |
