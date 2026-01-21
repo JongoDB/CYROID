@@ -45,7 +45,7 @@ export function ServicesStep() {
 
   // Load base images on mount
   useEffect(() => {
-    imagesApi.listBase().then(res => setBaseImages(res.data));
+    imagesApi.listBaseImages().then((res) => setBaseImages(res.data));
   }, []);
 
   // Auto-select recommended services when environment changes

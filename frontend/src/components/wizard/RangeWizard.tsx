@@ -41,7 +41,7 @@ function WizardContent({ onClose }: { onClose: () => void }) {
     try {
       // Fetch base images to map names to IDs
       setDeployProgress('Loading base images...');
-      const imagesRes = await imagesApi.listBase();
+      const imagesRes = await imagesApi.listBaseImages();
       const imageMap: Record<string, BaseImage> = {};
       imagesRes.data.forEach((img: BaseImage) => {
         imageMap[img.name] = img;

@@ -41,7 +41,7 @@ export default function RangeWizardPage() {
   useEffect(() => {
     const loadBaseImages = async () => {
       try {
-        const response = await imagesApi.listBase();
+        const response = await imagesApi.listBaseImages();
         setBaseImages(response.data);
       } catch (error) {
         console.error('Failed to load base images:', error);

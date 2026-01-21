@@ -159,7 +159,7 @@ export const usersApi = {
     api.delete(`/users/${userId}/attributes/${attributeId}`),
 }
 
-import type { Range, Network, VM, EventLog, EventLogList, VMStatsResponse, VMLogsResponse, ResourceTagsResponse, Walkthrough, WalkthroughProgress, DeploymentStatusResponse, ScenarioDetail, ScenariosListResponse, ScenarioUpload, ApplyScenarioRequest, ApplyScenarioResponse } from '../types'
+import type { Range, Network, VM, EventLog, EventLogList, VMStatsResponse, VMLogsResponse, Walkthrough, WalkthroughProgress, DeploymentStatusResponse, ScenarioDetail, ScenariosListResponse, ScenarioUpload, ApplyScenarioRequest, ApplyScenarioResponse } from '../types'
 
 // Ranges API
 export interface RangeCreate {

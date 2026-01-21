@@ -53,7 +53,7 @@ export function NetworkPropertiesPanel({ selectedNetworkId, selectedVmId, onClos
   const [baseImages, setBaseImages] = useState<BaseImage[]>([]);
 
   useEffect(() => {
-    imagesApi.listBase().then(res => setBaseImages(res.data));
+    imagesApi.listBaseImages().then((res) => setBaseImages(res.data));
   }, []);
 
   const selectedNetwork = networks.segments.find(n => n.id === selectedNetworkId);
