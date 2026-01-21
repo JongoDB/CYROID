@@ -1102,13 +1102,15 @@ export default function ImageCache() {
         // Skip Windows images in Docker section
         return
       }
-      // Check cyroid first (before services to avoid nginx/postgres matching)
+      // Check cyroid first (most specific)
+      // Then desktop (before services/server to avoid xfce/kde images being caught by alpine/ubuntu patterns)
+      // Then services, then server, then other
       if (cyroidPatterns.some(p => tags.includes(p))) {
         cyroid.push(img)
-      } else if (servicePatterns.some(p => tags.includes(p))) {
-        services.push(img)
       } else if (desktopPatterns.some(p => tags.includes(p))) {
         desktop.push(img)
+      } else if (servicePatterns.some(p => tags.includes(p))) {
+        services.push(img)
       } else if (serverPatterns.some(p => tags.includes(p))) {
         server.push(img)
       } else {
@@ -1479,74 +1481,94 @@ export default function ImageCache() {
           />
 
           {/* Cached Desktop Images (not in recommended list) - Issue #63 */}
-          {categorizedImages.desktop.length > 0 && (
-            <div className="bg-white shadow rounded-lg overflow-hidden">
-              <div className="px-6 py-4 border-b border-gray-200 bg-blue-50">
-                <h4 className="text-sm font-medium text-blue-800 flex items-center">
-                  <Monitor className="h-4 w-4 mr-2" />
-                  Cached Desktop Images ({categorizedImages.desktop.length})
-                </h4>
-                <p className="text-xs text-blue-600 mt-1">Cached desktop images with GUI/VNC access</p>
-              </div>
-              <ImageTable images={categorizedImages.desktop} onRemove={handleRemoveImage} actionLoading={actionLoading} isAdmin={isAdmin} />
+          <div className="bg-white shadow rounded-lg overflow-hidden">
+            <div className="px-6 py-4 border-b border-gray-200 bg-blue-50">
+              <h4 className="text-sm font-medium text-blue-800 flex items-center">
+                <Monitor className="h-4 w-4 mr-2" />
+                Cached Desktop Images ({categorizedImages.desktop.length})
+              </h4>
+              <p className="text-xs text-blue-600 mt-1">Cached desktop images with GUI/VNC access</p>
             </div>
-          )}
+            {categorizedImages.desktop.length > 0 ? (
+              <ImageTable images={categorizedImages.desktop} onRemove={handleRemoveImage} actionLoading={actionLoading} isAdmin={isAdmin} />
+            ) : (
+              <div className="px-6 py-8 text-center text-gray-500 text-sm">
+                No desktop images cached. Pull images with GUI environments (webtop, xfce, kde, etc.)
+              </div>
+            )}
+          </div>
 
           {/* Cached Server/CLI Images (not in recommended list) - Issue #63 */}
-          {categorizedImages.server.length > 0 && (
-            <div className="bg-white shadow rounded-lg overflow-hidden">
-              <div className="px-6 py-4 border-b border-gray-200 bg-purple-50">
-                <h4 className="text-sm font-medium text-purple-800 flex items-center">
-                  <Server className="h-4 w-4 mr-2" />
-                  Cached Server/CLI Images ({categorizedImages.server.length})
-                </h4>
-                <p className="text-xs text-purple-600 mt-1">Cached headless server and CLI images</p>
-              </div>
-              <ImageTable images={categorizedImages.server} onRemove={handleRemoveImage} actionLoading={actionLoading} isAdmin={isAdmin} />
+          <div className="bg-white shadow rounded-lg overflow-hidden">
+            <div className="px-6 py-4 border-b border-gray-200 bg-purple-50">
+              <h4 className="text-sm font-medium text-purple-800 flex items-center">
+                <Server className="h-4 w-4 mr-2" />
+                Cached Server/CLI Images ({categorizedImages.server.length})
+              </h4>
+              <p className="text-xs text-purple-600 mt-1">Cached headless server and CLI images</p>
             </div>
-          )}
+            {categorizedImages.server.length > 0 ? (
+              <ImageTable images={categorizedImages.server} onRemove={handleRemoveImage} actionLoading={actionLoading} isAdmin={isAdmin} />
+            ) : (
+              <div className="px-6 py-8 text-center text-gray-500 text-sm">
+                No server/CLI images cached. Pull images like alpine, ubuntu, kali, etc.
+              </div>
+            )}
+          </div>
 
           {/* Cached Service Images (not in recommended list) - Issue #63 */}
-          {categorizedImages.services.length > 0 && (
-            <div className="bg-white shadow rounded-lg overflow-hidden">
-              <div className="px-6 py-4 border-b border-gray-200 bg-green-50">
-                <h4 className="text-sm font-medium text-green-800 flex items-center">
-                  <Database className="h-4 w-4 mr-2" />
-                  Cached Service Images ({categorizedImages.services.length})
-                </h4>
-                <p className="text-xs text-green-600 mt-1">Cached database and service containers</p>
-              </div>
-              <ImageTable images={categorizedImages.services} onRemove={handleRemoveImage} actionLoading={actionLoading} isAdmin={isAdmin} />
+          <div className="bg-white shadow rounded-lg overflow-hidden">
+            <div className="px-6 py-4 border-b border-gray-200 bg-green-50">
+              <h4 className="text-sm font-medium text-green-800 flex items-center">
+                <Database className="h-4 w-4 mr-2" />
+                Cached Service Images ({categorizedImages.services.length})
+              </h4>
+              <p className="text-xs text-green-600 mt-1">Cached database and service containers</p>
             </div>
-          )}
+            {categorizedImages.services.length > 0 ? (
+              <ImageTable images={categorizedImages.services} onRemove={handleRemoveImage} actionLoading={actionLoading} isAdmin={isAdmin} />
+            ) : (
+              <div className="px-6 py-8 text-center text-gray-500 text-sm">
+                No service images cached. Pull images like nginx, mysql, postgres, redis, etc.
+              </div>
+            )}
+          </div>
 
           {/* Cached CYROID Images (not in recommended list) */}
-          {categorizedImages.cyroid.length > 0 && (
-            <div className="bg-white shadow rounded-lg overflow-hidden">
-              <div className="px-6 py-4 border-b border-gray-200 bg-indigo-50">
-                <h4 className="text-sm font-medium text-indigo-800 flex items-center">
-                  <Cog className="h-4 w-4 mr-2" />
-                  Cached CYROID Services ({categorizedImages.cyroid.length})
-                </h4>
-                <p className="text-xs text-indigo-600 mt-1">Cached platform infrastructure images</p>
-              </div>
-              <ImageTable images={categorizedImages.cyroid} onRemove={handleRemoveImage} actionLoading={actionLoading} isAdmin={isAdmin} />
+          <div className="bg-white shadow rounded-lg overflow-hidden">
+            <div className="px-6 py-4 border-b border-gray-200 bg-indigo-50">
+              <h4 className="text-sm font-medium text-indigo-800 flex items-center">
+                <Cog className="h-4 w-4 mr-2" />
+                Cached CYROID Services ({categorizedImages.cyroid.length})
+              </h4>
+              <p className="text-xs text-indigo-600 mt-1">Cached platform infrastructure images</p>
             </div>
-          )}
+            {categorizedImages.cyroid.length > 0 ? (
+              <ImageTable images={categorizedImages.cyroid} onRemove={handleRemoveImage} actionLoading={actionLoading} isAdmin={isAdmin} />
+            ) : (
+              <div className="px-6 py-8 text-center text-gray-500 text-sm">
+                No CYROID infrastructure images cached.
+              </div>
+            )}
+          </div>
 
           {/* Other Cached Images (not in recommended list) */}
-          {categorizedImages.other.length > 0 && (
-            <div className="bg-white shadow rounded-lg overflow-hidden">
-              <div className="px-6 py-4 border-b border-gray-200 bg-gray-50">
-                <h4 className="text-sm font-medium text-gray-800 flex items-center">
-                  <HardDrive className="h-4 w-4 mr-2" />
-                  Other Cached ({categorizedImages.other.length})
-                </h4>
-                <p className="text-xs text-gray-600 mt-1">Additional cached images not in recommended list</p>
-              </div>
-              <ImageTable images={categorizedImages.other} onRemove={handleRemoveImage} actionLoading={actionLoading} isAdmin={isAdmin} />
+          <div className="bg-white shadow rounded-lg overflow-hidden">
+            <div className="px-6 py-4 border-b border-gray-200 bg-gray-50">
+              <h4 className="text-sm font-medium text-gray-800 flex items-center">
+                <HardDrive className="h-4 w-4 mr-2" />
+                Other Cached ({categorizedImages.other.length})
+              </h4>
+              <p className="text-xs text-gray-600 mt-1">Additional cached images not in recommended list</p>
             </div>
-          )}
+            {categorizedImages.other.length > 0 ? (
+              <ImageTable images={categorizedImages.other} onRemove={handleRemoveImage} actionLoading={actionLoading} isAdmin={isAdmin} />
+            ) : (
+              <div className="px-6 py-8 text-center text-gray-500 text-sm">
+                No other images cached.
+              </div>
+            )}
+          </div>
 
           {/* Build Custom Images Section (consolidated from Build Images tab) */}
           <div className="border-t border-gray-200 pt-6 mt-6">
