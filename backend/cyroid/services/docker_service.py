@@ -1118,12 +1118,24 @@ class DockerService:
             logger.info(f"Using local ISO: {iso_path}")
         elif not iso_url:
             # Check for default ISO in cache directory (only if no URL provided)
-            # Filename pattern: linux-{distro}.iso (e.g., linux-kali.iso)
+            # Try architecture-specific filename first, then legacy format
             linux_iso_dir = os.path.join(settings.iso_cache_dir, "linux-isos")
-            cached_iso = os.path.join(linux_iso_dir, f"linux-{linux_distro}.iso")
-            if os.path.isfile(cached_iso):
+
+            # Priority 1: Architecture-specific filename (e.g., linux-kali-arm64.iso)
+            arch_specific_iso = os.path.join(linux_iso_dir, f"linux-{linux_distro}-{HOST_ARCH}.iso")
+            # Priority 2: Legacy filename (e.g., linux-kali.iso)
+            legacy_iso = os.path.join(linux_iso_dir, f"linux-{linux_distro}.iso")
+
+            cached_iso = None
+            if os.path.isfile(arch_specific_iso):
+                cached_iso = arch_specific_iso
+                logger.info(f"Using cached ISO (arch-specific): {cached_iso}")
+            elif os.path.isfile(legacy_iso):
+                cached_iso = legacy_iso
+                logger.info(f"Using cached ISO (legacy): {cached_iso}")
+
+            if cached_iso:
                 binds.append(f"{cached_iso}:/boot.iso:ro")
-                logger.info(f"Using cached ISO: {cached_iso}")
 
         # Setup persistent storage
         if storage_path:

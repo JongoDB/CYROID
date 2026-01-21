@@ -603,14 +603,14 @@ export const cacheApi = {
   getLinuxISOStatus: () => api.get<ISOCacheStatus>('/cache/linux-isos'),
 
   // Linux ISO Downloads
-  downloadLinuxISO: (version: string, url?: string) =>
-    api.post<LinuxISODownloadResponse>('/cache/linux-isos/download', { version, url }),
-  getLinuxISODownloadStatus: (version: string) =>
-    api.get<LinuxISODownloadStatus>(`/cache/linux-isos/download/${encodeURIComponent(version)}/status`),
-  cancelLinuxISODownload: (version: string) =>
-    api.post(`/cache/linux-isos/download/${encodeURIComponent(version)}/cancel`),
-  deleteLinuxISO: (version: string) =>
-    api.delete(`/cache/linux-isos/${encodeURIComponent(version)}`),
+  downloadLinuxISO: (version: string, url?: string, arch?: string) =>
+    api.post<LinuxISODownloadResponse>('/cache/linux-isos/download', { version, url, arch }),
+  getLinuxISODownloadStatus: (version: string, arch?: string) =>
+    api.get<LinuxISODownloadStatus>(`/cache/linux-isos/download/${encodeURIComponent(version)}/status${arch ? `?arch=${arch}` : ''}`),
+  cancelLinuxISODownload: (version: string, arch?: string) =>
+    api.post(`/cache/linux-isos/download/${encodeURIComponent(version)}/cancel${arch ? `?arch=${arch}` : ''}`),
+  deleteLinuxISO: (version: string, arch?: string) =>
+    api.delete(`/cache/linux-isos/${encodeURIComponent(version)}${arch ? `?arch=${arch}` : ''}`),
 
   // Windows ISO Downloads
   downloadWindowsISO: (version: string, url?: string) =>

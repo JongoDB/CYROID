@@ -286,12 +286,6 @@ export default function RangeDetail() {
     return ''
   }, [])
 
-  // Helper: Get IP prefix from network subnet (e.g., 10.0.1.0/24 -> 10.0.1.)
-  const getIpPrefixFromSubnet = useCallback((subnet: string): string => {
-    const match = subnet.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\./)
-    return match ? match[0] : ''
-  }, [])
-
   // Fetch available IPs when network is selected for VM
   const fetchAvailableIps = useCallback(async (networkId: string) => {
     if (!networkId) {

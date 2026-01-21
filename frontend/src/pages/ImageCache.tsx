@@ -95,6 +95,7 @@ export default function ImageCache() {
     type: 'docker' | 'snapshot' | 'windows-iso' | 'linux-iso' | 'custom-iso' | null
     name: string
     id?: string
+    arch?: string  // For linux-iso architecture-specific delete
     isLoading: boolean
   }>({ type: null, name: '', isLoading: false })
 
@@ -717,12 +718,14 @@ export default function ImageCache() {
     }
   }
 
-  const handleDownloadLinuxISO = async (version: LinuxVersion, customUrl?: string) => {
-    setActionLoading(`download-linux-${version.version}`)
+  const handleDownloadLinuxISO = async (version: LinuxVersion, customUrl?: string, arch?: string) => {
+    // Use architecture-specific key for tracking
+    const downloadKey = arch ? `${version.version}-${arch}` : version.version
+    setActionLoading(`download-linux-${downloadKey}`)
     setError(null)
 
     try {
-      const res = await cacheApi.downloadLinuxISO(version.version, customUrl)
+      const res = await cacheApi.downloadLinuxISO(version.version, customUrl, arch)
 
       // Handle no direct download available
       if (res.data.status === 'no_direct_download') {
@@ -734,16 +737,16 @@ export default function ImageCache() {
       // Start polling for download status
       setLinuxDownloadStatus(prev => ({
         ...prev,
-        [version.version]: { status: 'downloading', version: version.version, progress_gb: 0 }
+        [downloadKey]: { status: 'downloading', version: version.version, progress_gb: 0 }
       }))
 
       // Poll for status
       const pollInterval = setInterval(async () => {
         try {
-          const statusRes = await cacheApi.getLinuxISODownloadStatus(version.version)
+          const statusRes = await cacheApi.getLinuxISODownloadStatus(version.version, arch)
           setLinuxDownloadStatus(prev => ({
             ...prev,
-            [version.version]: statusRes.data
+            [downloadKey]: statusRes.data
           }))
 
           if (statusRes.data.status === 'completed' || statusRes.data.status === 'failed') {
@@ -751,7 +754,7 @@ export default function ImageCache() {
             setActionLoading(null)
 
             if (statusRes.data.status === 'completed') {
-              setSuccess(`Downloaded ${version.name} ISO successfully!`)
+              setSuccess(`Downloaded ${version.name} (${arch || 'default'}) ISO successfully!`)
               await loadData()
             } else if (statusRes.data.error) {
               setError(`Download failed: ${statusRes.data.error}`)
@@ -761,7 +764,7 @@ export default function ImageCache() {
             setTimeout(() => {
               setLinuxDownloadStatus(prev => {
                 const newStatus = { ...prev }
-                delete newStatus[version.version]
+                delete newStatus[downloadKey]
                 return newStatus
               })
             }, 5000)
@@ -783,8 +786,10 @@ export default function ImageCache() {
     }
   }
 
-  const handleDeleteLinuxISO = (version: string) => {
-    setDeleteConfirm({ type: 'linux-iso', name: version, id: version, isLoading: false })
+  const handleDeleteLinuxISO = (version: string, arch?: string) => {
+    const displayName = arch ? `${version} (${arch})` : version
+    const id = arch ? `${version}-${arch}` : version
+    setDeleteConfirm({ type: 'linux-iso', name: displayName, id: id, arch: arch, isLoading: false })
   }
 
   const confirmDelete = async () => {
@@ -825,7 +830,9 @@ export default function ImageCache() {
           break
         case 'linux-iso':
           if (deleteConfirm.id) {
-            await cacheApi.deleteLinuxISO(deleteConfirm.id)
+            // Extract version from id (format: version or version-arch)
+            const version = deleteConfirm.arch ? deleteConfirm.id.replace(`-${deleteConfirm.arch}`, '') : deleteConfirm.id
+            await cacheApi.deleteLinuxISO(version, deleteConfirm.arch)
             setLinuxDownloadStatus(prev => {
               const newStatus = { ...prev }
               delete newStatus[deleteConfirm.id!]
@@ -843,15 +850,16 @@ export default function ImageCache() {
     }
   }
 
-  const handleCancelLinuxDownload = async (version: string) => {
-    setActionLoading(`cancel-linux-${version}`)
+  const handleCancelLinuxDownload = async (version: string, arch?: string) => {
+    const downloadKey = arch ? `${version}-${arch}` : version
+    setActionLoading(`cancel-linux-${downloadKey}`)
     setError(null)
     try {
-      await cacheApi.cancelLinuxISODownload(version)
-      setSuccess(`Cancelled download for ${version}`)
+      await cacheApi.cancelLinuxISODownload(version, arch)
+      setSuccess(`Cancelled download for ${version}${arch ? ` (${arch})` : ''}`)
       setLinuxDownloadStatus(prev => {
         const newStatus = { ...prev }
-        delete newStatus[version]
+        delete newStatus[downloadKey]
         return newStatus
       })
     } catch (err: any) {
@@ -1519,6 +1527,11 @@ export default function ImageCache() {
               <h3 className="text-lg font-medium text-gray-900">Linux Distributions (qemux/qemu)</h3>
               <p className="text-sm text-gray-500">
                 {linuxVersions.cached_count} of {linuxVersions.total_count} distributions cached
+                {linuxVersions.host_arch && (
+                  <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700">
+                    Host: {linuxVersions.host_arch}
+                  </span>
+                )}
               </p>
             </div>
           </div>
@@ -1535,6 +1548,11 @@ export default function ImageCache() {
                 <p className="mt-2 text-sm text-blue-700">
                   {linuxVersions.note}
                 </p>
+                {linuxVersions.arm64_supported_distros && linuxVersions.arm64_supported_distros.length > 0 && (
+                  <p className="mt-2 text-sm text-purple-700">
+                    ARM64 supported: {linuxVersions.arm64_supported_distros.join(', ')}
+                  </p>
+                )}
               </div>
             </div>
           </div>
@@ -1551,6 +1569,7 @@ export default function ImageCache() {
             downloadStatus={linuxDownloadStatus}
             actionLoading={actionLoading}
             isAdmin={isAdmin}
+            hostArch={linuxVersions.host_arch}
           />
 
           {/* Security Distributions (for cyber range training) */}
@@ -1565,6 +1584,7 @@ export default function ImageCache() {
             downloadStatus={linuxDownloadStatus}
             actionLoading={actionLoading}
             isAdmin={isAdmin}
+            hostArch={linuxVersions.host_arch}
           />
 
           {/* Server Distributions */}
@@ -1579,6 +1599,7 @@ export default function ImageCache() {
             downloadStatus={linuxDownloadStatus}
             actionLoading={actionLoading}
             isAdmin={isAdmin}
+            hostArch={linuxVersions.host_arch}
           />
         </div>
       )}
@@ -2577,17 +2598,18 @@ function ImageCheckbox({ img, selected, setSelected }: {
   )
 }
 
-function LinuxVersionSection({ title, versions, icon: Icon, colorClass, onDelete, onDownload, onCancel, downloadStatus, actionLoading, isAdmin }: {
+function LinuxVersionSection({ title, versions, icon: Icon, colorClass, onDelete, onDownload, onCancel, downloadStatus, actionLoading, isAdmin, hostArch }: {
   title: string
   versions: LinuxVersion[]
   icon: typeof Monitor
   colorClass: string
-  onDelete: (version: string) => void
-  onDownload: (version: LinuxVersion, customUrl?: string) => Promise<void>
-  onCancel: (version: string) => Promise<void>
+  onDelete: (version: string, arch?: string) => void
+  onDownload: (version: LinuxVersion, customUrl?: string, arch?: string) => Promise<void>
+  onCancel: (version: string, arch?: string) => Promise<void>
   downloadStatus: Record<string, LinuxISODownloadStatus>
   actionLoading: string | null
   isAdmin: boolean
+  hostArch?: 'x86_64' | 'arm64'
 }) {
   const bgClass = `bg-${colorClass}-50`
   const textClass = `text-${colorClass}-800`
@@ -2604,14 +2626,24 @@ function LinuxVersionSection({ title, versions, icon: Icon, colorClass, onDelete
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 p-4">
         {versions.map((v) => {
-          const status = downloadStatus[v.version]
-          const isDownloading = status?.status === 'downloading'
-          const isLoading = actionLoading === `download-linux-${v.version}` || actionLoading === `delete-linux-${v.version}`
+          // Check for architecture-specific downloads
+          const x86Key = `${v.version}-x86_64`
+          const arm64Key = `${v.version}-arm64`
+          const x86Status = downloadStatus[x86Key] || downloadStatus[v.version]
+          const arm64Status = downloadStatus[arm64Key]
+          const isDownloadingX86 = x86Status?.status === 'downloading'
+          const isDownloadingArm64 = arm64Status?.status === 'downloading'
+          const isLoading = actionLoading?.startsWith(`download-linux-${v.version}`) ||
+                           actionLoading?.startsWith(`delete-linux-${v.version}`)
+
+          // Check cached status
+          const cachedX86 = v.cached_x86_64 || (hostArch === 'x86_64' && v.cached)
+          const cachedArm64 = v.cached_arm64 || (hostArch === 'arm64' && v.cached)
 
           return (
             <div key={v.version} className={clsx(
               "border rounded-lg p-4",
-              v.cached ? "bg-green-50 border-green-200" : "hover:bg-gray-50"
+              (cachedX86 || cachedArm64) ? "bg-green-50 border-green-200" : "hover:bg-gray-50"
             )}>
               <div className="flex items-start justify-between">
                 <div className="flex-1 min-w-0">
@@ -2621,25 +2653,46 @@ function LinuxVersionSection({ title, versions, icon: Icon, colorClass, onDelete
                       {v.version}
                     </code>
                     <span className="text-sm text-gray-500">{v.size_gb} GB</span>
+                    {v.arm64_available && (
+                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-700" title="ARM64 version available">
+                        ARM64
+                      </span>
+                    )}
                   </div>
                   <p className="text-xs text-gray-500 mt-2">{v.description}</p>
 
-                  {/* Download progress */}
-                  {isDownloading && status && (
+                  {/* Architecture-specific cache status */}
+                  <div className="flex items-center gap-2 mt-2 flex-wrap">
+                    {cachedX86 && (
+                      <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
+                        <Check className="h-2.5 w-2.5 mr-0.5" />
+                        x86_64
+                      </span>
+                    )}
+                    {cachedArm64 && (
+                      <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
+                        <Check className="h-2.5 w-2.5 mr-0.5" />
+                        ARM64
+                      </span>
+                    )}
+                  </div>
+
+                  {/* x86_64 Download progress */}
+                  {isDownloadingX86 && x86Status && (
                     <div className="mt-3 space-y-1.5">
                       <div className="flex justify-between items-center text-xs">
                         <span className="text-blue-700 font-medium">
-                          {status.progress_gb?.toFixed(2) || '0.00'} GB
-                          {status.total_gb ? ` / ${status.total_gb.toFixed(2)} GB` : ''}
+                          x86_64: {x86Status.progress_gb?.toFixed(2) || '0.00'} GB
+                          {x86Status.total_gb ? ` / ${x86Status.total_gb.toFixed(2)} GB` : ''}
                         </span>
                         <div className="flex items-center gap-2">
-                          {status.progress_percent && (
-                            <span className="text-blue-600 font-semibold">{status.progress_percent}%</span>
+                          {x86Status.progress_percent && (
+                            <span className="text-blue-600 font-semibold">{x86Status.progress_percent}%</span>
                           )}
                           {isAdmin && (
                             <button
-                              onClick={() => onCancel(v.version)}
-                              disabled={actionLoading === `cancel-linux-${v.version}`}
+                              onClick={() => onCancel(v.version, 'x86_64')}
+                              disabled={actionLoading === `cancel-linux-${x86Key}`}
                               className="text-red-500 hover:text-red-700 p-0.5 rounded hover:bg-red-50"
                               title="Cancel download"
                             >
@@ -2648,14 +2701,51 @@ function LinuxVersionSection({ title, versions, icon: Icon, colorClass, onDelete
                           )}
                         </div>
                       </div>
-                      <div className="w-full bg-blue-100 rounded-full h-2.5 overflow-hidden">
-                        {status.total_bytes && status.progress_bytes ? (
+                      <div className="w-full bg-blue-100 rounded-full h-2 overflow-hidden">
+                        {x86Status.total_bytes && x86Status.progress_bytes ? (
                           <div
-                            className="bg-gradient-to-r from-blue-500 to-blue-600 h-2.5 rounded-full transition-all duration-500 ease-out"
-                            style={{ width: `${status.progress_percent || 0}%` }}
+                            className="bg-gradient-to-r from-blue-500 to-blue-600 h-2 rounded-full transition-all duration-500 ease-out"
+                            style={{ width: `${x86Status.progress_percent || 0}%` }}
                           />
                         ) : (
-                          <div className="bg-gradient-to-r from-blue-400 via-blue-500 to-blue-400 h-2.5 rounded-full animate-pulse w-full opacity-60" />
+                          <div className="bg-gradient-to-r from-blue-400 via-blue-500 to-blue-400 h-2 rounded-full animate-pulse w-full opacity-60" />
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ARM64 Download progress */}
+                  {isDownloadingArm64 && arm64Status && (
+                    <div className="mt-3 space-y-1.5">
+                      <div className="flex justify-between items-center text-xs">
+                        <span className="text-purple-700 font-medium">
+                          ARM64: {arm64Status.progress_gb?.toFixed(2) || '0.00'} GB
+                          {arm64Status.total_gb ? ` / ${arm64Status.total_gb.toFixed(2)} GB` : ''}
+                        </span>
+                        <div className="flex items-center gap-2">
+                          {arm64Status.progress_percent && (
+                            <span className="text-purple-600 font-semibold">{arm64Status.progress_percent}%</span>
+                          )}
+                          {isAdmin && (
+                            <button
+                              onClick={() => onCancel(v.version, 'arm64')}
+                              disabled={actionLoading === `cancel-linux-${arm64Key}`}
+                              className="text-red-500 hover:text-red-700 p-0.5 rounded hover:bg-red-50"
+                              title="Cancel download"
+                            >
+                              <X className="h-4 w-4" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      <div className="w-full bg-purple-100 rounded-full h-2 overflow-hidden">
+                        {arm64Status.total_bytes && arm64Status.progress_bytes ? (
+                          <div
+                            className="bg-gradient-to-r from-purple-500 to-purple-600 h-2 rounded-full transition-all duration-500 ease-out"
+                            style={{ width: `${arm64Status.progress_percent || 0}%` }}
+                          />
+                        ) : (
+                          <div className="bg-gradient-to-r from-purple-400 via-purple-500 to-purple-400 h-2 rounded-full animate-pulse w-full opacity-60" />
                         )}
                       </div>
                     </div>
@@ -2664,33 +2754,30 @@ function LinuxVersionSection({ title, versions, icon: Icon, colorClass, onDelete
               </div>
 
               {/* Action buttons */}
-              <div className="mt-3 flex items-center gap-2">
-                {v.cached ? (
-                  <>
-                    <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                      <Check className="h-3 w-3 mr-1" />
-                      Cached
-                    </span>
+              <div className="mt-3 flex items-center gap-2 flex-wrap">
+                {/* x86_64 actions */}
+                {cachedX86 ? (
+                  <div className="flex items-center gap-1">
                     {isAdmin && (
                       <button
-                        onClick={() => onDelete(v.version)}
+                        onClick={() => onDelete(v.version, 'x86_64')}
                         disabled={isLoading}
                         className="p-1 text-red-600 hover:bg-red-50 rounded"
-                        title="Delete ISO"
+                        title="Delete x86_64 ISO"
                       >
-                        <Trash2 className="h-4 w-4" />
+                        <Trash2 className="h-3.5 w-3.5" />
                       </button>
                     )}
-                  </>
-                ) : isDownloading ? (
+                  </div>
+                ) : isDownloadingX86 ? (
                   <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
                     <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                    Downloading
+                    x86_64
                   </span>
                 ) : v.download_url ? (
                   isAdmin && (
                     <button
-                      onClick={() => onDownload(v)}
+                      onClick={() => onDownload(v, undefined, 'x86_64')}
                       disabled={isLoading}
                       className="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-blue-50 text-blue-700 hover:bg-blue-100"
                     >
@@ -2699,13 +2786,53 @@ function LinuxVersionSection({ title, versions, icon: Icon, colorClass, onDelete
                       ) : (
                         <Download className="h-3 w-3 mr-1" />
                       )}
-                      Download
+                      x86_64
                     </button>
                   )
                 ) : (
                   <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600" title={v.download_note}>
                     Auto-download
                   </span>
+                )}
+
+                {/* ARM64 actions (only if available) */}
+                {v.arm64_available && (
+                  <>
+                    {cachedArm64 ? (
+                      <div className="flex items-center gap-1">
+                        {isAdmin && (
+                          <button
+                            onClick={() => onDelete(v.version, 'arm64')}
+                            disabled={isLoading}
+                            className="p-1 text-red-600 hover:bg-red-50 rounded"
+                            title="Delete ARM64 ISO"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    ) : isDownloadingArm64 ? (
+                      <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
+                        <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                        ARM64
+                      </span>
+                    ) : (
+                      isAdmin && (
+                        <button
+                          onClick={() => onDownload(v, undefined, 'arm64')}
+                          disabled={isLoading}
+                          className="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-purple-50 text-purple-700 hover:bg-purple-100"
+                        >
+                          {isLoading ? (
+                            <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                          ) : (
+                            <Download className="h-3 w-3 mr-1" />
+                          )}
+                          ARM64
+                        </button>
+                      )
+                    )}
+                  </>
                 )}
               </div>
             </div>

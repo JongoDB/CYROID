@@ -511,6 +511,11 @@ export interface LinuxVersion {
   download_url: string | null
   download_note?: string
   cached?: boolean
+  // Architecture-specific fields
+  cached_x86_64?: boolean
+  cached_arm64?: boolean
+  arm64_available?: boolean
+  arm64_url?: string | null
 }
 
 export interface LinuxVersionsResponse {
@@ -522,6 +527,8 @@ export interface LinuxVersionsResponse {
   cached_count: number
   total_count: number
   note: string
+  host_arch?: 'x86_64' | 'arm64'
+  arm64_supported_distros?: string[]
 }
 
 export interface LinuxISODownloadResponse {

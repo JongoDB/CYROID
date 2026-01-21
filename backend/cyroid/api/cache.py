@@ -6,7 +6,7 @@ import logging
 from typing import List, Optional, Dict, Any
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, status, BackgroundTasks
+from fastapi import APIRouter, HTTPException, status, BackgroundTasks, Query
 from pydantic import BaseModel
 
 from cyroid.api.deps import DBSession, CurrentUser, AdminUser
@@ -1499,8 +1499,10 @@ def get_linux_versions(current_user: CurrentUser):
 
     These distributions are automatically downloaded by qemux/qemu
     when a container is started - no manual ISO download needed.
-    Returns cached status for each version.
+    Returns cached status for each version, including architecture availability.
     """
+    from cyroid.utils.arch import HOST_ARCH
+
     linux_iso_dir = get_linux_iso_dir()
 
     # Get list of cached ISO files
@@ -1510,19 +1512,34 @@ def get_linux_versions(current_user: CurrentUser):
             if filename.endswith((".iso", ".img", ".qcow2")):
                 cached_isos.add(filename.lower())
 
-    # Add cached status to each version
+    # Add cached status and architecture info to each version
     def add_cached_status(version_list):
         result = []
         for v in version_list:
             version_info = dict(v)
-            # Check for common ISO naming patterns
             version_code = v["version"]
-            is_cached = any(
-                version_code.lower() in iso_name or
-                f"linux-{version_code}".lower() in iso_name
+
+            # Check for architecture-specific cached ISOs
+            x86_cached = any(
+                f"linux-{version_code}-x86_64.iso".lower() in iso_name or
+                # Legacy format (backwards compat)
+                (f"linux-{version_code}.iso".lower() == iso_name)
                 for iso_name in cached_isos
             )
-            version_info["cached"] = is_cached
+            arm64_cached = any(
+                f"linux-{version_code}-arm64.iso".lower() in iso_name
+                for iso_name in cached_isos
+            )
+
+            # Backwards compat: "cached" = cached for current host architecture
+            version_info["cached"] = arm64_cached if HOST_ARCH == "arm64" else x86_cached
+            version_info["cached_x86_64"] = x86_cached
+            version_info["cached_arm64"] = arm64_cached
+
+            # ARM64 availability (from our defined list)
+            version_info["arm64_available"] = has_arm64_support(version_code)
+            version_info["arm64_url"] = get_arm64_iso_url(version_code)
+
             result.append(version_info)
         return result
 
@@ -1531,6 +1548,7 @@ def get_linux_versions(current_user: CurrentUser):
     server = [v for v in all_versions if v["category"] == "server"]
     security = [v for v in all_versions if v["category"] == "security"]
 
+    # Count cached for current host architecture
     cached_count = sum(1 for v in all_versions if v["cached"])
 
     return {
@@ -1541,6 +1559,8 @@ def get_linux_versions(current_user: CurrentUser):
         "cache_dir": linux_iso_dir,
         "cached_count": cached_count,
         "total_count": len(all_versions),
+        "host_arch": HOST_ARCH,
+        "arm64_supported_distros": list(ARM64_NATIVE_DISTROS),
         "note": "ISOs are automatically downloaded by qemux/qemu when the VM starts. Pre-caching is optional but speeds up first boot."
     }
 
@@ -1556,6 +1576,7 @@ def get_linux_iso_cache_status(current_user: CurrentUser):
 
 class LinuxISODownloadRequest(BaseModel):
     version: str
+    arch: Optional[str] = None  # x86_64 or arm64, defaults to host architecture
     url: Optional[str] = None  # Custom URL, or use default for version
 
 
@@ -1574,10 +1595,20 @@ def download_linux_iso(
     Admin only as this downloads large files.
 
     If no URL is provided, uses the default download URL for the distribution.
+    Architecture can be specified (x86_64 or arm64), defaults to host architecture.
     Some distributions don't have static download URLs and require manual download.
     """
     import os
     from cyroid.config import get_settings
+    from cyroid.utils.arch import HOST_ARCH
+
+    # Validate and default architecture
+    arch = request.arch or HOST_ARCH
+    if arch not in ("x86_64", "arm64"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid architecture '{arch}'. Must be 'x86_64' or 'arm64'."
+        )
 
     # Validate version
     version_info = None
@@ -1593,8 +1624,22 @@ def download_linux_iso(
             detail=f"Invalid version '{request.version}'. Valid versions: {', '.join(valid_versions)}"
         )
 
-    # Determine download URL
-    download_url = request.url or version_info.get("download_url")
+    # Determine download URL based on architecture
+    download_url = request.url  # Custom URL takes priority
+
+    if not download_url:
+        if arch == "arm64":
+            # Try ARM64 URL first
+            download_url = QEMU_LINUX_ARM64_ISOS.get(request.version)
+            if not download_url:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"No ARM64 ISO available for '{request.version}'. "
+                           f"ARM64 supported distros: {', '.join(QEMU_LINUX_ARM64_ISOS.keys())}"
+                )
+        else:
+            # Use x86_64 URL (default)
+            download_url = version_info.get("download_url")
 
     if not download_url:
         # No direct download URL available
@@ -1603,6 +1648,7 @@ def download_linux_iso(
         response = {
             "status": "no_direct_download",
             "version": request.version,
+            "arch": arch,
             "name": version_info["name"],
             "message": download_note,
             "instructions": "Provide a custom URL or upload the ISO manually.",
@@ -1616,33 +1662,38 @@ def download_linux_iso(
     linux_iso_dir = get_linux_iso_dir()
     os.makedirs(linux_iso_dir, exist_ok=True)
 
-    filename = f"linux-{request.version}.iso"
+    # Include architecture in filename for clarity
+    filename = f"linux-{request.version}-{arch}.iso"
     filepath = os.path.join(linux_iso_dir, filename)
 
     # Check if already exists
     if os.path.exists(filepath):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"ISO for '{request.version}' already exists. Delete it first to re-download."
+            detail=f"ISO for '{request.version}' ({arch}) already exists. Delete it first to re-download."
         )
 
+    # Track by version+arch to allow parallel downloads of different architectures
+    download_key = f"{request.version}-{arch}"
+
     # Check if already downloading
-    if request.version in _active_linux_downloads and _active_linux_downloads[request.version].get("status") == "downloading":
+    if download_key in _active_linux_downloads and _active_linux_downloads[download_key].get("status") == "downloading":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Download already in progress for '{request.version}'"
+            detail=f"Download already in progress for '{request.version}' ({arch})"
         )
 
     # Start download
-    _active_linux_downloads[request.version] = {
+    _active_linux_downloads[download_key] = {
         "status": "downloading",
         "filename": filename,
+        "arch": arch,
         "progress_bytes": 0,
         "total_bytes": None,
         "error": None
     }
 
-    def download_iso(url: str, dest_path: str, version: str):
+    def download_iso(url: str, dest_path: str, key: str):
         """Download ISO in background with progress tracking."""
         import requests
         import time
@@ -1656,71 +1707,103 @@ def download_linux_iso(
             total_size = response.headers.get('content-length')
             if total_size:
                 total_size = int(total_size)
-                _active_linux_downloads[version]["total_bytes"] = total_size
+                _active_linux_downloads[key]["total_bytes"] = total_size
 
             # Download with progress tracking
             downloaded = 0
             with open(dest_path, 'wb') as f:
                 for chunk in response.iter_content(chunk_size=1024 * 1024):  # 1MB chunks
                     # Check if download was cancelled
-                    if version not in _active_linux_downloads or _active_linux_downloads[version].get("cancelled"):
+                    if key not in _active_linux_downloads or _active_linux_downloads[key].get("cancelled"):
                         if os.path.exists(dest_path):
                             os.remove(dest_path)
-                        if version in _active_linux_downloads:
-                            del _active_linux_downloads[version]
+                        if key in _active_linux_downloads:
+                            del _active_linux_downloads[key]
                         return
                     if chunk:
                         f.write(chunk)
                         downloaded += len(chunk)
-                        _active_linux_downloads[version]["progress_bytes"] = downloaded
+                        _active_linux_downloads[key]["progress_bytes"] = downloaded
 
-            _active_linux_downloads[version]["status"] = "completed"
-            _active_linux_downloads[version]["progress_bytes"] = os.path.getsize(dest_path)
+            _active_linux_downloads[key]["status"] = "completed"
+            _active_linux_downloads[key]["progress_bytes"] = os.path.getsize(dest_path)
 
             # Clear from active downloads after a delay (allow frontend to see completion)
             time.sleep(3)
-            if version in _active_linux_downloads:
-                del _active_linux_downloads[version]
+            if key in _active_linux_downloads:
+                del _active_linux_downloads[key]
 
         except Exception as e:
             # Clean up partial download
             if os.path.exists(dest_path):
                 os.remove(dest_path)
-            if version in _active_linux_downloads:
-                _active_linux_downloads[version]["status"] = "failed"
-                _active_linux_downloads[version]["error"] = str(e)
+            if key in _active_linux_downloads:
+                _active_linux_downloads[key]["status"] = "failed"
+                _active_linux_downloads[key]["error"] = str(e)
                 # Clear failed downloads after a delay
                 time.sleep(5)
-                if version in _active_linux_downloads:
-                    del _active_linux_downloads[version]
+                if key in _active_linux_downloads:
+                    del _active_linux_downloads[key]
 
-    background_tasks.add_task(download_iso, download_url, filepath, request.version)
+    background_tasks.add_task(download_iso, download_url, filepath, download_key)
 
     return {
         "status": "downloading",
         "version": request.version,
+        "arch": arch,
         "name": version_info["name"],
         "filename": filename,
         "destination": filepath,
         "source_url": download_url,
         "expected_size_gb": version_info.get("size_gb"),
-        "message": f"Downloading {version_info['name']} ISO..."
+        "message": f"Downloading {version_info['name']} ({arch}) ISO..."
     }
 
 
 @router.get("/linux-isos/download/{version}/status")
-def get_linux_iso_download_status(version: str, current_user: CurrentUser):
+def get_linux_iso_download_status(
+    version: str,
+    arch: Optional[str] = Query(None, description="Architecture (x86_64 or arm64)"),
+    current_user: CurrentUser = None
+):
     """Check the status of a Linux ISO download."""
+    from cyroid.utils.arch import HOST_ARCH
+
     linux_iso_dir = get_linux_iso_dir()
-    filename = f"linux-{version}.iso"
+
+    # If arch specified, check that specific file
+    if arch:
+        download_key = f"{version}-{arch}"
+        filename = f"linux-{version}-{arch}.iso"
+    else:
+        # Check both architectures, prefer host arch
+        download_key = f"{version}-{HOST_ARCH}"
+        filename = f"linux-{version}-{HOST_ARCH}.iso"
+
+        # Also check old-style filename for backward compatibility
+        old_filename = f"linux-{version}.iso"
+        old_filepath = os.path.join(linux_iso_dir, old_filename)
+        if os.path.exists(old_filepath):
+            size = os.path.getsize(old_filepath)
+            return {
+                "status": "completed",
+                "version": version,
+                "arch": "x86_64",  # Old files are assumed x86_64
+                "filename": old_filename,
+                "path": old_filepath,
+                "size_bytes": size,
+                "size_gb": round(size / (1024**3), 2)
+            }
+
     filepath = os.path.join(linux_iso_dir, filename)
 
     # IMPORTANT: Check active downloads FIRST (file exists during download)
-    if version in _active_linux_downloads:
-        info = _active_linux_downloads[version]
+    if download_key in _active_linux_downloads:
+        info = _active_linux_downloads[download_key]
         response = {
             "status": info["status"],
             "version": version,
+            "arch": info.get("arch", arch or HOST_ARCH),
             "filename": info.get("filename"),
         }
 
@@ -1745,6 +1828,7 @@ def get_linux_iso_download_status(version: str, current_user: CurrentUser):
         return {
             "status": "completed",
             "version": version,
+            "arch": arch or HOST_ARCH,
             "filename": filename,
             "path": filepath,
             "size_bytes": size,
@@ -1754,52 +1838,88 @@ def get_linux_iso_download_status(version: str, current_user: CurrentUser):
     return {
         "status": "not_found",
         "version": version,
+        "arch": arch or HOST_ARCH,
         "message": "No download in progress and ISO not found in cache"
     }
 
 
 @router.post("/linux-isos/download/{version}/cancel")
-def cancel_linux_iso_download(version: str, current_user: AdminUser):
+def cancel_linux_iso_download(
+    version: str,
+    arch: Optional[str] = Query(None, description="Architecture (x86_64 or arm64)"),
+    current_user: AdminUser = None
+):
     """Cancel an in-progress Linux ISO download. Admin only."""
-    if version not in _active_linux_downloads:
+    from cyroid.utils.arch import HOST_ARCH
+
+    download_key = f"{version}-{arch}" if arch else f"{version}-{HOST_ARCH}"
+
+    if download_key not in _active_linux_downloads:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"No active download found for '{version}'"
+            detail=f"No active download found for '{version}' ({arch or HOST_ARCH})"
         )
 
-    if _active_linux_downloads[version].get("status") != "downloading":
+    if _active_linux_downloads[download_key].get("status") != "downloading":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Download for '{version}' is not in progress (status: {_active_linux_downloads[version].get('status')})"
+            detail=f"Download for '{version}' ({arch or HOST_ARCH}) is not in progress"
         )
 
     # Mark as cancelled - the download loop will detect this and clean up
-    _active_linux_downloads[version]["cancelled"] = True
-    _active_linux_downloads[version]["status"] = "cancelled"
+    _active_linux_downloads[download_key]["cancelled"] = True
+    _active_linux_downloads[download_key]["status"] = "cancelled"
 
-    return {"status": "cancelled", "version": version, "message": f"Download for '{version}' has been cancelled"}
+    return {
+        "status": "cancelled",
+        "version": version,
+        "arch": arch or HOST_ARCH,
+        "message": f"Download for '{version}' ({arch or HOST_ARCH}) has been cancelled"
+    }
 
 
 @router.delete("/linux-isos/{version}")
-def delete_linux_iso(version: str, current_user: AdminUser):
+def delete_linux_iso(
+    version: str,
+    arch: Optional[str] = Query(None, description="Architecture (x86_64 or arm64)"),
+    current_user: AdminUser = None
+):
     """Delete a cached Linux ISO. Admin only."""
+    from cyroid.utils.arch import HOST_ARCH
+
     linux_iso_dir = get_linux_iso_dir()
-    filename = f"linux-{version}.iso"
+
+    # If arch specified, delete that specific file
+    if arch:
+        download_key = f"{version}-{arch}"
+        filename = f"linux-{version}-{arch}.iso"
+    else:
+        # Try new-style filename with host arch first
+        download_key = f"{version}-{HOST_ARCH}"
+        filename = f"linux-{version}-{HOST_ARCH}.iso"
+
+        # Also check old-style filename for backward compatibility
+        old_filename = f"linux-{version}.iso"
+        old_filepath = os.path.join(linux_iso_dir, old_filename)
+        if os.path.exists(old_filepath) and not os.path.exists(os.path.join(linux_iso_dir, filename)):
+            filename = old_filename
+            download_key = version  # Old key format
+
     filepath = os.path.join(linux_iso_dir, filename)
 
-    # Clear any active download entry for this version
-    if version in _active_linux_downloads:
-        del _active_linux_downloads[version]
+    # Clear any active download entry
+    if download_key in _active_linux_downloads:
+        del _active_linux_downloads[download_key]
 
     if not os.path.exists(filepath):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"ISO for '{version}' not found"
+            detail=f"ISO for '{version}' ({arch or 'any'}) not found"
         )
 
     try:
         os.remove(filepath)
-        return {"status": "deleted", "version": version, "filename": filename}
+        return {"status": "deleted", "version": version, "arch": arch, "filename": filename}
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
