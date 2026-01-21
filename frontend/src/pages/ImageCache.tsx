@@ -1320,6 +1320,48 @@ export default function ImageCache() {
             isAdmin={isAdmin}
           />
 
+          {/* Cached Desktop Images (not in recommended list) - Issue #63 */}
+          {categorizedImages.desktop.length > 0 && (
+            <div className="bg-white shadow rounded-lg overflow-hidden">
+              <div className="px-6 py-4 border-b border-gray-200 bg-blue-50">
+                <h4 className="text-sm font-medium text-blue-800 flex items-center">
+                  <Monitor className="h-4 w-4 mr-2" />
+                  Cached Desktop Images ({categorizedImages.desktop.length})
+                </h4>
+                <p className="text-xs text-blue-600 mt-1">Cached desktop images with GUI/VNC access</p>
+              </div>
+              <ImageTable images={categorizedImages.desktop} onRemove={handleRemoveImage} actionLoading={actionLoading} isAdmin={isAdmin} />
+            </div>
+          )}
+
+          {/* Cached Server/CLI Images (not in recommended list) - Issue #63 */}
+          {categorizedImages.server.length > 0 && (
+            <div className="bg-white shadow rounded-lg overflow-hidden">
+              <div className="px-6 py-4 border-b border-gray-200 bg-purple-50">
+                <h4 className="text-sm font-medium text-purple-800 flex items-center">
+                  <Server className="h-4 w-4 mr-2" />
+                  Cached Server/CLI Images ({categorizedImages.server.length})
+                </h4>
+                <p className="text-xs text-purple-600 mt-1">Cached headless server and CLI images</p>
+              </div>
+              <ImageTable images={categorizedImages.server} onRemove={handleRemoveImage} actionLoading={actionLoading} isAdmin={isAdmin} />
+            </div>
+          )}
+
+          {/* Cached Service Images (not in recommended list) - Issue #63 */}
+          {categorizedImages.services.length > 0 && (
+            <div className="bg-white shadow rounded-lg overflow-hidden">
+              <div className="px-6 py-4 border-b border-gray-200 bg-green-50">
+                <h4 className="text-sm font-medium text-green-800 flex items-center">
+                  <Database className="h-4 w-4 mr-2" />
+                  Cached Service Images ({categorizedImages.services.length})
+                </h4>
+                <p className="text-xs text-green-600 mt-1">Cached database and service containers</p>
+              </div>
+              <ImageTable images={categorizedImages.services} onRemove={handleRemoveImage} actionLoading={actionLoading} isAdmin={isAdmin} />
+            </div>
+          )}
+
           {/* Other Cached Images (not in recommended list) */}
           {categorizedImages.other.length > 0 && (
             <div className="bg-white shadow rounded-lg overflow-hidden">
