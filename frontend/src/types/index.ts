@@ -139,6 +139,8 @@ export interface VM {
   linux_user_sudo: boolean
   // Boot source for QEMU VMs (Windows/Linux via dockur/qemux)
   boot_source: 'golden_image' | 'fresh_install' | null
+  // Target architecture for QEMU VMs
+  arch: 'x86_64' | 'arm64' | null
   position_x: number
   position_y: number
   created_at: string
@@ -1028,4 +1030,6 @@ export interface VMCreateWithImageLibrary {
   // Other VM settings
   display_type?: 'desktop' | 'server' | 'headless' | null
   boot_source?: 'golden_image' | 'fresh_install' | null
+  // Target architecture for QEMU VMs
+  arch?: 'x86_64' | 'arm64' | null
 }

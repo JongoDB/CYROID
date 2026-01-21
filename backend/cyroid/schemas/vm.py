@@ -100,6 +100,13 @@ class VMCreate(BaseModel):
         description="Boot source for QEMU VMs: 'golden_image' (pre-configured) or 'fresh_install' (from ISO)"
     )
 
+    # Target architecture for QEMU VMs
+    # Defaults to host architecture if not specified
+    arch: Optional[Literal["x86_64", "arm64"]] = Field(
+        None,
+        description="Target architecture: 'x86_64' or 'arm64'. Defaults to host architecture."
+    )
+
 
 class VMUpdate(BaseModel):
     hostname: Optional[str] = Field(None, min_length=1, max_length=63)
@@ -135,6 +142,8 @@ class VMUpdate(BaseModel):
     linux_user_sudo: Optional[bool] = None
     # Boot source for QEMU VMs
     boot_source: Optional[Literal["golden_image", "fresh_install"]] = None
+    # Target architecture
+    arch: Optional[Literal["x86_64", "arm64"]] = None
 
 
 class VMResponse(VMBase):
@@ -173,6 +182,8 @@ class VMResponse(VMBase):
     linux_user_sudo: bool = True
     # Boot source for QEMU VMs
     boot_source: Optional[str] = None
+    # Target architecture
+    arch: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 

@@ -997,6 +997,8 @@ class DockerService:
         linux_username: Optional[str] = None,
         linux_password: Optional[str] = None,
         linux_user_sudo: bool = True,
+        # Target architecture (x86_64 or arm64, defaults to host)
+        arch: Optional[str] = None,
     ) -> str:
         """
         Create a Linux VM container using qemux/qemu.
@@ -1093,19 +1095,21 @@ class DockerService:
         # Check if KVM is available for hardware acceleration
         kvm_available = os.path.exists("/dev/kvm")
 
-        # Determine if this distro needs emulation
-        # ARM64-native distros: ubuntu, debian, fedora, alpine, rocky, alma, kali
-        arm64_native = linux_distro.lower() in ('ubuntu', 'debian', 'fedora', 'alpine', 'rocky', 'alma', 'kali')
-        emulated = IS_ARM and not arm64_native
+        # Determine target architecture (use specified arch or default to host)
+        target_arch = arch or HOST_ARCH
+
+        # Determine if emulation is needed
+        # Emulation required when target arch differs from host arch
+        emulated = requires_emulation(target_arch)
 
         if kvm_available:
             if emulated:
                 logger.warning(
-                    f"Linux VM '{name}' ({linux_distro}) will run via x86 emulation on ARM host. "
+                    f"Linux VM '{name}' ({linux_distro}) will run {target_arch} via emulation on {HOST_ARCH} host. "
                     "Expect significantly slower performance (10-20x)."
                 )
             else:
-                logger.info(f"KVM acceleration enabled for Linux VM (native {'ARM64' if IS_ARM else 'x86_64'})")
+                logger.info(f"KVM acceleration enabled for Linux VM (native {target_arch})")
         else:
             logger.warning("KVM not available, Linux VM will run in software emulation mode")
 
@@ -1121,15 +1125,15 @@ class DockerService:
             # Try architecture-specific filename first, then legacy format
             linux_iso_dir = os.path.join(settings.iso_cache_dir, "linux-isos")
 
-            # Priority 1: Architecture-specific filename (e.g., linux-kali-arm64.iso)
-            arch_specific_iso = os.path.join(linux_iso_dir, f"linux-{linux_distro}-{HOST_ARCH}.iso")
+            # Priority 1: Architecture-specific filename for target arch (e.g., linux-kali-arm64.iso)
+            arch_specific_iso = os.path.join(linux_iso_dir, f"linux-{linux_distro}-{target_arch}.iso")
             # Priority 2: Legacy filename (e.g., linux-kali.iso)
             legacy_iso = os.path.join(linux_iso_dir, f"linux-{linux_distro}.iso")
 
             cached_iso = None
             if os.path.isfile(arch_specific_iso):
                 cached_iso = arch_specific_iso
-                logger.info(f"Using cached ISO (arch-specific): {cached_iso}")
+                logger.info(f"Using cached ISO (arch-specific {target_arch}): {cached_iso}")
             elif os.path.isfile(legacy_iso):
                 cached_iso = legacy_iso
                 logger.info(f"Using cached ISO (legacy): {cached_iso}")

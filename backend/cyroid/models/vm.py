@@ -106,6 +106,11 @@ class VM(Base, UUIDMixin, TimestampMixin):
     # Only used for Windows/Linux VM types (not container-based VMs)
     boot_source: Mapped[Optional[str]] = mapped_column(String(20), nullable=True, default=None)
 
+    # Target architecture for QEMU VMs (x86_64 or arm64)
+    # Defaults to host architecture if not specified
+    # Used to select correct cached ISO and determine if emulation is needed
+    arch: Mapped[Optional[str]] = mapped_column(String(10), nullable=True, default=None)
+
     # Position in visual builder (for UI)
     position_x: Mapped[int] = mapped_column(Integer, default=0)
     position_y: Mapped[int] = mapped_column(Integer, default=0)

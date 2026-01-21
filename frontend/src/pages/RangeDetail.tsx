@@ -100,7 +100,9 @@ export default function RangeDetail() {
     linux_password: '',
     linux_user_sudo: true,
     // Boot source for QEMU VMs (Windows/Linux)
-    boot_source: undefined
+    boot_source: undefined,
+    // Target architecture for QEMU VMs
+    arch: undefined as 'x86_64' | 'arm64' | undefined
   })
   const [showWindowsOptions, setShowWindowsOptions] = useState(false)
   const [showLinuxISOOptions, setShowLinuxISOOptions] = useState(false)
@@ -657,6 +659,8 @@ export default function RangeDetail() {
         vmData.display_type = vmForm.display_type || 'desktop'
         // Boot source for QEMU VMs
         if (vmForm.boot_source) vmData.boot_source = vmForm.boot_source
+        // Target architecture
+        if (vmForm.arch) vmData.arch = vmForm.arch
         // Network configuration
         vmData.use_dhcp = vmForm.use_dhcp || false
         if (!vmForm.use_dhcp) {
@@ -679,6 +683,8 @@ export default function RangeDetail() {
         vmData.display_type = vmForm.display_type || 'desktop'
         // Boot source for QEMU VMs
         if (vmForm.boot_source) vmData.boot_source = vmForm.boot_source
+        // Target architecture
+        if (vmForm.arch) vmData.arch = vmForm.arch
         // Network configuration (static IP only for Linux)
         if (vmForm.gateway) vmData.gateway = vmForm.gateway
         if (vmForm.dns_servers) vmData.dns_servers = vmForm.dns_servers
@@ -719,7 +725,9 @@ export default function RangeDetail() {
         // Linux user configuration reset
         linux_username: '', linux_password: '', linux_user_sudo: true,
         // Boot source reset
-        boot_source: undefined
+        boot_source: undefined,
+        // Architecture reset
+        arch: undefined
       })
       setShowWindowsOptions(false)
       setShowLinuxISOOptions(false)
@@ -1754,6 +1762,52 @@ export default function RangeDetail() {
                           : 'Select a boot source. Images must be cached before deployment.'}
                       </p>
                     </div>
+                    {/* Architecture Selection - For fresh install only */}
+                    {vmForm.boot_source === 'fresh_install' && (
+                      <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
+                        <label className="block text-sm font-medium text-gray-900 mb-2">Target Architecture</label>
+                        <div className="space-y-2">
+                          <label className="flex items-center">
+                            <input
+                              type="radio"
+                              name="windows_arch"
+                              value=""
+                              checked={!vmForm.arch}
+                              onChange={() => setVmForm({ ...vmForm, arch: undefined })}
+                              className="mr-2 text-purple-600"
+                            />
+                            <span className="text-sm">Host Default (Recommended)</span>
+                          </label>
+                          <label className="flex items-center">
+                            <input
+                              type="radio"
+                              name="windows_arch"
+                              value="x86_64"
+                              checked={vmForm.arch === 'x86_64'}
+                              onChange={() => setVmForm({ ...vmForm, arch: 'x86_64' })}
+                              className="mr-2 text-purple-600"
+                            />
+                            <span className="text-sm">x86_64 (Intel/AMD)</span>
+                          </label>
+                          <label className="flex items-center">
+                            <input
+                              type="radio"
+                              name="windows_arch"
+                              value="arm64"
+                              checked={vmForm.arch === 'arm64'}
+                              onChange={() => setVmForm({ ...vmForm, arch: 'arm64' })}
+                              className="mr-2 text-purple-600"
+                            />
+                            <span className="text-sm">ARM64 (Apple Silicon/ARM)</span>
+                          </label>
+                        </div>
+                        <p className="mt-2 text-xs text-purple-700">
+                          {!vmForm.arch
+                            ? 'Uses host architecture for native performance.'
+                            : 'Cross-architecture VMs run via emulation (10-20x slower).'}
+                        </p>
+                      </div>
+                    )}
                     <div>
                       <label className="block text-sm font-medium text-gray-700">Environment Type</label>
                       <select
@@ -2028,6 +2082,52 @@ export default function RangeDetail() {
                           : 'Select a boot source. Images must be cached before deployment.'}
                       </p>
                     </div>
+                    {/* Architecture Selection - For fresh install only */}
+                    {vmForm.boot_source === 'fresh_install' && (
+                      <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
+                        <label className="block text-sm font-medium text-gray-900 mb-2">Target Architecture</label>
+                        <div className="space-y-2">
+                          <label className="flex items-center">
+                            <input
+                              type="radio"
+                              name="linux_arch"
+                              value=""
+                              checked={!vmForm.arch}
+                              onChange={() => setVmForm({ ...vmForm, arch: undefined })}
+                              className="mr-2 text-purple-600"
+                            />
+                            <span className="text-sm">Host Default (Recommended)</span>
+                          </label>
+                          <label className="flex items-center">
+                            <input
+                              type="radio"
+                              name="linux_arch"
+                              value="x86_64"
+                              checked={vmForm.arch === 'x86_64'}
+                              onChange={() => setVmForm({ ...vmForm, arch: 'x86_64' })}
+                              className="mr-2 text-purple-600"
+                            />
+                            <span className="text-sm">x86_64 (Intel/AMD)</span>
+                          </label>
+                          <label className="flex items-center">
+                            <input
+                              type="radio"
+                              name="linux_arch"
+                              value="arm64"
+                              checked={vmForm.arch === 'arm64'}
+                              onChange={() => setVmForm({ ...vmForm, arch: 'arm64' })}
+                              className="mr-2 text-purple-600"
+                            />
+                            <span className="text-sm">ARM64 (Apple Silicon/ARM)</span>
+                          </label>
+                        </div>
+                        <p className="mt-2 text-xs text-purple-700">
+                          {!vmForm.arch
+                            ? 'Uses host architecture for native performance.'
+                            : 'Cross-architecture VMs run via emulation (10-20x slower).'}
+                        </p>
+                      </div>
+                    )}
                     <div>
                       <label className="block text-sm font-medium text-gray-700">Environment Type</label>
                       <select

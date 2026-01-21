@@ -130,6 +130,15 @@ def compute_emulation_status(
     Returns:
         Tuple of (is_emulated, warning_message)
     """
+    # If VM has explicit architecture set, check against host
+    if vm.arch:
+        from cyroid.utils.arch import requires_emulation
+        if requires_emulation(vm.arch):
+            arch_display = "ARM64" if vm.arch == "arm64" else "x86_64"
+            host_display = "ARM64" if IS_ARM else "x86_64"
+            return True, f"VM targets {arch_display} but host is {host_display}. Performance will be reduced (10-20x slower)."
+        return False, None
+
     if not IS_ARM:
         # x86 hosts run everything natively
         return False, None
@@ -227,6 +236,9 @@ def vm_to_response(
         "manual_install": vm.manual_install,
         "linux_username": vm.linux_username,
         "linux_user_sudo": vm.linux_user_sudo,
+        "boot_source": vm.boot_source,
+        "arch": vm.arch,
+        "error_message": vm.error_message,
         "created_at": vm.created_at,
         "updated_at": vm.updated_at,
         "emulated": emulated,
@@ -908,6 +920,8 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
                         gateway=network.gateway,
                         dns_servers=network.dns_servers,
                         dns_search=network.dns_search,
+                        # Architecture selection
+                        arch=vm.arch,
                     )
             elif vm_type == VMType.LINUX_VM:
                 # Linux VM using qemux/qemu (ISO-based Linux installation)
@@ -1007,6 +1021,8 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
                         gateway=network.gateway,
                         dns_servers=network.dns_servers,
                         dns_search=network.dns_search,
+                        # Architecture selection
+                        arch=vm.arch,
                     )
             else:
                 # Container (standard Docker container) or snapshot-based VM
