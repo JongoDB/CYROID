@@ -1257,10 +1257,10 @@ DOCKUR_WINDOWS_VERSIONS = [
 
 
 # Windows ARM64 versions (for dockur/windows-arm)
-# Only Windows 10 and 11 are available for ARM64
+# Only Windows 11 ARM64 has direct download URLs from Microsoft
+# Windows 10 ARM64 requires UUP build at runtime (not pre-cacheable)
 # See: https://github.com/dockur/windows-arm
 DOCKUR_WINDOWS_ARM64_VERSIONS = {
-    # Windows 11 ARM64
     "11": {
         "name": "Windows 11 Pro ARM64",
         "size_gb": 7.3,
@@ -1276,27 +1276,10 @@ DOCKUR_WINDOWS_ARM64_VERSIONS = {
         "size_gb": 5.0,
         "download_url": "https://software-static.download.prss.microsoft.com/dbazure/888969d5-f34g-4e03-ac9d-1f9786c66749/26100.1.240331-1435.ge_release_CLIENT_IOT_LTSC_EVAL_A64FRE_en-us.iso",
     },
-    # Windows 10 ARM64
-    "10": {
-        "name": "Windows 10 Pro ARM64",
-        "size_gb": 4.7,
-        # No direct Microsoft link available; dockur/windows-arm downloads via UUP
-        "download_note": "Windows 10 ARM64 ISOs are built by dockur/windows-arm at runtime. Pre-caching not currently supported.",
-    },
-    "10e": {
-        "name": "Windows 10 Enterprise ARM64",
-        "size_gb": 4.7,
-        "download_note": "Windows 10 ARM64 ISOs are built by dockur/windows-arm at runtime. Pre-caching not currently supported.",
-    },
-    "10l": {
-        "name": "Windows 10 LTSC ARM64",
-        "size_gb": 4.4,
-        "download_note": "Windows 10 ARM64 ISOs are built by dockur/windows-arm at runtime. Pre-caching not currently supported.",
-    },
 }
 
-# Windows versions with ARM64 support
-WINDOWS_ARM64_VERSIONS = {"11", "11e", "11l", "10", "10e", "10l"}
+# Windows versions with ARM64 ISO pre-cache support (Win11 only)
+WINDOWS_ARM64_VERSIONS = {"11", "11e", "11l"}
 
 
 def get_windows_arm64_info(version: str) -> dict | None:
@@ -2048,7 +2031,7 @@ def get_windows_versions(current_user: CurrentUser):
         "total_count": len(all_versions),
         "host_arch": HOST_ARCH,
         "note": "ISOs are automatically downloaded by dockur/windows when the VM starts. Pre-caching is optional but speeds up first boot.",
-        "arm64_note": "ARM64 support is available for Windows 10/11 only. Server editions require x86_64."
+        "arm64_note": "ARM64 pre-caching available for Windows 11 only. Server/legacy editions require x86_64."
     }
 
 
