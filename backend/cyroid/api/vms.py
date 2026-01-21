@@ -1309,10 +1309,18 @@ def get_vm_vnc_info(vm_id: UUID, db: DBSession, current_user: CurrentUser, reque
     try:
         # Check if range uses DinD isolation with VNC proxy
         range_obj = db.query(Range).filter(Range.id == vm.range_id).first()
-        if range_obj and range_obj.vnc_proxy_mappings:
-            proxy_mapping = range_obj.vnc_proxy_mappings.get(str(vm.id))
+
+        # Check if this is a DinD range by looking for dind_container_id
+        use_dind = range_obj and range_obj.dind_container_id is not None if range_obj else False
+
+        if use_dind:
+            # DinD range - VNC must be set up through proxy mappings
+            proxy_mapping = None
+            if range_obj.vnc_proxy_mappings:
+                proxy_mapping = range_obj.vnc_proxy_mappings.get(str(vm.id))
+
             if proxy_mapping:
-                # DinD range with VNC proxy - return proxy connection info
+                # VNC proxy is configured - return connection info
                 return {
                     "vm_id": str(vm.id),
                     "hostname": vm.hostname,
@@ -1323,7 +1331,72 @@ def get_vm_vnc_info(vm_id: UUID, db: DBSession, current_user: CurrentUser, reque
                     "method": "dind_proxy",
                 }
 
-        # Standard deployment - VNC is proxied through traefik at /vnc/{vm_id}
+            # VNC not configured for this VM in DinD range - try to set it up on-demand
+            if vm.ip_address:
+                try:
+                    from cyroid.services.dind_service import get_dind_service
+                    from cyroid.services.traefik_route_service import get_traefik_route_service
+
+                    dind_service = get_dind_service()
+                    traefik_service = get_traefik_route_service()
+
+                    # Determine VNC port based on VM type and image
+                    vnc_port = 8006  # Default for QEMU VMs (linux_vm, windows_vm)
+                    if vm.base_image:
+                        # Check vm_type first
+                        if vm.base_image.vm_type == "container":
+                            vnc_port = 3000  # Default for containers
+                            # Check docker_image_tag for specific images
+                            image_tag = vm.base_image.docker_image_tag or ""
+                            if "kasmweb" in image_tag.lower():
+                                vnc_port = 6901
+                            elif "linuxserver/" in image_tag.lower() or "lscr.io/linuxserver" in image_tag.lower():
+                                vnc_port = 3000
+
+                    vm_ports = [{
+                        "vm_id": str(vm.id),
+                        "hostname": vm.hostname,
+                        "vnc_port": vnc_port,
+                        "ip_address": vm.ip_address,
+                    }]
+
+                    existing_mappings = range_obj.vnc_proxy_mappings or {}
+
+                    port_mappings = asyncio.run(dind_service.setup_vnc_port_forwarding(
+                        range_id=str(vm.range_id),
+                        vm_ports=vm_ports,
+                        existing_mappings=existing_mappings,
+                    ))
+
+                    existing_mappings.update(port_mappings)
+                    range_obj.vnc_proxy_mappings = existing_mappings
+                    db.commit()
+
+                    # Generate Traefik routes
+                    traefik_service.generate_vnc_routes(str(vm.range_id), existing_mappings)
+
+                    proxy_mapping = port_mappings.get(str(vm.id))
+                    if proxy_mapping:
+                        logger.info(f"Set up VNC routing on-demand for VM {vm.hostname}")
+                        return {
+                            "vm_id": str(vm.id),
+                            "hostname": vm.hostname,
+                            "path": f"/vnc/{vm.id}",
+                            "websocket_path": "websockify",
+                            "proxy_host": proxy_mapping.get("proxy_host"),
+                            "proxy_port": proxy_mapping.get("proxy_port"),
+                            "method": "dind_proxy",
+                        }
+                except Exception as e:
+                    logger.warning(f"Failed to set up VNC routing on-demand for VM {vm.hostname}: {e}")
+
+            # VNC routing failed for DinD range
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="VNC console not available - routing not configured for this VM",
+            )
+
+        # Standard (non-DinD) deployment - VNC is proxied through traefik at /vnc/{vm_id}
         vnc_path = f"/vnc/{vm.id}"
 
         # All VNC implementations (KasmVNC, noVNC/websockify, dockur) use /websockify path
