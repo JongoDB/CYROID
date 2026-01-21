@@ -276,6 +276,9 @@ class RangeDeploymentService:
                 container_id=container_id,
             )
 
+            # Mark VM as running after successful start (Issue #75)
+            vm.status = VMStatus.RUNNING
+
         db.commit()
 
         # 5. Set up VNC port forwarding using iptables DNAT (replaces nginx proxy)

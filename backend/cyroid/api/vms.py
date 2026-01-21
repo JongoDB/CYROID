@@ -1597,7 +1597,7 @@ def get_vm_vnc_info(vm_id: UUID, db: DBSession, current_user: CurrentUser, reque
                     "vm_id": str(vm.id),
                     "hostname": vm.hostname,
                     "path": f"/vnc/{vm.id}",
-                    "websocket_path": "websockify",
+                    "websocket_path": f"vnc/{vm.id}",  # KasmVNC builds WS URL as host + path (Issue #77)
                     "proxy_host": proxy_mapping.get("proxy_host"),
                     "proxy_port": proxy_mapping.get("proxy_port"),
                     "method": "dind_proxy",
@@ -1654,7 +1654,7 @@ def get_vm_vnc_info(vm_id: UUID, db: DBSession, current_user: CurrentUser, reque
                             "vm_id": str(vm.id),
                             "hostname": vm.hostname,
                             "path": f"/vnc/{vm.id}",
-                            "websocket_path": "websockify",
+                            "websocket_path": f"vnc/{vm.id}",  # KasmVNC builds WS URL as host + path (Issue #77)
                             "proxy_host": proxy_mapping.get("proxy_host"),
                             "proxy_port": proxy_mapping.get("proxy_port"),
                             "method": "dind_proxy",
@@ -1671,8 +1671,8 @@ def get_vm_vnc_info(vm_id: UUID, db: DBSession, current_user: CurrentUser, reque
         # Standard (non-DinD) deployment - VNC is proxied through traefik at /vnc/{vm_id}
         vnc_path = f"/vnc/{vm.id}"
 
-        # All VNC implementations (KasmVNC, noVNC/websockify, dockur) use /websockify path
-        websocket_path = "websockify"
+        # KasmVNC builds WebSocket URL as host + path, so use full vnc path (Issue #77)
+        websocket_path = f"vnc/{vm.id}"
 
         # Return the path - frontend will construct full URL using browser hostname
         # This avoids issues with Docker internal hostnames in the Host header
