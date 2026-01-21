@@ -190,6 +190,34 @@ import type {
   LoadImagesResult,
 } from '../types'
 
+// Range Console types (DinD diagnostics)
+export interface RangeConsoleContainer {
+  id: string
+  name: string
+  status: string
+  image: string
+}
+
+export interface RangeConsoleNetwork {
+  id: string
+  name: string
+  driver: string
+  scope: string
+}
+
+export interface RangeConsoleStats {
+  container_count: number
+  network_count: number
+}
+
+export interface RangeConsoleIptables {
+  iptables_nat: string
+}
+
+export interface RangeConsoleRoutes {
+  routes: string
+}
+
 export const rangesApi = {
   list: () => api.get<Range[]>('/ranges'),
   get: (id: string) => api.get<Range>(`/ranges/${id}`),
@@ -262,6 +290,18 @@ export const rangesApi = {
       headers: { 'Content-Type': 'multipart/form-data' },
     })
   },
+
+  // Range Console (DinD diagnostics)
+  getConsoleContainers: (rangeId: string) =>
+    api.get<RangeConsoleContainer[]>(`/ranges/${rangeId}/console/containers`),
+  getConsoleNetworks: (rangeId: string) =>
+    api.get<RangeConsoleNetwork[]>(`/ranges/${rangeId}/console/networks`),
+  getConsoleStats: (rangeId: string) =>
+    api.get<RangeConsoleStats>(`/ranges/${rangeId}/console/stats`),
+  getConsoleIptables: (rangeId: string) =>
+    api.get<RangeConsoleIptables>(`/ranges/${rangeId}/console/iptables`),
+  getConsoleRoutes: (rangeId: string) =>
+    api.get<RangeConsoleRoutes>(`/ranges/${rangeId}/console/routes`),
 }
 
 // Networks API

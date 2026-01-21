@@ -381,6 +381,155 @@ async def vm_vnc_console(
                 pass
 
 
+@router.websocket("/ws/range-console/{range_id}")
+async def range_console(
+    websocket: WebSocket,
+    range_id: UUID,
+    token: str = Query(...),
+):
+    """
+    WebSocket endpoint for Range Console - shell access to the DinD container.
+
+    Provides interactive terminal to the Docker-in-Docker container that hosts
+    the range's networks and VMs. Useful for:
+    - Running docker commands (ps, logs, inspect)
+    - Viewing network configuration (iptables, ip routes)
+    - Troubleshooting range deployment issues
+    - Debugging container networking
+
+    Only available for DinD-based deployments.
+    """
+    await websocket.accept()
+
+    db = next(get_db())
+
+    try:
+        # Authenticate
+        user = await get_current_user_ws(websocket, token, db)
+        if not user:
+            return
+
+        # Check user has admin or range_engineer role for console access
+        if user.role not in ["admin", "range_engineer"]:
+            await websocket.close(code=4003, reason="Insufficient permissions")
+            return
+
+        # Get range
+        range_obj = db.query(Range).filter(Range.id == range_id).first()
+        if not range_obj:
+            await websocket.close(code=4004, reason="Range not found")
+            return
+
+        # Check if range has DinD container
+        if not range_obj.dind_container_id:
+            await websocket.close(code=4000, reason="Range is not a DinD deployment")
+            return
+
+        # Get the DinD container from the host Docker
+        from cyroid.services.docker_service import get_docker_service
+        docker_service = get_docker_service()
+        host_client = docker_service.client
+
+        try:
+            dind_container = host_client.containers.get(range_obj.dind_container_id)
+        except Exception as e:
+            await websocket.close(code=4000, reason=f"DinD container not found: {e}")
+            return
+
+        # Check container is running
+        if dind_container.status != "running":
+            await websocket.close(code=4000, reason="DinD container is not running")
+            return
+
+        # Create interactive shell exec in the DinD container
+        shell_cmd = ["/bin/sh", "-c", "if [ -x /bin/bash ]; then exec /bin/bash; else exec /bin/sh; fi"]
+
+        exec_instance = host_client.api.exec_create(
+            dind_container.id,
+            cmd=shell_cmd,
+            stdin=True,
+            tty=True,
+            stdout=True,
+            stderr=True,
+            privileged=True,  # Allow full access for diagnostics
+        )
+
+        # Start exec and get socket
+        exec_socket = host_client.api.exec_start(
+            exec_instance["Id"],
+            socket=True,
+            tty=True,
+        )
+
+        exec_socket._sock.setblocking(False)
+
+        connection_alive = True
+
+        async def read_from_container():
+            """Read output from DinD container and send to WebSocket."""
+            nonlocal connection_alive
+            try:
+                await asyncio.sleep(0.1)  # Wait for shell to start
+
+                while connection_alive:
+                    try:
+                        data = exec_socket._sock.recv(4096)
+                        if data:
+                            # Skip Docker stream header (8 bytes) if present
+                            if len(data) > 8 and data[0] in (0, 1, 2):
+                                data = data[8:]
+                            if data:
+                                await websocket.send_text(data.decode("utf-8", errors="replace"))
+                        else:
+                            logger.info(f"DinD container socket closed for range {range_id}")
+                            connection_alive = False
+                            break
+                    except BlockingIOError:
+                        await asyncio.sleep(0.05)
+                    except OSError as e:
+                        logger.warning(f"Socket error for range {range_id}: {e}")
+                        connection_alive = False
+                        break
+            except Exception as e:
+                logger.error(f"Error reading from DinD container: {e}")
+                connection_alive = False
+
+        async def write_to_container():
+            """Read input from WebSocket and send to DinD container."""
+            nonlocal connection_alive
+            try:
+                while connection_alive:
+                    try:
+                        data = await asyncio.wait_for(websocket.receive_text(), timeout=1.0)
+                        exec_socket._sock.send(data.encode())
+                    except asyncio.TimeoutError:
+                        continue
+            except WebSocketDisconnect:
+                logger.info(f"Range console WebSocket disconnected for range {range_id}")
+                connection_alive = False
+            except Exception as e:
+                logger.error(f"Error writing to DinD container: {e}")
+                connection_alive = False
+
+        # Run both tasks concurrently
+        await asyncio.gather(
+            read_from_container(),
+            write_to_container(),
+            return_exceptions=True,
+        )
+
+    except WebSocketDisconnect:
+        logger.info(f"Range console WebSocket disconnected for range {range_id}")
+    except Exception as e:
+        logger.error(f"Range console WebSocket error for range {range_id}: {e}")
+        try:
+            await websocket.close(code=4000, reason=str(e))
+        except Exception:
+            pass
+    finally:
+        db.close()
+
+
 @router.websocket("/ws/status/{range_id}")
 async def range_status(
     websocket: WebSocket,

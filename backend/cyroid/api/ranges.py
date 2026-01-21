@@ -1687,3 +1687,266 @@ def remove_range_tag(range_id: UUID, tag: str, db: DBSession, current_user: Curr
     db.commit()
 
     return {"message": f"Tag '{tag}' removed from range"}
+
+
+# ============================================================================
+# Range Console - DinD Quick Actions
+# ============================================================================
+
+class RangeConsoleContainer(BaseModel):
+    """Container info from DinD."""
+    id: str
+    name: str
+    status: str
+    image: str
+    created: str
+
+
+class RangeConsoleNetwork(BaseModel):
+    """Network info from DinD."""
+    id: str
+    name: str
+    driver: str
+    scope: str
+
+
+class RangeConsoleStats(BaseModel):
+    """Resource stats from DinD."""
+    container_count: int
+    network_count: int
+    cpu_percent: Optional[float] = None
+    memory_mb: Optional[float] = None
+
+
+@router.get("/{range_id}/console/containers", response_model=List[RangeConsoleContainer])
+def get_range_containers(range_id: UUID, db: DBSession, current_user: CurrentUser):
+    """
+    List all containers in the range's DinD environment.
+    Equivalent to 'docker ps -a' inside the DinD container.
+    """
+    range_obj = db.query(Range).filter(Range.id == range_id).first()
+    if not range_obj:
+        raise HTTPException(status_code=404, detail="Range not found")
+
+    if not range_obj.dind_container_id or not range_obj.dind_docker_url:
+        raise HTTPException(status_code=400, detail="Range is not a DinD deployment")
+
+    from cyroid.services.dind_service import get_dind_service
+    dind_service = get_dind_service()
+
+    try:
+        range_client = dind_service.get_range_client(str(range_id), range_obj.dind_docker_url)
+        containers = range_client.containers.list(all=True)
+
+        return [
+            RangeConsoleContainer(
+                id=c.short_id,
+                name=c.name,
+                status=c.status,
+                image=c.image.tags[0] if c.image.tags else c.image.short_id,
+                created=c.attrs.get("Created", "")[:19],
+            )
+            for c in containers
+        ]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to list containers: {e}")
+
+
+@router.get("/{range_id}/console/networks", response_model=List[RangeConsoleNetwork])
+def get_range_networks(range_id: UUID, db: DBSession, current_user: CurrentUser):
+    """
+    List all networks in the range's DinD environment.
+    Equivalent to 'docker network ls' inside the DinD container.
+    """
+    range_obj = db.query(Range).filter(Range.id == range_id).first()
+    if not range_obj:
+        raise HTTPException(status_code=404, detail="Range not found")
+
+    if not range_obj.dind_container_id or not range_obj.dind_docker_url:
+        raise HTTPException(status_code=400, detail="Range is not a DinD deployment")
+
+    from cyroid.services.dind_service import get_dind_service
+    dind_service = get_dind_service()
+
+    try:
+        range_client = dind_service.get_range_client(str(range_id), range_obj.dind_docker_url)
+        networks = range_client.networks.list()
+
+        return [
+            RangeConsoleNetwork(
+                id=n.short_id,
+                name=n.name,
+                driver=n.attrs.get("Driver", ""),
+                scope=n.attrs.get("Scope", ""),
+            )
+            for n in networks
+        ]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to list networks: {e}")
+
+
+@router.get("/{range_id}/console/container/{container_id}/logs")
+def get_container_logs(
+    range_id: UUID,
+    container_id: str,
+    db: DBSession,
+    current_user: CurrentUser,
+    tail: int = Query(100, ge=1, le=10000),
+):
+    """
+    Get logs from a container in the range's DinD environment.
+    Equivalent to 'docker logs --tail N <container>' inside DinD.
+    """
+    range_obj = db.query(Range).filter(Range.id == range_id).first()
+    if not range_obj:
+        raise HTTPException(status_code=404, detail="Range not found")
+
+    if not range_obj.dind_container_id or not range_obj.dind_docker_url:
+        raise HTTPException(status_code=400, detail="Range is not a DinD deployment")
+
+    from cyroid.services.dind_service import get_dind_service
+    dind_service = get_dind_service()
+
+    try:
+        range_client = dind_service.get_range_client(str(range_id), range_obj.dind_docker_url)
+        container = range_client.containers.get(container_id)
+        logs = container.logs(tail=tail, timestamps=True).decode("utf-8", errors="replace")
+
+        return {"container_id": container_id, "logs": logs}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get container logs: {e}")
+
+
+@router.get("/{range_id}/console/stats", response_model=RangeConsoleStats)
+def get_range_stats(range_id: UUID, db: DBSession, current_user: CurrentUser):
+    """
+    Get resource statistics for the range's DinD environment.
+    """
+    range_obj = db.query(Range).filter(Range.id == range_id).first()
+    if not range_obj:
+        raise HTTPException(status_code=404, detail="Range not found")
+
+    if not range_obj.dind_container_id or not range_obj.dind_docker_url:
+        raise HTTPException(status_code=400, detail="Range is not a DinD deployment")
+
+    from cyroid.services.dind_service import get_dind_service
+    dind_service = get_dind_service()
+
+    try:
+        range_client = dind_service.get_range_client(str(range_id), range_obj.dind_docker_url)
+        containers = range_client.containers.list(all=True)
+        networks = range_client.networks.list()
+
+        return RangeConsoleStats(
+            container_count=len(containers),
+            network_count=len(networks),
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get stats: {e}")
+
+
+@router.get("/{range_id}/console/iptables")
+def get_range_iptables(range_id: UUID, db: DBSession, current_user: CurrentUser):
+    """
+    Get iptables NAT rules from the DinD container.
+    Shows VNC port forwarding and network routing rules.
+    """
+    range_obj = db.query(Range).filter(Range.id == range_id).first()
+    if not range_obj:
+        raise HTTPException(status_code=404, detail="Range not found")
+
+    if not range_obj.dind_container_id:
+        raise HTTPException(status_code=400, detail="Range is not a DinD deployment")
+
+    from cyroid.services.docker_service import get_docker_service
+    docker_service = get_docker_service()
+
+    try:
+        dind_container = docker_service.client.containers.get(range_obj.dind_container_id)
+        result = dind_container.exec_run("iptables -t nat -L -n -v", privileged=True)
+        output = result.output.decode("utf-8", errors="replace")
+
+        return {"iptables_nat": output}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get iptables rules: {e}")
+
+
+@router.get("/{range_id}/console/routes")
+def get_range_routes(range_id: UUID, db: DBSession, current_user: CurrentUser):
+    """
+    Get IP routing table from the DinD container.
+    """
+    range_obj = db.query(Range).filter(Range.id == range_id).first()
+    if not range_obj:
+        raise HTTPException(status_code=404, detail="Range not found")
+
+    if not range_obj.dind_container_id:
+        raise HTTPException(status_code=400, detail="Range is not a DinD deployment")
+
+    from cyroid.services.docker_service import get_docker_service
+    docker_service = get_docker_service()
+
+    try:
+        dind_container = docker_service.client.containers.get(range_obj.dind_container_id)
+        result = dind_container.exec_run("ip route show")
+        output = result.output.decode("utf-8", errors="replace")
+
+        return {"routes": output}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get routes: {e}")
+
+
+@router.post("/{range_id}/console/exec")
+def exec_in_dind(
+    range_id: UUID,
+    db: DBSession,
+    current_user: CurrentUser,
+    command: str = Query(..., description="Command to execute in DinD container"),
+):
+    """
+    Execute a command in the DinD container.
+    Only admin and range_engineer roles allowed.
+    """
+    # Permission check
+    if current_user.role not in ["admin", "range_engineer"]:
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+    range_obj = db.query(Range).filter(Range.id == range_id).first()
+    if not range_obj:
+        raise HTTPException(status_code=404, detail="Range not found")
+
+    if not range_obj.dind_container_id:
+        raise HTTPException(status_code=400, detail="Range is not a DinD deployment")
+
+    # Whitelist allowed commands for safety
+    allowed_prefixes = [
+        "docker ps", "docker logs", "docker inspect", "docker stats",
+        "docker network", "docker images", "docker volume",
+        "ip route", "ip addr", "ip link",
+        "iptables -L", "iptables -t nat -L",
+        "cat /etc/resolv.conf", "cat /etc/hosts",
+        "ls", "pwd", "whoami", "hostname", "uname",
+    ]
+
+    is_allowed = any(command.strip().startswith(prefix) for prefix in allowed_prefixes)
+    if not is_allowed:
+        raise HTTPException(
+            status_code=400,
+            detail="Command not allowed. Use the interactive console for arbitrary commands."
+        )
+
+    from cyroid.services.docker_service import get_docker_service
+    docker_service = get_docker_service()
+
+    try:
+        dind_container = docker_service.client.containers.get(range_obj.dind_container_id)
+        result = dind_container.exec_run(command, privileged=True)
+        output = result.output.decode("utf-8", errors="replace")
+
+        return {
+            "command": command,
+            "exit_code": result.exit_code,
+            "output": output,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to execute command: {e}")
