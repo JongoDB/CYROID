@@ -5,10 +5,11 @@ import { rangesApi, networksApi, vmsApi, imagesApi, NetworkCreate, VMCreate } fr
 import type { Range, Network, VM, RealtimeEvent, BaseImage, GoldenImageLibrary, SnapshotWithLineage } from '../types'
 import {
   ArrowLeft, Plus, Loader2, X, Play, Square, RotateCw, Camera,
-  Network as NetworkIcon, Server, Trash2, Rocket, Activity, Monitor, Shield, Download, Pencil, Globe, Router, Wifi, Radio, Wrench, BookOpen, LayoutTemplate
+  Network as NetworkIcon, Server, Trash2, Rocket, Activity, Monitor, Shield, Download, Pencil, Globe, Router, Wifi, Radio, Wrench, BookOpen, LayoutTemplate, Terminal
 } from 'lucide-react'
 import clsx from 'clsx'
 import { VncConsole } from '../components/console/VncConsole'
+import { VMConsole } from '../components/console/VMConsole'
 import { useAuthStore } from '../stores/authStore'
 import { RelativeTime } from '../components/common/RelativeTime'
 import { useIsArmHost } from '../stores/systemStore'
@@ -112,24 +113,26 @@ export default function RangeDetail() {
 
   // Console state
   const [consoleVm, setConsoleVm] = useState<VM | null>(null)
+  const [consoleType, setConsoleType] = useState<'vnc' | 'terminal'>('vnc')
   const token = useAuthStore((state) => state.token)
 
   // Open console - new window by default, Shift+click for inline
-  const handleOpenConsole = async (vm: VM, event: React.MouseEvent) => {
+  const handleOpenConsole = async (vm: VM, event: React.MouseEvent, type: 'vnc' | 'terminal' = 'vnc') => {
     if (event.shiftKey) {
       // Shift+click: Open inline modal
+      setConsoleType(type)
       setConsoleVm(vm)
       return
     }
 
     // Default: Open in new window
-    const width = 1280
-    const height = 800
+    const width = type === 'vnc' ? 1280 : 900
+    const height = type === 'vnc' ? 800 : 600
     const left = (window.screen.width - width) / 2
     const top = (window.screen.height - height) / 2
     window.open(
-      `/console/${vm.id}`,
-      `console_${vm.id}`,
+      `/console/${vm.id}?type=${type}`,
+      `console_${vm.id}_${type}`,
       `width=${width},height=${height},left=${left},top=${top},menubar=no,toolbar=no,location=no,status=no,resizable=yes,scrollbars=no`
     )
   }
@@ -1190,11 +1193,18 @@ export default function RangeDetail() {
                       {vm.status === 'running' && (
                         <>
                           <button
-                            onClick={(e) => handleOpenConsole(vm, e)}
+                            onClick={(e) => handleOpenConsole(vm, e, 'vnc')}
                             className="p-1.5 text-gray-400 hover:text-blue-600"
-                            title="Open Console (Shift+click for inline)"
+                            title="VM Console (VNC) - Shift+click for inline"
                           >
                             <Monitor className="h-4 w-4" />
+                          </button>
+                          <button
+                            onClick={(e) => handleOpenConsole(vm, e, 'terminal')}
+                            className="p-1.5 text-gray-400 hover:text-green-600"
+                            title="Container Shell - Shift+click for inline"
+                          >
+                            <Terminal className="h-4 w-4" />
                           </button>
                           <button
                             onClick={() => handleVmAction(vm, 'stop')}
@@ -2373,18 +2383,30 @@ export default function RangeDetail() {
         </div>
       )}
 
-      {/* VNC Console Modal */}
+      {/* Console Modal (VNC or Terminal) */}
       {consoleVm && token && (
         <div className="fixed inset-0 z-50 overflow-hidden">
           <div className="absolute inset-0 bg-gray-900/80" onClick={() => setConsoleVm(null)} />
           <div className="relative flex items-center justify-center h-full p-4">
-            <div className="w-full max-w-6xl h-[90vh]">
-              <VncConsole
-                vmId={consoleVm.id}
-                vmHostname={consoleVm.hostname}
-                token={token}
-                onClose={() => setConsoleVm(null)}
-              />
+            <div className={clsx(
+              "h-[90vh]",
+              consoleType === 'vnc' ? "w-full max-w-6xl" : "w-full max-w-4xl"
+            )}>
+              {consoleType === 'vnc' ? (
+                <VncConsole
+                  vmId={consoleVm.id}
+                  vmHostname={consoleVm.hostname}
+                  token={token}
+                  onClose={() => setConsoleVm(null)}
+                />
+              ) : (
+                <VMConsole
+                  vmId={consoleVm.id}
+                  vmHostname={consoleVm.hostname}
+                  token={token}
+                  onClose={() => setConsoleVm(null)}
+                />
+              )}
             </div>
           </div>
         </div>

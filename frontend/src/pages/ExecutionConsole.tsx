@@ -6,6 +6,7 @@ import { rangesApi, vmsApi, mselApi, networksApi } from '../services/api'
 import { VMGrid } from '../components/execution/VMGrid'
 import { EventLogComponent } from '../components/execution/EventLog'
 import { VMConsole } from '../components/console/VMConsole'
+import { VncConsole } from '../components/console/VncConsole'
 import { MSELUpload } from '../components/execution/MSELUpload'
 import { InjectTimeline } from '../components/execution/InjectTimeline'
 import { NetworkInterfaces } from '../components/execution/NetworkInterfaces'
@@ -22,7 +23,7 @@ export default function ExecutionConsole() {
   const [networks, setNetworks] = useState<NetworkType[]>([])
   const [msel, setMSEL] = useState<MSEL | null>(null)
   const [loading, setLoading] = useState(true)
-  const [selectedVM, setSelectedVM] = useState<{ id: string; hostname: string } | null>(null)
+  const [selectedVM, setSelectedVM] = useState<{ id: string; hostname: string; type: 'vnc' | 'terminal' } | null>(null)
   const [rightPanelTab, setRightPanelTab] = useState<RightPanelTab>('events')
 
   useEffect(() => {
@@ -68,44 +69,18 @@ export default function ExecutionConsole() {
     setRightPanelTab('injects')
   }
 
-  const handleOpenConsole = async (vmId: string, hostname: string) => {
-    // Find the VM to check its display_type
-    const vm = vms.find(v => v.id === vmId)
-
-    if (vm?.display_type === 'server' || vm?.display_type === 'headless') {
-      // Server/headless VMs only have terminal console
-      setSelectedVM({ id: vmId, hostname })
-      return
-    }
-
-    // Desktop VMs or unknown display_type - try VNC
-    const token = localStorage.getItem('token') || ''
-
-    // Check if VM has VNC capability
-    try {
-      const response = await fetch(`/api/v1/vms/${vmId}/vnc-info`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      })
-
-      if (response.ok) {
-        // VNC available - open in new window
-        const width = 1280
-        const height = 800
-        const left = (window.screen.width - width) / 2
-        const top = (window.screen.height - height) / 2
-        window.open(
-          `/console/${vmId}`,
-          `console_${vmId}`,
-          `width=${width},height=${height},left=${left},top=${top},menubar=no,toolbar=no,location=no,status=no,resizable=yes,scrollbars=no`
-        )
-        return
-      }
-    } catch {
-      // VNC not available, fall through to inline terminal
-    }
-
-    // No VNC - open inline terminal console
-    setSelectedVM({ id: vmId, hostname })
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const handleOpenConsole = (vmId: string, _hostname: string, type: 'vnc' | 'terminal') => {
+    // Open in new window by default
+    const width = type === 'vnc' ? 1280 : 900
+    const height = type === 'vnc' ? 800 : 600
+    const left = (window.screen.width - width) / 2
+    const top = (window.screen.height - height) / 2
+    window.open(
+      `/console/${vmId}?type=${type}`,
+      `console_${vmId}_${type}`,
+      `width=${width},height=${height},left=${left},top=${top},menubar=no,toolbar=no,location=no,status=no,resizable=yes,scrollbars=no`
+    )
   }
 
   const handleCloseConsole = () => {
@@ -234,12 +209,14 @@ export default function ExecutionConsole() {
         </div>
       </div>
 
-      {/* Console Modal */}
+      {/* Console Modal (VNC or Terminal) */}
       {selectedVM && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg shadow-xl w-full h-full max-w-6xl max-h-[90vh] flex flex-col">
+          <div className={`bg-white rounded-lg shadow-xl w-full h-full ${selectedVM.type === 'vnc' ? 'max-w-6xl' : 'max-w-4xl'} max-h-[90vh] flex flex-col`}>
             <div className="flex items-center justify-between px-4 py-2 border-b">
-              <h3 className="font-medium">VM Console - {selectedVM.hostname}</h3>
+              <h3 className="font-medium">
+                {selectedVM.type === 'vnc' ? 'VM Console' : 'Container Shell'} - {selectedVM.hostname}
+              </h3>
               <button
                 onClick={handleCloseConsole}
                 className="p-1 hover:bg-gray-100 rounded"
@@ -248,12 +225,21 @@ export default function ExecutionConsole() {
               </button>
             </div>
             <div className="flex-1 min-h-0">
-              <VMConsole
-                vmId={selectedVM.id}
-                vmHostname={selectedVM.hostname}
-                token={localStorage.getItem('token') || ''}
-                onClose={handleCloseConsole}
-              />
+              {selectedVM.type === 'vnc' ? (
+                <VncConsole
+                  vmId={selectedVM.id}
+                  vmHostname={selectedVM.hostname}
+                  token={localStorage.getItem('token') || ''}
+                  onClose={handleCloseConsole}
+                />
+              ) : (
+                <VMConsole
+                  vmId={selectedVM.id}
+                  vmHostname={selectedVM.hostname}
+                  token={localStorage.getItem('token') || ''}
+                  onClose={handleCloseConsole}
+                />
+              )}
             </div>
           </div>
         </div>
