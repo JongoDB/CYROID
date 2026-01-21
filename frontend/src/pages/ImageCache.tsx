@@ -45,7 +45,7 @@ import { ConfirmDialog } from '../components/common/ConfirmDialog'
 import { toast } from '../stores/toastStore'
 import { FileBrowser } from '../components/files/FileBrowser'
 
-type TabType = 'overview' | 'docker' | 'build' | 'files' | 'isos' | 'linux-isos' | 'macos-isos' | 'custom-isos'
+type TabType = 'overview' | 'docker' | 'isos' | 'linux-isos' | 'macos-isos' | 'custom-isos'
 
 export default function ImageCache() {
   const { user } = useAuthStore()
@@ -1070,8 +1070,6 @@ export default function ImageCache() {
   const tabs = [
     { id: 'overview' as const, name: 'Overview', icon: HardDrive },
     { id: 'docker' as const, name: 'Docker Images', icon: Server },
-    { id: 'build' as const, name: 'Build Images', icon: Hammer },
-    { id: 'files' as const, name: 'Image Files', icon: FolderEdit },
     { id: 'isos' as const, name: 'Windows ISOs', icon: Monitor },
     { id: 'linux-isos' as const, name: 'Linux ISOs', icon: Terminal },
     { id: 'macos-isos' as const, name: 'macOS ISOs', icon: Monitor },
@@ -1501,223 +1499,198 @@ export default function ImageCache() {
               <ImageTable images={categorizedImages.other} onRemove={handleRemoveImage} actionLoading={actionLoading} isAdmin={isAdmin} />
             </div>
           )}
-        </div>
-      )}
 
-      {/* Build Images Tab */}
-      {activeTab === 'build' && (
-        <div className="space-y-6">
-          <div className="flex justify-between items-center">
-            <div>
-              <h3 className="text-lg font-medium text-gray-900">Build Custom Images</h3>
-              <p className="text-sm text-gray-500">
-                Build Docker images from Dockerfiles in the images/ directory
-              </p>
-            </div>
-            <button
-              onClick={loadData}
-              className="inline-flex items-center px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
-            >
-              <RefreshCw className="h-4 w-4 mr-1" />
-              Refresh
-            </button>
-          </div>
-
-          {/* Active Builds */}
-          {Object.keys(dockerBuildStatus).length > 0 && (
-            <div className="bg-white shadow rounded-lg overflow-hidden">
-              <div className="px-6 py-4 border-b border-gray-200 bg-yellow-50">
-                <h4 className="text-sm font-medium text-yellow-800 flex items-center">
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Active Builds ({Object.keys(dockerBuildStatus).length})
-                </h4>
-              </div>
-              <div className="divide-y divide-gray-200">
-                {Object.entries(dockerBuildStatus).map(([buildKey, status]) => (
-                  <div key={buildKey} className="px-6 py-4">
-                    <div className="flex items-center justify-between">
-                      <div className="flex-1">
-                        <div className="flex items-center">
-                          <span className="font-medium text-gray-900">{status.full_tag}</span>
-                          <span className={clsx(
-                            'ml-2 px-2 py-0.5 text-xs rounded-full',
-                            status.status === 'building' && 'bg-yellow-100 text-yellow-800',
-                            status.status === 'completed' && 'bg-green-100 text-green-800',
-                            status.status === 'failed' && 'bg-red-100 text-red-800',
-                            status.status === 'cancelled' && 'bg-gray-100 text-gray-800'
-                          )}>
-                            {status.status}
-                          </span>
-                        </div>
-                        <div className="mt-1 text-sm text-gray-500">
-                          {status.current_step_name}
-                        </div>
-                        {status.status === 'building' && (
-                          <div className="mt-2">
-                            <div className="flex items-center text-xs text-gray-500 mb-1">
-                              <span>Step {status.current_step || 0}/{status.total_steps || '?'}</span>
-                              <span className="mx-2">-</span>
-                              <span>{status.progress_percent || 0}%</span>
-                            </div>
-                            <div className="w-full bg-gray-200 rounded-full h-2">
-                              <div
-                                className="bg-indigo-600 h-2 rounded-full transition-all duration-300"
-                                style={{ width: `${status.progress_percent || 0}%` }}
-                              />
-                            </div>
-                          </div>
-                        )}
-                        {status.error && (
-                          <div className="mt-2 text-sm text-red-600">
-                            {status.error}
-                          </div>
-                        )}
-                        {status.logs && status.logs.length > 0 && (
-                          <details className="mt-2">
-                            <summary className="text-xs text-gray-500 cursor-pointer hover:text-gray-700">
-                              Show build logs ({status.logs.length} lines)
-                            </summary>
-                            <pre className="mt-2 p-2 bg-gray-50 rounded text-xs font-mono overflow-x-auto max-h-40">
-                              {status.logs.join('\n')}
-                            </pre>
-                          </details>
-                        )}
-                      </div>
-                      {status.status === 'building' && (
-                        <button
-                          onClick={() => handleCancelDockerBuild(buildKey)}
-                          disabled={actionLoading === `cancel-build-${buildKey}`}
-                          className="ml-4 p-2 text-gray-400 hover:text-red-600"
-                          title="Cancel build"
-                        >
-                          {actionLoading === `cancel-build-${buildKey}` ? (
-                            <Loader2 className="h-5 w-5 animate-spin" />
-                          ) : (
-                            <X className="h-5 w-5" />
-                          )}
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                ))}
+          {/* Build Custom Images Section (consolidated from Build Images tab) */}
+          <div className="border-t border-gray-200 pt-6 mt-6">
+            <div className="flex justify-between items-center mb-4">
+              <div>
+                <h3 className="text-lg font-medium text-gray-900 flex items-center">
+                  <Hammer className="h-5 w-5 mr-2 text-indigo-500" />
+                  Build Custom Images
+                </h3>
+                <p className="text-sm text-gray-500">
+                  Build Docker images from Dockerfiles in the images/ directory
+                </p>
               </div>
             </div>
-          )}
 
-          {/* Available Images to Build */}
-          <div className="bg-white shadow rounded-lg overflow-hidden">
-            <div className="px-6 py-4 border-b border-gray-200">
-              <h4 className="text-sm font-medium text-gray-900">
-                Available Images ({buildableImages.length})
-              </h4>
-              <p className="text-xs text-gray-500 mt-1">
-                Build these images locally for use in ranges
-              </p>
-            </div>
-            {buildableImages.length > 0 ? (
-              <div className="divide-y divide-gray-200">
-                {buildableImages.map((image) => {
-                  const buildKey = `${image.name}_latest`
-                  const isBuilding = dockerBuildStatus[buildKey]?.status === 'building'
-                  const isCached = images.some(img => img.tags?.some(t => t.includes(`cyroid/${image.name}`)))
-
-                  return (
-                    <div key={image.name} className="px-6 py-4">
+            {/* Active Builds */}
+            {Object.keys(dockerBuildStatus).length > 0 && (
+              <div className="bg-white shadow rounded-lg overflow-hidden mb-4">
+                <div className="px-6 py-4 border-b border-gray-200 bg-yellow-50">
+                  <h4 className="text-sm font-medium text-yellow-800 flex items-center">
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Active Builds ({Object.keys(dockerBuildStatus).length})
+                  </h4>
+                </div>
+                <div className="divide-y divide-gray-200">
+                  {Object.entries(dockerBuildStatus).map(([buildKey, status]) => (
+                    <div key={buildKey} className="px-6 py-4">
                       <div className="flex items-center justify-between">
                         <div className="flex-1">
                           <div className="flex items-center">
-                            <Hammer className="h-5 w-5 text-gray-400 mr-3" />
-                            <div>
-                              <span className="font-medium text-gray-900">cyroid/{image.name}</span>
-                              {isCached && (
-                                <span className="ml-2 px-2 py-0.5 text-xs bg-green-100 text-green-800 rounded-full">
-                                  Cached
-                                </span>
-                              )}
-                            </div>
+                            <span className="font-medium text-gray-900">{status.full_tag}</span>
+                            <span className={clsx(
+                              'ml-2 px-2 py-0.5 text-xs rounded-full',
+                              status.status === 'building' && 'bg-yellow-100 text-yellow-800',
+                              status.status === 'completed' && 'bg-green-100 text-green-800',
+                              status.status === 'failed' && 'bg-red-100 text-red-800',
+                              status.status === 'cancelled' && 'bg-gray-100 text-gray-800'
+                            )}>
+                              {status.status}
+                            </span>
                           </div>
-                          {image.description && (
-                            <p className="mt-1 text-sm text-gray-500 ml-8">{image.description}</p>
+                          <div className="mt-1 text-sm text-gray-500">
+                            {status.current_step_name}
+                          </div>
+                          {status.status === 'building' && (
+                            <div className="mt-2">
+                              <div className="flex items-center text-xs text-gray-500 mb-1">
+                                <span>Step {status.current_step || 0}/{status.total_steps || '?'}</span>
+                                <span className="mx-2">-</span>
+                                <span>{status.progress_percent || 0}%</span>
+                              </div>
+                              <div className="w-full bg-gray-200 rounded-full h-2">
+                                <div
+                                  className="bg-indigo-600 h-2 rounded-full transition-all duration-300"
+                                  style={{ width: `${status.progress_percent || 0}%` }}
+                                />
+                              </div>
+                            </div>
+                          )}
+                          {status.error && (
+                            <div className="mt-2 text-sm text-red-600">
+                              {status.error}
+                            </div>
+                          )}
+                          {status.logs && status.logs.length > 0 && (
+                            <details className="mt-2">
+                              <summary className="text-xs text-gray-500 cursor-pointer hover:text-gray-700">
+                                Show build logs ({status.logs.length} lines)
+                              </summary>
+                              <pre className="mt-2 p-2 bg-gray-50 rounded text-xs font-mono overflow-x-auto max-h-40">
+                                {status.logs.join('\n')}
+                              </pre>
+                            </details>
                           )}
                         </div>
-                        <div className="flex items-center gap-2">
-                          {isCached && (
-                            <button
-                              onClick={() => handleBuildImage(image.name, true)}
-                              disabled={isBuilding || actionLoading === `build-${buildKey}`}
-                              className="inline-flex items-center px-3 py-1.5 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
-                              title="Rebuild without cache"
-                            >
-                              <RefreshCw className="h-4 w-4 mr-1" />
-                              Rebuild
-                            </button>
-                          )}
+                        {status.status === 'building' && (
                           <button
-                            onClick={() => handleBuildImage(image.name, false)}
-                            disabled={isBuilding || actionLoading === `build-${buildKey}`}
-                            className="inline-flex items-center px-3 py-1.5 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50"
+                            onClick={() => handleCancelDockerBuild(buildKey)}
+                            disabled={actionLoading === `cancel-build-${buildKey}`}
+                            className="ml-4 p-2 text-gray-400 hover:text-red-600"
+                            title="Cancel build"
                           >
-                            {actionLoading === `build-${buildKey}` || isBuilding ? (
-                              <>
-                                <Loader2 className="h-4 w-4 mr-1 animate-spin" />
-                                Building...
-                              </>
+                            {actionLoading === `cancel-build-${buildKey}` ? (
+                              <Loader2 className="h-5 w-5 animate-spin" />
                             ) : (
-                              <>
-                                <Hammer className="h-4 w-4 mr-1" />
-                                {isCached ? 'Build' : 'Build'}
-                              </>
+                              <X className="h-5 w-5" />
                             )}
                           </button>
-                        </div>
+                        )}
                       </div>
                     </div>
-                  )
-                })}
-              </div>
-            ) : (
-              <div className="px-6 py-12 text-center text-gray-500">
-                <Hammer className="h-12 w-12 text-gray-300 mx-auto mb-4" />
-                <p className="text-lg font-medium text-gray-900">No buildable images found</p>
-                <p className="text-sm mt-1">
-                  Add Dockerfiles to the <code className="bg-gray-100 px-1 rounded">images/</code> directory
-                </p>
-              </div>
-            )}
-          </div>
-
-          {/* Build Instructions */}
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-            <div className="flex">
-              <Info className="h-5 w-5 text-blue-400 flex-shrink-0" />
-              <div className="ml-3">
-                <h4 className="text-sm font-medium text-blue-800">About Image Building</h4>
-                <div className="mt-1 text-sm text-blue-700">
-                  <ul className="list-disc list-inside space-y-1">
-                    <li>Images are built from Dockerfiles in the <code className="bg-blue-100 px-1 rounded">images/</code> directory</li>
-                    <li>Built images are tagged as <code className="bg-blue-100 px-1 rounded">cyroid/[name]:latest</code></li>
-                    <li>Use "Rebuild" to force a fresh build without Docker cache</li>
-                    <li>Build progress can be monitored - you can navigate away and return</li>
-                  </ul>
+                  ))}
                 </div>
               </div>
+            )}
+
+            {/* Available Images to Build */}
+            <div className="bg-white shadow rounded-lg overflow-hidden">
+              <div className="px-6 py-4 border-b border-gray-200">
+                <h4 className="text-sm font-medium text-gray-900">
+                  Buildable Images ({buildableImages.length})
+                </h4>
+                <p className="text-xs text-gray-500 mt-1">
+                  Build these images locally for use in ranges
+                </p>
+              </div>
+              {buildableImages.length > 0 ? (
+                <div className="divide-y divide-gray-200">
+                  {buildableImages.map((image) => {
+                    const buildKey = `${image.name}_latest`
+                    const isBuilding = dockerBuildStatus[buildKey]?.status === 'building'
+                    const isCached = images.some(img => img.tags?.some(t => t.includes(`cyroid/${image.name}`)))
+
+                    return (
+                      <div key={image.name} className="px-6 py-4">
+                        <div className="flex items-center justify-between">
+                          <div className="flex-1">
+                            <div className="flex items-center">
+                              <Hammer className="h-5 w-5 text-gray-400 mr-3" />
+                              <div>
+                                <span className="font-medium text-gray-900">cyroid/{image.name}</span>
+                                {isCached && (
+                                  <span className="ml-2 px-2 py-0.5 text-xs bg-green-100 text-green-800 rounded-full">
+                                    Cached
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            {image.description && (
+                              <p className="mt-1 text-sm text-gray-500 ml-8">{image.description}</p>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {isCached && (
+                              <button
+                                onClick={() => handleBuildImage(image.name, true)}
+                                disabled={isBuilding || actionLoading === `build-${buildKey}`}
+                                className="inline-flex items-center px-3 py-1.5 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
+                                title="Rebuild without cache"
+                              >
+                                <RefreshCw className="h-4 w-4 mr-1" />
+                                Rebuild
+                              </button>
+                            )}
+                            <button
+                              onClick={() => handleBuildImage(image.name, false)}
+                              disabled={isBuilding || actionLoading === `build-${buildKey}`}
+                              className="inline-flex items-center px-3 py-1.5 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50"
+                            >
+                              {actionLoading === `build-${buildKey}` || isBuilding ? (
+                                <>
+                                  <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                                  Building...
+                                </>
+                              ) : (
+                                <>
+                                  <Hammer className="h-4 w-4 mr-1" />
+                                  Build
+                                </>
+                              )}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              ) : (
+                <div className="px-6 py-12 text-center text-gray-500">
+                  <Hammer className="h-12 w-12 text-gray-300 mx-auto mb-4" />
+                  <p className="text-lg font-medium text-gray-900">No buildable images found</p>
+                  <p className="text-sm mt-1">
+                    Add Dockerfiles to the <code className="bg-gray-100 px-1 rounded">images/</code> directory
+                  </p>
+                </div>
+              )}
             </div>
           </div>
-        </div>
-      )}
 
-      {/* Image Files Tab */}
-      {activeTab === 'files' && (
-        <div className="space-y-4">
-          <div className="flex justify-between items-center">
-            <div>
-              <h3 className="text-lg font-medium text-gray-900">Image Project Files</h3>
+          {/* Image Project Files Section (consolidated from Image Files tab) */}
+          <div className="border-t border-gray-200 pt-6 mt-6">
+            <div className="mb-4">
+              <h3 className="text-lg font-medium text-gray-900 flex items-center">
+                <FolderEdit className="h-5 w-5 mr-2 text-amber-500" />
+                Image Project Files
+              </h3>
               <p className="text-sm text-gray-500">
                 Browse and edit Dockerfiles, scripts, and configuration files for custom images
               </p>
             </div>
+            <FileBrowser basePath="images" title="" />
           </div>
-          <FileBrowser basePath="images" title="" />
         </div>
       )}
 
@@ -1932,7 +1905,7 @@ export default function ImageCache() {
                 className="inline-flex items-center px-3 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 text-sm"
               >
                 <Upload className="h-4 w-4 mr-2" />
-                Upload macOS ISO
+                Upload ISO
               </button>
             )}
           </div>
