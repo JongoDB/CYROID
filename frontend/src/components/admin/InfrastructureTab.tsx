@@ -31,6 +31,7 @@ import {
   DockerOverviewResponse,
   InfrastructureMetricsResponse,
   SystemInfoResponse,
+  RangeDebugResponse,
 } from '../../services/api'
 
 // Status badge component
@@ -118,6 +119,7 @@ export default function InfrastructureTab() {
   const [docker, setDocker] = useState<DockerOverviewResponse | null>(null)
   const [metrics, setMetrics] = useState<InfrastructureMetricsResponse | null>(null)
   const [system, setSystem] = useState<SystemInfoResponse | null>(null)
+  const [rangeDebug, setRangeDebug] = useState<RangeDebugResponse | null>(null)
 
   // Logs state
   const [selectedService, setSelectedService] = useState('api')
@@ -136,17 +138,19 @@ export default function InfrastructureTab() {
     setError(null)
 
     try {
-      const [servicesRes, dockerRes, metricsRes, systemRes] = await Promise.all([
+      const [servicesRes, dockerRes, metricsRes, systemRes, rangeDebugRes] = await Promise.all([
         infrastructureApi.getServices(),
         infrastructureApi.getDocker(),
         infrastructureApi.getMetrics(),
         infrastructureApi.getSystem(),
+        infrastructureApi.getRangeDebug(),
       ])
 
       setServices(servicesRes.data)
       setDocker(dockerRes.data)
       setMetrics(metricsRes.data)
       setSystem(systemRes.data)
+      setRangeDebug(rangeDebugRes.data)
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to fetch infrastructure data'
       setError(errorMessage)
@@ -723,6 +727,161 @@ export default function InfrastructureTab() {
                     {item.value}
                   </span>
                 </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Range Debug Information */}
+      <div className="bg-white rounded-lg shadow p-4">
+        <h3 className="text-sm font-medium text-gray-900 mb-4 flex items-center gap-2">
+          <Database className="h-4 w-4" />
+          Range Debug Info
+          {rangeDebug && (
+            <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">
+              {rangeDebug.total_count} ranges
+            </span>
+          )}
+        </h3>
+        {rangeDebug && (
+          <div className="space-y-4">
+            {/* Summary */}
+            <div className="flex gap-4 text-sm">
+              <div className="p-2 bg-gray-50 rounded">
+                <span className="text-gray-500">DinD Containers (Docker): </span>
+                <span className="font-medium">{rangeDebug.dind_containers_in_docker.length}</span>
+              </div>
+              <div className="p-2 bg-gray-50 rounded">
+                <span className="text-gray-500">Ranges in DB: </span>
+                <span className="font-medium">{rangeDebug.total_count}</span>
+              </div>
+            </div>
+
+            {/* Range Details */}
+            <div className="space-y-3">
+              {rangeDebug.ranges.map((range) => (
+                <CollapsibleSection
+                  key={range.id}
+                  title={range.name}
+                  icon={Server}
+                  badge={range.status}
+                >
+                  <div className="space-y-4">
+                    {/* DinD Info */}
+                    <div>
+                      <h5 className="text-xs font-medium text-gray-700 mb-2">DinD Container</h5>
+                      <div className="grid grid-cols-2 gap-2 text-xs">
+                        <div>
+                          <span className="text-gray-500">Container ID: </span>
+                          <span className={clsx('font-mono', !range.dind_container_id && 'text-red-500')}>
+                            {range.dind_container_id?.slice(0, 12) || 'NOT SET'}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-gray-500">Docker URL: </span>
+                          <span className={clsx('font-mono', !range.dind_docker_url && 'text-red-500')}>
+                            {range.dind_docker_url || 'NOT SET'}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-gray-500">Container Name: </span>
+                          <span className="font-mono">{range.dind_container_name || '-'}</span>
+                        </div>
+                        <div>
+                          <span className="text-gray-500">Mgmt IP: </span>
+                          <span className="font-mono">{range.dind_mgmt_ip || '-'}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Router Info */}
+                    <div>
+                      <h5 className="text-xs font-medium text-gray-700 mb-2">Router</h5>
+                      <div className="text-xs">
+                        <span className="text-gray-500">Container: </span>
+                        <span className="font-mono">{range.router_container_id?.slice(0, 12) || 'None'}</span>
+                        {range.router_status && (
+                          <span className="ml-2">
+                            <StatusBadge status={range.router_status.toLowerCase()} />
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* VNC Proxy Mappings */}
+                    <div>
+                      <h5 className="text-xs font-medium text-gray-700 mb-2">
+                        VNC Proxy Mappings ({Object.keys(range.vnc_proxy_mappings || {}).length})
+                      </h5>
+                      {range.vnc_proxy_mappings && Object.keys(range.vnc_proxy_mappings).length > 0 ? (
+                        <div className="overflow-x-auto">
+                          <table className="min-w-full text-xs">
+                            <thead>
+                              <tr className="border-b text-left">
+                                <th className="py-1 px-2 text-gray-500">VM ID</th>
+                                <th className="py-1 px-2 text-gray-500">Proxy Port</th>
+                                <th className="py-1 px-2 text-gray-500">Original Port</th>
+                                <th className="py-1 px-2 text-gray-500">Host</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {Object.entries(range.vnc_proxy_mappings).map(([vmId, mapping]) => (
+                                <tr key={vmId} className="border-b border-gray-100">
+                                  <td className="py-1 px-2 font-mono">{vmId.slice(0, 8)}...</td>
+                                  <td className="py-1 px-2">{mapping.proxy_port}</td>
+                                  <td className="py-1 px-2">{mapping.original_port}</td>
+                                  <td className="py-1 px-2">{mapping.proxy_host}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      ) : (
+                        <p className="text-xs text-gray-500">No VNC proxy mappings configured</p>
+                      )}
+                    </div>
+
+                    {/* VMs */}
+                    <div>
+                      <h5 className="text-xs font-medium text-gray-700 mb-2">VMs ({range.vms.length})</h5>
+                      {range.vms.length > 0 ? (
+                        <div className="overflow-x-auto">
+                          <table className="min-w-full text-xs">
+                            <thead>
+                              <tr className="border-b text-left">
+                                <th className="py-1 px-2 text-gray-500">Hostname</th>
+                                <th className="py-1 px-2 text-gray-500">Status</th>
+                                <th className="py-1 px-2 text-gray-500">Container ID</th>
+                                <th className="py-1 px-2 text-gray-500">IP</th>
+                                <th className="py-1 px-2 text-gray-500">Image</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {range.vms.map((vm) => (
+                                <tr key={vm.id} className="border-b border-gray-100">
+                                  <td className="py-1 px-2 font-medium">{vm.hostname}</td>
+                                  <td className="py-1 px-2">
+                                    <StatusBadge status={vm.status.toLowerCase()} />
+                                  </td>
+                                  <td className="py-1 px-2 font-mono">
+                                    {vm.container_id?.slice(0, 12) || <span className="text-gray-400">-</span>}
+                                  </td>
+                                  <td className="py-1 px-2">{vm.ip_address || '-'}</td>
+                                  <td className="py-1 px-2 truncate max-w-[150px]" title={vm.base_image || ''}>
+                                    {vm.base_image || '-'}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      ) : (
+                        <p className="text-xs text-gray-500">No VMs in this range</p>
+                      )}
+                    </div>
+                  </div>
+                </CollapsibleSection>
               ))}
             </div>
           </div>

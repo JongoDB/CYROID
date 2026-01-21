@@ -667,6 +667,14 @@ export const cacheApi = {
       headers: { 'Content-Type': 'multipart/form-data' },
     })
   },
+  uploadLinuxISO: (file: File, distro: string) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('distro', distro)
+    return api.post<ISOUploadResponse>('/cache/linux-isos/upload', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  },
   uploadCustomISO: (file: File, name: string) => {
     const formData = new FormData()
     formData.append('file', file)
@@ -1299,6 +1307,38 @@ export interface LogsQueryParams {
   offset?: number
 }
 
+// Range Debug Types
+export interface VMDebugInfo {
+  id: string
+  hostname: string
+  status: string
+  container_id: string | null
+  ip_address: string | null
+  base_image: string | null
+  error_message: string | null
+}
+
+export interface RangeDebugInfo {
+  id: string
+  name: string
+  status: string
+  dind_container_id: string | null
+  dind_container_name: string | null
+  dind_docker_url: string | null
+  dind_mgmt_ip: string | null
+  vnc_proxy_mappings: Record<string, { proxy_port: number; proxy_host: string; original_port: number }> | null
+  vms: VMDebugInfo[]
+  network_count: number
+  router_container_id: string | null
+  router_status: string | null
+}
+
+export interface RangeDebugResponse {
+  ranges: RangeDebugInfo[]
+  total_count: number
+  dind_containers_in_docker: string[]
+}
+
 export const infrastructureApi = {
   getServices: () =>
     api.get<InfrastructureServicesResponse>('/admin/infrastructure/services'),
@@ -1310,6 +1350,8 @@ export const infrastructureApi = {
     api.get<InfrastructureMetricsResponse>('/admin/infrastructure/metrics'),
   getSystem: () =>
     api.get<SystemInfoResponse>('/admin/infrastructure/system'),
+  getRangeDebug: () =>
+    api.get<RangeDebugResponse>('/admin/infrastructure/ranges'),
 }
 
 // ============ Files API ============

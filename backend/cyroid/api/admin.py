@@ -1135,3 +1135,116 @@ def get_system_info(admin_user: AdminUser, db: DBSession):
         migrations=migrations,
         config=config_items,
     )
+
+
+# Range Debug Response Models
+class VMDebugInfo(BaseModel):
+    id: str
+    hostname: str
+    status: str
+    container_id: Optional[str] = None
+    ip_address: Optional[str] = None
+    base_image: Optional[str] = None
+    error_message: Optional[str] = None
+
+
+class RangeDebugInfo(BaseModel):
+    id: str
+    name: str
+    status: str
+    dind_container_id: Optional[str] = None
+    dind_container_name: Optional[str] = None
+    dind_docker_url: Optional[str] = None
+    dind_mgmt_ip: Optional[str] = None
+    vnc_proxy_mappings: Optional[Dict[str, Any]] = None
+    vms: List[VMDebugInfo] = []
+    network_count: int = 0
+    router_container_id: Optional[str] = None
+    router_status: Optional[str] = None
+
+
+class RangeDebugResponse(BaseModel):
+    ranges: List[RangeDebugInfo]
+    total_count: int
+    dind_containers_in_docker: List[str] = []
+
+
+@router.get("/infrastructure/ranges", response_model=RangeDebugResponse)
+def get_range_debug_info(admin_user: AdminUser, db: DBSession):
+    """
+    Get debug information for all ranges including DinD, VNC, and VM status.
+
+    Shows database state for ranges, VMs, networks, and VNC proxy mappings.
+    Useful for debugging console access and deployment issues.
+
+    **Requires admin privileges.**
+    """
+    from cyroid.models.range import Range
+    from cyroid.models.vm import VM
+    from cyroid.models.network import Network
+    from cyroid.models.router import RangeRouter
+    from cyroid.models.base_image import BaseImage
+
+    # Get all ranges
+    ranges = db.query(Range).all()
+
+    range_infos = []
+    for r in ranges:
+        # Get VMs for this range
+        vms = db.query(VM).filter(VM.range_id == r.id).all()
+        vm_infos = []
+        for vm in vms:
+            base_image_tag = None
+            if vm.base_image_id:
+                bi = db.query(BaseImage).filter(BaseImage.id == vm.base_image_id).first()
+                if bi:
+                    base_image_tag = bi.docker_image_tag
+
+            vm_infos.append(VMDebugInfo(
+                id=str(vm.id),
+                hostname=vm.hostname,
+                status=str(vm.status.value) if vm.status else "unknown",
+                container_id=vm.container_id,
+                ip_address=vm.ip_address,
+                base_image=base_image_tag,
+                error_message=vm.error_message,
+            ))
+
+        # Get network count
+        network_count = db.query(Network).filter(Network.range_id == r.id).count()
+
+        # Get router info
+        router = db.query(RangeRouter).filter(RangeRouter.range_id == r.id).first()
+
+        range_infos.append(RangeDebugInfo(
+            id=str(r.id),
+            name=r.name,
+            status=str(r.status.value) if r.status else "unknown",
+            dind_container_id=r.dind_container_id,
+            dind_container_name=r.dind_container_name,
+            dind_docker_url=r.dind_docker_url,
+            dind_mgmt_ip=r.dind_mgmt_ip,
+            vnc_proxy_mappings=r.vnc_proxy_mappings,
+            vms=vm_infos,
+            network_count=network_count,
+            router_container_id=router.container_id if router else None,
+            router_status=str(router.status.value) if router and router.status else None,
+        ))
+
+    # Get actual DinD containers from Docker
+    docker = get_docker_service()
+    dind_containers = []
+    try:
+        containers = docker.client.containers.list(
+            all=True,
+            filters={"label": "com.cyroid.type=dind"}
+        )
+        dind_containers = [c.name for c in containers]
+    except Exception as e:
+        logger.warning(f"Could not list DinD containers: {e}")
+
+    return RangeDebugResponse(
+        ranges=range_infos,
+        total_count=len(range_infos),
+        dind_containers_in_docker=dind_containers,
+    )
