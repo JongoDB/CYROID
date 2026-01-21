@@ -615,12 +615,12 @@ export const cacheApi = {
     api.delete(`/cache/linux-isos/${encodeURIComponent(version)}${arch ? `?arch=${arch}` : ''}`),
 
   // Windows ISO Downloads
-  downloadWindowsISO: (version: string, url?: string) =>
-    api.post<WindowsISODownloadResponse>('/cache/isos/download', { version, url }),
-  getWindowsISODownloadStatus: (version: string) =>
-    api.get<WindowsISODownloadStatus>(`/cache/isos/download/${encodeURIComponent(version)}/status`),
-  cancelWindowsISODownload: (version: string) =>
-    api.post(`/cache/isos/download/${encodeURIComponent(version)}/cancel`),
+  downloadWindowsISO: (version: string, url?: string, arch?: 'x86_64' | 'arm64') =>
+    api.post<WindowsISODownloadResponse>('/cache/isos/download', { version, url, arch: arch || 'x86_64' }),
+  getWindowsISODownloadStatus: (version: string, arch?: 'x86_64' | 'arm64') =>
+    api.get<WindowsISODownloadStatus>(`/cache/isos/download/${encodeURIComponent(version)}/status${arch === 'arm64' ? '?arch=arm64' : ''}`),
+  cancelWindowsISODownload: (version: string, arch?: 'x86_64' | 'arm64') =>
+    api.post(`/cache/isos/download/${encodeURIComponent(version)}/cancel${arch === 'arm64' ? '?arch=arm64' : ''}`),
 
   // Snapshots (unified API for both Windows golden images and Docker snapshots)
   getAllSnapshots: () => api.get<AllSnapshotsStatus>('/cache/snapshots'),
@@ -663,8 +663,8 @@ export const cacheApi = {
       headers: { 'Content-Type': 'multipart/form-data' },
     })
   },
-  deleteWindowsISO: (version: string) =>
-    api.delete(`/cache/isos/${encodeURIComponent(version)}`),
+  deleteWindowsISO: (version: string, arch?: 'x86_64' | 'arm64') =>
+    api.delete(`/cache/isos/${encodeURIComponent(version)}${arch ? `?arch=${arch}` : ''}`),
 
   // Stats and info
   getStats: () => api.get<CacheStats>('/cache/stats'),

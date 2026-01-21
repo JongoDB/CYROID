@@ -642,16 +642,19 @@ export default function ImageCache() {
     setDeleteConfirm({ type: 'custom-iso', name, id: filename, isLoading: false })
   }
 
-  const handleDeleteWindowsISO = (version: string, name: string) => {
-    setDeleteConfirm({ type: 'windows-iso', name: `${name} (${version})`, id: version, isLoading: false })
+  const handleDeleteWindowsISO = (version: string, name: string, arch?: 'x86_64' | 'arm64') => {
+    const archSuffix = arch ? ` (${arch})` : ''
+    setDeleteConfirm({ type: 'windows-iso', name: `${name}${archSuffix}`, id: version, arch, isLoading: false })
   }
 
-  const handleDownloadWindowsISO = async (version: WindowsVersion, customUrl?: string) => {
-    setActionLoading(`download-${version.version}`)
+  const handleDownloadWindowsISO = async (version: WindowsVersion, customUrl?: string, arch?: 'x86_64' | 'arm64') => {
+    // Use architecture-specific key for tracking
+    const downloadKey = arch ? `${version.version}-${arch}` : version.version
+    setActionLoading(`download-windows-${downloadKey}`)
     setError(null)
 
     try {
-      const res = await cacheApi.downloadWindowsISO(version.version, customUrl)
+      const res = await cacheApi.downloadWindowsISO(version.version, customUrl, arch)
 
       // Handle no direct download available
       if (res.data.status === 'no_direct_download') {
@@ -663,16 +666,16 @@ export default function ImageCache() {
       // Start polling for download status
       setDownloadStatus(prev => ({
         ...prev,
-        [version.version]: { status: 'downloading', version: version.version, progress_gb: 0 }
+        [downloadKey]: { status: 'downloading', version: version.version, progress_gb: 0 }
       }))
 
       // Poll for status
       const pollInterval = setInterval(async () => {
         try {
-          const statusRes = await cacheApi.getWindowsISODownloadStatus(version.version)
+          const statusRes = await cacheApi.getWindowsISODownloadStatus(version.version, arch)
           setDownloadStatus(prev => ({
             ...prev,
-            [version.version]: statusRes.data
+            [downloadKey]: statusRes.data
           }))
 
           if (statusRes.data.status === 'completed' || statusRes.data.status === 'failed') {
@@ -680,7 +683,8 @@ export default function ImageCache() {
             setActionLoading(null)
 
             if (statusRes.data.status === 'completed') {
-              setSuccess(`Downloaded ${version.name} ISO successfully!`)
+              const archLabel = arch ? ` (${arch})` : ''
+              setSuccess(`Downloaded ${version.name}${archLabel} ISO successfully!`)
               await loadData()
             } else if (statusRes.data.error) {
               setError(`Download failed: ${statusRes.data.error}`)
@@ -690,7 +694,7 @@ export default function ImageCache() {
             setTimeout(() => {
               setDownloadStatus(prev => {
                 const newStatus = { ...prev }
-                delete newStatus[version.version]
+                delete newStatus[downloadKey]
                 return newStatus
               })
             }, 5000)
@@ -824,7 +828,14 @@ export default function ImageCache() {
           break
         case 'windows-iso':
           if (deleteConfirm.id) {
-            await cacheApi.deleteWindowsISO(deleteConfirm.id)
+            await cacheApi.deleteWindowsISO(deleteConfirm.id, deleteConfirm.arch as 'x86_64' | 'arm64' | undefined)
+            // Clear download status if exists
+            const downloadKey = deleteConfirm.arch ? `${deleteConfirm.id}-${deleteConfirm.arch}` : deleteConfirm.id
+            setDownloadStatus(prev => {
+              const newStatus = { ...prev }
+              delete newStatus[downloadKey]
+              return newStatus
+            })
             toast.success(`Deleted Windows ISO: ${deleteConfirm.name}`)
           }
           break
@@ -869,15 +880,16 @@ export default function ImageCache() {
     }
   }
 
-  const handleCancelWindowsDownload = async (version: string) => {
-    setActionLoading(`cancel-windows-${version}`)
+  const handleCancelWindowsDownload = async (version: string, arch?: 'x86_64' | 'arm64') => {
+    const downloadKey = arch ? `${version}-${arch}` : version
+    setActionLoading(`cancel-windows-${downloadKey}`)
     setError(null)
     try {
-      await cacheApi.cancelWindowsISODownload(version)
-      setSuccess(`Cancelled download for ${version}`)
+      await cacheApi.cancelWindowsISODownload(version, arch)
+      setSuccess(`Cancelled download for ${version}${arch ? ` (${arch})` : ''}`)
       setDownloadStatus(prev => {
         const newStatus = { ...prev }
-        delete newStatus[version]
+        delete newStatus[downloadKey]
         return newStatus
       })
     } catch (err: any) {
@@ -1443,9 +1455,14 @@ export default function ImageCache() {
         <div className="space-y-6">
           <div className="flex justify-between items-center">
             <div>
-              <h3 className="text-lg font-medium text-gray-900">Windows ISOs</h3>
+              <h3 className="text-lg font-medium text-gray-900">Windows ISOs (dockur/windows)</h3>
               <p className="text-sm text-gray-500">
                 {windowsVersions.cached_count} of {windowsVersions.total_count} versions cached
+                {windowsVersions.host_arch && (
+                  <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700">
+                    Host: {windowsVersions.host_arch}
+                  </span>
+                )}
               </p>
             </div>
             {isAdmin && (
@@ -1471,6 +1488,11 @@ export default function ImageCache() {
                 <p className="mt-2 text-sm text-blue-700">
                   {windowsVersions.note}
                 </p>
+                {windowsVersions.arm64_note && (
+                  <p className="mt-2 text-sm text-purple-700">
+                    {windowsVersions.arm64_note}
+                  </p>
+                )}
               </div>
             </div>
           </div>
@@ -1487,6 +1509,7 @@ export default function ImageCache() {
             downloadStatus={downloadStatus}
             actionLoading={actionLoading}
             isAdmin={isAdmin}
+            hostArch={windowsVersions.host_arch}
           />
 
           {/* Server Versions */}
@@ -1501,6 +1524,7 @@ export default function ImageCache() {
             downloadStatus={downloadStatus}
             actionLoading={actionLoading}
             isAdmin={isAdmin}
+            hostArch={windowsVersions.host_arch}
           />
 
           {/* Legacy Versions */}
@@ -1515,6 +1539,7 @@ export default function ImageCache() {
             downloadStatus={downloadStatus}
             actionLoading={actionLoading}
             isAdmin={isAdmin}
+            hostArch={windowsVersions.host_arch}
           />
         </div>
       )}
@@ -2419,17 +2444,18 @@ function ImageTable({ images, onRemove, actionLoading, isAdmin }: {
   )
 }
 
-function WindowsVersionSection({ title, versions, icon: Icon, colorClass, onDelete, onDownload, onCancel, downloadStatus, actionLoading, isAdmin }: {
+function WindowsVersionSection({ title, versions, icon: Icon, colorClass, onDelete, onDownload, onCancel, downloadStatus, actionLoading, isAdmin, hostArch }: {
   title: string
   versions: WindowsVersion[]
   icon: typeof Monitor
   colorClass: string
-  onDelete: (version: string, name: string) => void
-  onDownload: (version: WindowsVersion) => void
-  onCancel: (version: string) => void
+  onDelete: (version: string, name: string, arch?: 'x86_64' | 'arm64') => void
+  onDownload: (version: WindowsVersion, customUrl?: string, arch?: 'x86_64' | 'arm64') => Promise<void>
+  onCancel: (version: string, arch?: 'x86_64' | 'arm64') => Promise<void>
   downloadStatus: Record<string, WindowsISODownloadStatus>
   actionLoading: string | null
   isAdmin: boolean
+  hostArch?: 'x86_64' | 'arm64'
 }) {
   const bgClass = `bg-${colorClass}-50`
   const textClass = `text-${colorClass}-800`
@@ -2446,14 +2472,31 @@ function WindowsVersionSection({ title, versions, icon: Icon, colorClass, onDele
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 p-4">
         {versions.map((v) => {
-          const dlStatus = downloadStatus[v.version]
-          const isDownloading = dlStatus?.status === 'downloading'
+          // Check for architecture-specific downloads
+          const x86Key = `${v.version}-x86_64`
+          const arm64Key = `${v.version}-arm64`
+          const x86Status = downloadStatus[x86Key] || downloadStatus[v.version]
+          const arm64Status = downloadStatus[arm64Key]
+          const isDownloadingX86 = x86Status?.status === 'downloading'
+          const isDownloadingArm64 = arm64Status?.status === 'downloading'
+
+          // Architecture-specific loading states
+          const isLoadingX86 = actionLoading === `download-windows-${x86Key}` ||
+                              actionLoading === `download-windows-${v.version}` ||
+                              actionLoading === `cancel-windows-${x86Key}` ||
+                              actionLoading === `cancel-windows-${v.version}`
+          const isLoadingArm64 = actionLoading === `download-windows-${arm64Key}` ||
+                                actionLoading === `cancel-windows-${arm64Key}`
+
+          // Check cached status
+          const cachedX86 = v.cached_x86_64 || (hostArch === 'x86_64' && v.cached)
+          const cachedArm64 = v.cached_arm64 || (hostArch === 'arm64' && v.cached)
 
           return (
             <div key={v.version} className={clsx(
               "border rounded-lg p-4",
-              v.cached ? "bg-green-50 border-green-200" :
-              isDownloading ? "bg-blue-50 border-blue-200" : "hover:bg-gray-50"
+              (cachedX86 || cachedArm64) ? "bg-green-50 border-green-200" :
+              (isDownloadingX86 || isDownloadingArm64) ? "bg-blue-50 border-blue-200" : "hover:bg-gray-50"
             )}>
               <div className="flex items-start justify-between">
                 <div className="flex-1 min-w-0">
@@ -2463,94 +2506,189 @@ function WindowsVersionSection({ title, versions, icon: Icon, colorClass, onDele
                       {v.version}
                     </code>
                     <span className="text-sm text-gray-500">{v.size_gb} GB</span>
+                    {v.arm64_available && (
+                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-700" title="ARM64 version available">
+                        ARM64
+                      </span>
+                    )}
                   </div>
-                </div>
-                <div className="flex items-center gap-1 ml-2 flex-shrink-0">
-                  {isDownloading ? (
-                    <div className="flex items-center gap-1 text-blue-600">
-                      <Loader2 className="h-4 w-4 animate-spin flex-shrink-0" />
-                      <span className="text-xs font-medium">
-                        {dlStatus.progress_percent ? `${dlStatus.progress_percent}%` : 'Starting...'}
+
+                  {/* Architecture-specific cache status */}
+                  <div className="flex items-center gap-2 mt-2 flex-wrap">
+                    {cachedX86 && (
+                      <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
+                        <Check className="h-2.5 w-2.5 mr-0.5" />
+                        x86_64
                       </span>
-                    </div>
-                  ) : v.cached ? (
-                    <>
-                      <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                        <Check className="h-3 w-3 mr-1" />
-                        Cached
+                    )}
+                    {cachedArm64 && (
+                      <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
+                        <Check className="h-2.5 w-2.5 mr-0.5" />
+                        ARM64
                       </span>
-                      {isAdmin && (
-                        <button
-                          onClick={() => onDelete(v.version, v.name)}
-                          disabled={actionLoading === `windows-iso-${v.version}`}
-                          className="text-red-600 hover:text-red-900 disabled:opacity-50 p-1"
-                          title="Delete cached ISO"
-                        >
-                          {actionLoading === `windows-iso-${v.version}` ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <Trash2 className="h-4 w-4" />
+                    )}
+                  </div>
+
+                  {/* x86_64 Download progress */}
+                  {isDownloadingX86 && x86Status && (
+                    <div className="mt-3 space-y-1.5">
+                      <div className="flex justify-between items-center text-xs">
+                        <span className="text-blue-700 font-medium">
+                          x86_64: {x86Status.progress_gb?.toFixed(2) || '0.00'} GB
+                          {x86Status.total_gb ? ` / ${x86Status.total_gb.toFixed(2)} GB` : ''}
+                        </span>
+                        <div className="flex items-center gap-2">
+                          {x86Status.progress_percent && (
+                            <span className="text-blue-600 font-semibold">{x86Status.progress_percent}%</span>
                           )}
-                        </button>
-                      )}
-                    </>
-                  ) : isAdmin ? (
-                    <button
-                      onClick={() => onDownload(v)}
-                      disabled={actionLoading === `download-${v.version}`}
-                      className="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-blue-100 text-blue-700 hover:bg-blue-200 disabled:opacity-50"
-                      title="Download ISO"
-                    >
-                      {actionLoading === `download-${v.version}` ? (
-                        <Loader2 className="h-3 w-3 animate-spin" />
-                      ) : (
-                        <>
-                          <Download className="h-3 w-3 mr-1" />
-                          Download
-                        </>
-                      )}
-                    </button>
-                  ) : (
-                    <span className="text-xs text-gray-400">Not cached</span>
+                          {isAdmin && (
+                            <button
+                              onClick={() => onCancel(v.version, 'x86_64')}
+                              disabled={actionLoading === `cancel-windows-${x86Key}`}
+                              className="text-red-500 hover:text-red-700 p-0.5 rounded hover:bg-red-50"
+                              title="Cancel download"
+                            >
+                              <X className="h-4 w-4" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      <div className="w-full bg-blue-100 rounded-full h-2 overflow-hidden">
+                        {x86Status.total_bytes && x86Status.progress_bytes ? (
+                          <div
+                            className="bg-gradient-to-r from-blue-500 to-blue-600 h-2 rounded-full transition-all duration-500 ease-out"
+                            style={{ width: `${x86Status.progress_percent || 0}%` }}
+                          />
+                        ) : (
+                          <div className="bg-gradient-to-r from-blue-400 via-blue-500 to-blue-400 h-2 rounded-full animate-pulse w-full opacity-60" />
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ARM64 Download progress */}
+                  {isDownloadingArm64 && arm64Status && (
+                    <div className="mt-3 space-y-1.5">
+                      <div className="flex justify-between items-center text-xs">
+                        <span className="text-purple-700 font-medium">
+                          ARM64: {arm64Status.progress_gb?.toFixed(2) || '0.00'} GB
+                          {arm64Status.total_gb ? ` / ${arm64Status.total_gb.toFixed(2)} GB` : ''}
+                        </span>
+                        <div className="flex items-center gap-2">
+                          {arm64Status.progress_percent && (
+                            <span className="text-purple-600 font-semibold">{arm64Status.progress_percent}%</span>
+                          )}
+                          {isAdmin && (
+                            <button
+                              onClick={() => onCancel(v.version, 'arm64')}
+                              disabled={actionLoading === `cancel-windows-${arm64Key}`}
+                              className="text-red-500 hover:text-red-700 p-0.5 rounded hover:bg-red-50"
+                              title="Cancel download"
+                            >
+                              <X className="h-4 w-4" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      <div className="w-full bg-purple-100 rounded-full h-2 overflow-hidden">
+                        {arm64Status.total_bytes && arm64Status.progress_bytes ? (
+                          <div
+                            className="bg-gradient-to-r from-purple-500 to-purple-600 h-2 rounded-full transition-all duration-500 ease-out"
+                            style={{ width: `${arm64Status.progress_percent || 0}%` }}
+                          />
+                        ) : (
+                          <div className="bg-gradient-to-r from-purple-400 via-purple-500 to-purple-400 h-2 rounded-full animate-pulse w-full opacity-60" />
+                        )}
+                      </div>
+                    </div>
                   )}
                 </div>
               </div>
-              {/* Download progress bar */}
-              {isDownloading && (
-                <div className="mt-3 space-y-1.5">
-                  <div className="flex justify-between items-center text-xs">
-                    <span className="text-blue-700 font-medium">
-                      {dlStatus.progress_gb?.toFixed(2) || '0.00'} GB
-                      {dlStatus.total_gb ? ` / ${dlStatus.total_gb.toFixed(2)} GB` : ''}
-                    </span>
-                    <div className="flex items-center gap-2">
-                      {dlStatus.progress_percent && (
-                        <span className="text-blue-600 font-semibold">{dlStatus.progress_percent}%</span>
-                      )}
-                      {isAdmin && (
-                        <button
-                          onClick={() => onCancel(v.version)}
-                          disabled={actionLoading === `cancel-windows-${v.version}`}
-                          className="text-red-500 hover:text-red-700 p-0.5 rounded hover:bg-red-50"
-                          title="Cancel download"
-                        >
-                          <X className="h-4 w-4" />
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                  <div className="w-full bg-blue-100 rounded-full h-2.5 overflow-hidden">
-                    {dlStatus.total_bytes && dlStatus.progress_bytes ? (
-                      <div
-                        className="bg-gradient-to-r from-blue-500 to-blue-600 h-2.5 rounded-full transition-all duration-500 ease-out"
-                        style={{ width: `${(dlStatus.progress_bytes / dlStatus.total_bytes) * 100}%` }}
-                      />
-                    ) : (
-                      <div className="bg-gradient-to-r from-blue-400 via-blue-500 to-blue-400 h-2.5 rounded-full animate-pulse w-full opacity-60" />
+
+              {/* Action buttons */}
+              <div className="mt-3 flex items-center gap-2 flex-wrap">
+                {/* x86_64 actions */}
+                {cachedX86 ? (
+                  <div className="flex items-center gap-1">
+                    <span className="text-xs text-gray-500">x86_64</span>
+                    {isAdmin && (
+                      <button
+                        onClick={() => onDelete(v.version, v.name, 'x86_64')}
+                        disabled={isLoadingX86}
+                        className="p-1 text-red-600 hover:bg-red-50 rounded"
+                        title="Delete x86_64 ISO"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
                     )}
                   </div>
-                </div>
-              )}
+                ) : isDownloadingX86 ? (
+                  <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                    <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                    x86_64
+                  </span>
+                ) : v.download_url && isAdmin ? (
+                  <button
+                    onClick={() => onDownload(v, undefined, 'x86_64')}
+                    disabled={isLoadingX86}
+                    className="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-blue-50 text-blue-700 hover:bg-blue-100"
+                  >
+                    {isLoadingX86 ? (
+                      <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                    ) : (
+                      <Download className="h-3 w-3 mr-1" />
+                    )}
+                    x86_64
+                  </button>
+                ) : (
+                  <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600" title="Auto-downloaded on first use">
+                    x86_64 (auto)
+                  </span>
+                )}
+
+                {/* ARM64 actions (only if available) */}
+                {v.arm64_available && (
+                  <>
+                    {cachedArm64 ? (
+                      <div className="flex items-center gap-1">
+                        <span className="text-xs text-gray-500">ARM64</span>
+                        {isAdmin && (
+                          <button
+                            onClick={() => onDelete(v.version, v.name, 'arm64')}
+                            disabled={isLoadingArm64}
+                            className="p-1 text-red-600 hover:bg-red-50 rounded"
+                            title="Delete ARM64 ISO"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    ) : isDownloadingArm64 ? (
+                      <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
+                        <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                        ARM64
+                      </span>
+                    ) : v.arm64_has_url && isAdmin ? (
+                      <button
+                        onClick={() => onDownload(v, undefined, 'arm64')}
+                        disabled={isLoadingArm64}
+                        className="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-purple-50 text-purple-700 hover:bg-purple-100"
+                      >
+                        {isLoadingArm64 ? (
+                          <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                        ) : (
+                          <Download className="h-3 w-3 mr-1" />
+                        )}
+                        ARM64
+                      </button>
+                    ) : (
+                      <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600" title="ARM64 ISO built on first use (no direct download)">
+                        ARM64 (auto)
+                      </span>
+                    )}
+                  </>
+                )}
+              </div>
             </div>
           )
         })}

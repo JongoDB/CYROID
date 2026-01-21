@@ -461,6 +461,13 @@ export interface WindowsVersion {
   category: 'desktop' | 'server' | 'legacy'
   cached?: boolean
   download_url: string  // All versions now have direct download URLs
+  // Architecture-specific fields
+  cached_x86_64?: boolean
+  cached_arm64?: boolean
+  arm64_available?: boolean
+  arm64_name?: string
+  arm64_size_gb?: number
+  arm64_has_url?: boolean
 }
 
 export interface WindowsISODownloadResponse {
@@ -499,8 +506,11 @@ export interface WindowsVersionsResponse {
   all: WindowsVersion[]
   cache_dir: string
   cached_count: number
+  cached_arm64_count?: number
   total_count: number
+  host_arch?: 'x86_64' | 'arm64'
   note: string
+  arm64_note?: string
 }
 
 // Linux VM (qemux/qemu) Types

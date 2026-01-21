@@ -1256,6 +1256,59 @@ DOCKUR_WINDOWS_VERSIONS = [
 ]
 
 
+# Windows ARM64 versions (for dockur/windows-arm)
+# Only Windows 10 and 11 are available for ARM64
+# See: https://github.com/dockur/windows-arm
+DOCKUR_WINDOWS_ARM64_VERSIONS = {
+    # Windows 11 ARM64
+    "11": {
+        "name": "Windows 11 Pro ARM64",
+        "size_gb": 7.3,
+        "download_url": "https://software-static.download.prss.microsoft.com/dbazure/888969d5-f34g-4e03-ac9d-1f9786c66749/26200.6584.250915-1905.25h2_ge_release_svc_refresh_CLIENT_CONSUMER_a64fre_en-us.iso",
+    },
+    "11e": {
+        "name": "Windows 11 Enterprise ARM64",
+        "size_gb": 4.3,
+        "download_url": "https://software-static.download.prss.microsoft.com/dbazure/888969d5-f34g-4e03-ac9d-1f9786c66749/26100.1.240331-1435.ge_release_CLIENTENTERPRISEEVAL_OEMRET_A64FRE_en-us.iso",
+    },
+    "11l": {
+        "name": "Windows 11 LTSC ARM64",
+        "size_gb": 5.0,
+        "download_url": "https://software-static.download.prss.microsoft.com/dbazure/888969d5-f34g-4e03-ac9d-1f9786c66749/26100.1.240331-1435.ge_release_CLIENT_IOT_LTSC_EVAL_A64FRE_en-us.iso",
+    },
+    # Windows 10 ARM64
+    "10": {
+        "name": "Windows 10 Pro ARM64",
+        "size_gb": 4.7,
+        # No direct Microsoft link available; dockur/windows-arm downloads via UUP
+        "download_note": "Windows 10 ARM64 ISOs are built by dockur/windows-arm at runtime. Pre-caching not currently supported.",
+    },
+    "10e": {
+        "name": "Windows 10 Enterprise ARM64",
+        "size_gb": 4.7,
+        "download_note": "Windows 10 ARM64 ISOs are built by dockur/windows-arm at runtime. Pre-caching not currently supported.",
+    },
+    "10l": {
+        "name": "Windows 10 LTSC ARM64",
+        "size_gb": 4.4,
+        "download_note": "Windows 10 ARM64 ISOs are built by dockur/windows-arm at runtime. Pre-caching not currently supported.",
+    },
+}
+
+# Windows versions with ARM64 support
+WINDOWS_ARM64_VERSIONS = {"11", "11e", "11l", "10", "10e", "10l"}
+
+
+def get_windows_arm64_info(version: str) -> dict | None:
+    """Get ARM64 Windows version info if available."""
+    return DOCKUR_WINDOWS_ARM64_VERSIONS.get(version)
+
+
+def has_windows_arm64_support(version: str) -> bool:
+    """Check if a Windows version has ARM64 support."""
+    return version in WINDOWS_ARM64_VERSIONS
+
+
 # qemux/qemu supported Linux distributions
 # These are auto-downloaded by qemux/qemu when the container starts
 # Download URLs sourced from: https://github.com/qemux/qemu-docker/blob/master/src/define.sh
@@ -1935,8 +1988,10 @@ def get_windows_versions(current_user: CurrentUser):
 
     These versions are automatically downloaded by dockur/windows
     when a container is started - no manual ISO download needed.
-    Returns cached status for each version.
+    Returns cached status for each version, including ARM64 availability.
     """
+    from cyroid.utils.arch import HOST_ARCH
+
     windows_iso_dir = get_windows_iso_dir()
 
     # Get list of cached ISO files
@@ -1951,15 +2006,26 @@ def get_windows_versions(current_user: CurrentUser):
         result = []
         for v in version_list:
             version_info = dict(v)
-            # Check for common ISO naming patterns
             version_code = v["version"]
-            is_cached = any(
-                version_code.lower() in iso_name or
-                f"windows-{version_code}".lower() in iso_name or
-                f"win{version_code}".lower() in iso_name
-                for iso_name in cached_isos
-            )
-            version_info["cached"] = is_cached
+
+            # Check x86_64 cached status
+            x86_cached = f"windows-{version_code}.iso".lower() in cached_isos
+
+            # Check ARM64 cached status
+            arm64_cached = f"windows-{version_code}-arm64.iso".lower() in cached_isos
+
+            # Check if ARM64 is available for this version
+            arm64_available = has_windows_arm64_support(version_code)
+            arm64_info = get_windows_arm64_info(version_code) if arm64_available else None
+
+            version_info["cached"] = x86_cached  # Backwards compatibility
+            version_info["cached_x86_64"] = x86_cached
+            version_info["cached_arm64"] = arm64_cached
+            version_info["arm64_available"] = arm64_available
+            if arm64_info:
+                version_info["arm64_name"] = arm64_info.get("name")
+                version_info["arm64_size_gb"] = arm64_info.get("size_gb")
+                version_info["arm64_has_url"] = "download_url" in arm64_info
             result.append(version_info)
         return result
 
@@ -1968,7 +2034,8 @@ def get_windows_versions(current_user: CurrentUser):
     server = [v for v in all_versions if v["category"] == "server"]
     legacy = [v for v in all_versions if v["category"] == "legacy"]
 
-    cached_count = sum(1 for v in all_versions if v["cached"])
+    cached_count = sum(1 for v in all_versions if v["cached_x86_64"])
+    cached_arm64_count = sum(1 for v in all_versions if v["cached_arm64"])
 
     return {
         "desktop": desktop,
@@ -1977,8 +2044,11 @@ def get_windows_versions(current_user: CurrentUser):
         "all": all_versions,
         "cache_dir": windows_iso_dir,
         "cached_count": cached_count,
+        "cached_arm64_count": cached_arm64_count,
         "total_count": len(all_versions),
-        "note": "ISOs are automatically downloaded by dockur/windows when the VM starts. Pre-caching is optional but speeds up first boot."
+        "host_arch": HOST_ARCH,
+        "note": "ISOs are automatically downloaded by dockur/windows when the VM starts. Pre-caching is optional but speeds up first boot.",
+        "arm64_note": "ARM64 support is available for Windows 10/11 only. Server editions require x86_64."
     }
 
 
@@ -2662,47 +2732,71 @@ async def upload_custom_iso(
 
 
 @router.post("/isos/download/{version}/cancel")
-def cancel_windows_iso_download(version: str, current_user: AdminUser):
+def cancel_windows_iso_download(
+    version: str,
+    arch: Optional[str] = Query(None, description="Architecture (x86_64 or arm64)"),
+    current_user: AdminUser = None
+):
     """Cancel an in-progress Windows ISO download. Admin only."""
-    if version not in _active_downloads:
+    # Build download key (with arch suffix for ARM64)
+    download_key = f"{version}-{arch}" if arch == "arm64" else version
+
+    if download_key not in _active_downloads:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"No active download found for '{version}'"
+            detail=f"No active download found for '{version}'" + (f" ({arch})" if arch else "")
         )
 
-    if _active_downloads[version].get("status") != "downloading":
+    if _active_downloads[download_key].get("status") != "downloading":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Download for '{version}' is not in progress (status: {_active_downloads[version].get('status')})"
+            detail=f"Download for '{version}'" + (f" ({arch})" if arch else "") + f" is not in progress (status: {_active_downloads[download_key].get('status')})"
         )
 
     # Mark as cancelled - the download loop will detect this and clean up
-    _active_downloads[version]["cancelled"] = True
-    _active_downloads[version]["status"] = "cancelled"
+    _active_downloads[download_key]["cancelled"] = True
+    _active_downloads[download_key]["status"] = "cancelled"
 
-    return {"status": "cancelled", "version": version, "message": f"Download for '{version}' has been cancelled"}
+    return {
+        "status": "cancelled",
+        "version": version,
+        "arch": arch,
+        "message": f"Download for '{version}'" + (f" ({arch})" if arch else "") + " has been cancelled"
+    }
 
 
 @router.delete("/isos/{version}")
-def delete_windows_iso(version: str, current_user: AdminUser):
+def delete_windows_iso(
+    version: str,
+    arch: Optional[str] = Query(None, description="Architecture (x86_64 or arm64)"),
+    current_user: AdminUser = None
+):
     """Delete a cached Windows ISO. Admin only."""
     windows_iso_dir = get_windows_iso_dir()
-    filename = f"windows-{version}.iso"
+
+    # Build filename based on architecture
+    if arch == "arm64":
+        filename = f"windows-{version}-arm64.iso"
+        download_key = f"{version}-arm64"
+    else:
+        filename = f"windows-{version}.iso"
+        download_key = version
+
     filepath = os.path.join(windows_iso_dir, filename)
 
     # Clear any active download entry for this version
-    if version in _active_downloads:
-        del _active_downloads[version]
+    if download_key in _active_downloads:
+        del _active_downloads[download_key]
 
     if not os.path.exists(filepath):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"ISO for version '{version}' not found"
+            detail=f"ISO for version '{version}'" + (f" ({arch})" if arch else "") + " not found"
         )
 
     try:
         os.remove(filepath)
-        return {"status": "deleted", "version": version, "filename": filename}
+        return {"status": "deleted", "version": version, "arch": arch, "filename": filename}
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -2733,6 +2827,7 @@ def get_iso_upload_info(current_user: CurrentUser):
 class WindowsISODownloadRequest(BaseModel):
     version: str
     url: Optional[str] = None  # Custom URL, or use default for version
+    arch: Optional[str] = "x86_64"  # x86_64 or arm64
 
 
 class WindowsISODownloadStatusResponse(BaseModel):
@@ -2763,65 +2858,118 @@ def download_windows_iso(
     If no URL is provided, uses the default download URL for the version.
     Some versions (consumer editions) don't have direct download URLs
     and require manual download from Microsoft's website.
+
+    Supports both x86_64 and arm64 architectures (arm64 only for Win 10/11).
     """
     import os
     from cyroid.config import get_settings
 
-    # Validate version
-    version_info = None
-    for v in DOCKUR_WINDOWS_VERSIONS:
-        if v["version"] == request.version:
-            version_info = v
-            break
+    arch = request.arch or "x86_64"
 
-    if not version_info:
-        valid_versions = [v["version"] for v in DOCKUR_WINDOWS_VERSIONS]
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid version '{request.version}'. Valid versions: {', '.join(valid_versions)}"
-        )
+    # Handle ARM64 downloads
+    if arch == "arm64":
+        if not has_windows_arm64_support(request.version):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Windows version '{request.version}' is not available for ARM64. "
+                       f"ARM64 supported versions: {', '.join(WINDOWS_ARM64_VERSIONS)}"
+            )
 
-    # Determine download URLs (support multiple fallbacks)
-    download_urls = []
-    if request.url:
-        download_urls = [request.url]
-    else:
-        # Try download_urls list first, then fall back to single download_url
-        download_urls = version_info.get("download_urls", [])
-        if not download_urls:
-            single_url = version_info.get("download_url")
-            if single_url:
-                download_urls = [single_url]
+        arm64_info = get_windows_arm64_info(request.version)
+        if not arm64_info:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"ARM64 info not found for version '{request.version}'"
+            )
 
-    if not download_urls:
-        # No direct download URL available
-        download_page = version_info.get("download_page")
-        download_note = version_info.get("download_note", "No direct download available")
-
-        response = {
-            "status": "no_direct_download",
-            "version": request.version,
-            "name": version_info["name"],
-            "message": download_note,
-        }
-        if download_page:
-            response["download_page"] = download_page
-            response["instructions"] = f"Visit {download_page} to download the ISO manually, then upload it."
+        # Check if ARM64 has a download URL
+        download_urls = []
+        if request.url:
+            download_urls = [request.url]
         else:
-            response["instructions"] = "Provide a custom URL or upload the ISO manually."
+            arm64_url = arm64_info.get("download_url")
+            if arm64_url:
+                download_urls = [arm64_url]
 
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=response
-        )
+        if not download_urls:
+            download_note = arm64_info.get("download_note", "No direct download available for ARM64")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "status": "no_direct_download",
+                    "version": request.version,
+                    "arch": "arm64",
+                    "name": arm64_info["name"],
+                    "message": download_note,
+                    "instructions": "Provide a custom URL or let dockur/windows-arm download at runtime."
+                }
+            )
 
-    # Use the first URL for the response (actual download tries all URLs)
-    primary_download_url = download_urls[0]
+        version_info = {
+            "name": arm64_info["name"],
+            "size_gb": arm64_info.get("size_gb", 0),
+        }
+        primary_download_url = download_urls[0]
+
+    else:
+        # x86_64 download (original logic)
+        version_info = None
+        for v in DOCKUR_WINDOWS_VERSIONS:
+            if v["version"] == request.version:
+                version_info = v
+                break
+
+        if not version_info:
+            valid_versions = [v["version"] for v in DOCKUR_WINDOWS_VERSIONS]
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid version '{request.version}'. Valid versions: {', '.join(valid_versions)}"
+            )
+
+        # Determine download URLs (support multiple fallbacks)
+        download_urls = []
+        if request.url:
+            download_urls = [request.url]
+        else:
+            # Try download_urls list first, then fall back to single download_url
+            download_urls = version_info.get("download_urls", [])
+            if not download_urls:
+                single_url = version_info.get("download_url")
+                if single_url:
+                    download_urls = [single_url]
+
+        if not download_urls:
+            # No direct download URL available
+            download_page = version_info.get("download_page")
+            download_note = version_info.get("download_note", "No direct download available")
+
+            response = {
+                "status": "no_direct_download",
+                "version": request.version,
+                "name": version_info["name"],
+                "message": download_note,
+            }
+            if download_page:
+                response["download_page"] = download_page
+                response["instructions"] = f"Visit {download_page} to download the ISO manually, then upload it."
+            else:
+                response["instructions"] = "Provide a custom URL or upload the ISO manually."
+
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=response
+            )
+
+        primary_download_url = download_urls[0]
 
     windows_iso_dir = get_windows_iso_dir()
     os.makedirs(windows_iso_dir, exist_ok=True)
 
-    filename = f"windows-{request.version}.iso"
+    # Use architecture-specific filename
+    if arch == "arm64":
+        filename = f"windows-{request.version}-arm64.iso"
+    else:
+        filename = f"windows-{request.version}.iso"
     filepath = os.path.join(windows_iso_dir, filename)
 
     # Check if already exists
