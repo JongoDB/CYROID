@@ -43,10 +43,10 @@ class BaseImage(Base, UUIDMixin, TimestampMixin):
 
     # Container-specific fields
     docker_image_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)  # sha256:hash
-    docker_image_tag: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)  # e.g., kasmweb/ubuntu-jammy-desktop:1.14.0
+    docker_image_tag: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, unique=True)  # e.g., kasmweb/ubuntu-jammy-desktop:1.14.0
 
     # ISO-specific fields
-    iso_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)  # Path to cached ISO file
+    iso_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True, unique=True)  # Path to cached ISO file
     iso_source: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)  # windows, linux, custom
     iso_version: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)  # e.g., "22H2", "22.04"
 

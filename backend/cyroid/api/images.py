@@ -229,7 +229,23 @@ def sync_from_cache(
                     db.add(base_image)
                     custom_synced += 1
 
-    db.commit()
+    # Handle potential race condition with unique constraint
+    from sqlalchemy.exc import IntegrityError
+    try:
+        db.commit()
+    except IntegrityError as e:
+        # Race condition: another process created a duplicate record
+        # This is fine - just rollback and count what we can
+        db.rollback()
+        logger.warning(f"IntegrityError during sync (likely race condition): {e}")
+        # Return zeros since we couldn't sync due to race
+        return SyncResult(
+            docker_images_synced=0,
+            windows_isos_synced=0,
+            linux_isos_synced=0,
+            custom_isos_synced=0,
+            total_synced=0,
+        )
 
     total = docker_synced + windows_synced + linux_synced + custom_synced
     logger.info(f"Synced {total} images from cache to library")
