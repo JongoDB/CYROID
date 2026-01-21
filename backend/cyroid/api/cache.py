@@ -9,7 +9,7 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException, status, BackgroundTasks, Query
 from pydantic import BaseModel
 
-from cyroid.api.deps import DBSession, CurrentUser, AdminUser
+from cyroid.api.deps import DBSession, CurrentUser, AdminUser, require_role
 from cyroid.services.docker_service import get_docker_service
 from cyroid.config import get_settings
 
