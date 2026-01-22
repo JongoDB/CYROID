@@ -24,6 +24,8 @@ services:
     volumes:
       # Mount source code for hot-reload
       - ./backend:/app
+      # Mount VERSION file for version display
+      - ./VERSION:/app/VERSION:ro
       - /var/run/docker.sock:/var/run/docker.sock
       - ${CYROID_DATA_DIR:-/data/cyroid}/iso-cache:${CYROID_DATA_DIR:-/data/cyroid}/iso-cache
       - ${CYROID_DATA_DIR:-/data/cyroid}/template-storage:${CYROID_DATA_DIR:-/data/cyroid}/template-storage
@@ -48,6 +50,8 @@ services:
     volumes:
       # Mount source code for hot-reload
       - ./backend:/app
+      # Mount VERSION file for version display
+      - ./VERSION:/app/VERSION:ro
       - /var/run/docker.sock:/var/run/docker.sock
       - ${CYROID_DATA_DIR:-/data/cyroid}/iso-cache:${CYROID_DATA_DIR:-/data/cyroid}/iso-cache
       - ${CYROID_DATA_DIR:-/data/cyroid}/template-storage:${CYROID_DATA_DIR:-/data/cyroid}/template-storage
