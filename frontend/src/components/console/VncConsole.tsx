@@ -56,7 +56,8 @@ export function VncConsole({ vmId, vmHostname, token, onClose }: VncConsoleProps
         // noVNC resolves the path relative to its location, so we just need the websocket endpoint name
         // If noVNC is served from /vnc/{uuid}/ and path=websockify, it connects to /vnc/{uuid}/websockify
         const websocketPath = data.websocket_path ?? 'websockify'
-        const vncUrl = `${origin}${data.path}/?autoconnect=1&resize=scale&path=${websocketPath}`
+        // show_control_bar=true is required for KasmVNC to show sidebar when embedded in iframe
+        const vncUrl = `${origin}${data.path}/?autoconnect=1&resize=scale&path=${websocketPath}&show_control_bar=true`
 
         setVncInfo({
           url: vncUrl,
