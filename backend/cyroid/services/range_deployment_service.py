@@ -521,10 +521,23 @@ class RangeDeploymentService:
         for vm in new_vms:
             if vm.base_image_id:
                 base_img = db.query(BaseImage).filter(BaseImage.id == vm.base_image_id).first()
-                if base_img and base_img.image_type == "container":
-                    image_tag = base_img.docker_image_tag or base_img.docker_image_id
-                    if image_tag:
-                        unique_images.add(image_tag)
+                if base_img:
+                    if base_img.image_type == "container":
+                        # Container-based VMs use the docker image directly
+                        image_tag = base_img.docker_image_tag or base_img.docker_image_id
+                        if image_tag:
+                            unique_images.add(image_tag)
+                    elif base_img.image_type == "iso":
+                        # ISO-based VMs use QEMU images based on vm_type
+                        if base_img.vm_type == VMType.WINDOWS_VM:
+                            if base_img.native_arch == "arm64":
+                                unique_images.add("dockurr/windows-arm:latest")
+                            else:
+                                unique_images.add("dockurr/windows:latest")
+                        elif base_img.vm_type == VMType.LINUX_VM:
+                            unique_images.add("qemux/qemu:latest")
+                        elif base_img.vm_type == VMType.MACOS_VM:
+                            unique_images.add("dockurr/macos:latest")
             elif vm.golden_image_id:
                 golden_img = db.query(GoldenImage).filter(GoldenImage.id == vm.golden_image_id).first()
                 if golden_img:
@@ -569,6 +582,22 @@ class RangeDeploymentService:
                         image_tag = snapshot.docker_image_tag or snapshot.docker_image_id
                         vm_type = snapshot.vm_type
 
+                # For ISO-based VMs, derive image from vm_type
+                if not image_tag and vm_type:
+                    if vm_type == VMType.WINDOWS_VM:
+                        # Check architecture for Windows ARM
+                        if base_img and base_img.native_arch == "arm64":
+                            image_tag = "dockurr/windows-arm:latest"
+                        else:
+                            image_tag = "dockurr/windows:latest"
+                        logger.info(f"Using {image_tag} for Windows ISO VM {vm.hostname}")
+                    elif vm_type == VMType.LINUX_VM:
+                        image_tag = "qemux/qemu:latest"
+                        logger.info(f"Using {image_tag} for Linux ISO VM {vm.hostname}")
+                    elif vm_type == VMType.MACOS_VM:
+                        image_tag = "dockurr/macos:latest"
+                        logger.info(f"Using {image_tag} for macOS VM {vm.hostname}")
+
                 if not image_tag:
                     logger.warning(f"No image found for VM {vm.hostname}, skipping")
                     vm.status = VMStatus.ERROR
@@ -591,9 +620,15 @@ class RangeDeploymentService:
                 # Set up environment variables based on image type
                 environment = {}
                 privileged = False
+                volumes = {}
 
-                # macOS VM (dockur/macos) - requires VERSION env and privileged mode for KVM
-                if "dockur/macos" in image_tag.lower():
+                # Get ISO path if this is an ISO-based VM
+                iso_path = None
+                if base_img and base_img.image_type == "iso" and base_img.iso_path:
+                    iso_path = base_img.iso_path
+
+                # macOS VM (dockurr/macos) - requires VERSION env and privileged mode for KVM
+                if "dockurr/macos" in image_tag.lower():
                     macos_version_map = {
                         "15": "sequoia",
                         "14": "sonoma",
@@ -606,15 +641,41 @@ class RangeDeploymentService:
                     privileged = True
                     labels["cyroid.vm_type"] = "macos"
 
-                # Windows VM (dockur/windows) - set VERSION if specified
-                elif "dockur/windows" in image_tag.lower():
+                # Windows VM (dockurr/windows) - set VERSION if specified
+                elif "dockurr/windows" in image_tag.lower():
                     if vm.windows_version:
                         environment["VERSION"] = vm.windows_version
+                    # For Windows ISO VMs, mount the ISO file directly
+                    if iso_path:
+                        import os
+                        # Mount ISO file directly to /boot.iso (same as start_vm)
+                        volumes[iso_path] = {"bind": "/boot.iso", "mode": "ro"}
+                        environment["BOOT"] = "/boot.iso"
+                        logger.info(f"Mounting Windows ISO: {iso_path} -> /boot.iso")
+                    # Set resource limits
+                    environment["CPU_CORES"] = str(vm.cpu or 2)
+                    environment["RAM_SIZE"] = f"{vm.ram_mb or 4096}M"
+                    environment["DISK_SIZE"] = f"{vm.disk_gb or 64}G"
+                    # Disable KVM requirement for Docker Desktop / nested virtualization
+                    environment["KVM"] = "N"
                     privileged = True
                     labels["cyroid.vm_type"] = "windows"
 
-                # Linux VM (qemux/qemu) - uses VERSION for distro
+                # Linux VM (qemux/qemu) - uses VERSION for distro or BOOT for custom ISO
                 elif "qemux/qemu" in image_tag.lower():
+                    # For Linux ISO VMs, mount the ISO file directly and set BOOT
+                    if iso_path:
+                        import os
+                        # Mount ISO file directly to /boot.iso (same as start_vm)
+                        volumes[iso_path] = {"bind": "/boot.iso", "mode": "ro"}
+                        environment["BOOT"] = "/boot.iso"
+                        logger.info(f"Mounting Linux ISO: {iso_path} -> /boot.iso")
+                    # Set resource limits
+                    environment["CPU_CORES"] = str(vm.cpu or 2)
+                    environment["RAM_SIZE"] = f"{vm.ram_mb or 2048}M"
+                    environment["DISK_SIZE"] = f"{vm.disk_gb or 20}G"
+                    # Disable KVM requirement for Docker Desktop / nested virtualization
+                    environment["KVM"] = "N"
                     privileged = True
                     labels["cyroid.vm_type"] = "linux"
 
@@ -634,6 +695,7 @@ class RangeDeploymentService:
                     dns_search=vm_network.dns_search,
                     environment=environment if environment else None,
                     privileged=privileged,
+                    volumes=volumes if volumes else None,
                 )
 
                 vm.container_id = container_id
