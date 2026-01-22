@@ -23,7 +23,8 @@ def _get_default_data_dir() -> str:
 def _get_version() -> str:
     """Get version from VERSION file, env var, git tag, or fallback to 'dev'."""
     # First check environment variable (for Docker builds)
-    if version := os.environ.get("APP_VERSION"):
+    # Skip if it's the default "dev" value from Dockerfile
+    if (version := os.environ.get("APP_VERSION")) and version != "dev":
         return version
 
     # Try VERSION file locations (in order of preference)
