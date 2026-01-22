@@ -918,6 +918,8 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
                         manual_install=vm.manual_install,
                         # Architecture selection
                         arch=vm.arch,
+                        # Container runtime config from BaseImage
+                        container_config=base_image_record.container_config if base_image_record else None,
                     )
             elif os_type == OSType.CUSTOM:
                 # Custom ISO VMs use qemux/qemu with the custom ISO
@@ -1001,6 +1003,8 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
                         dns_search=network.dns_search,
                         # Architecture selection
                         arch=vm.arch,
+                        # Container runtime config from BaseImage
+                        container_config=base_image_record.container_config if base_image_record else None,
                     )
             elif os_type == OSType.MACOS:
                 # macOS VM using dockur/macos
@@ -1068,6 +1072,8 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
                         labels=labels,
                         storage_path=vm_storage_path,
                         display_type=vm.display_type or "desktop",
+                        # Container runtime config from BaseImage
+                        container_config=base_image_record.container_config if base_image_record else None,
                     )
             elif vm_type == VMType.LINUX_VM:
                 # Linux VM using qemux/qemu (ISO-based Linux installation)
@@ -1169,6 +1175,8 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
                         dns_search=network.dns_search,
                         # Architecture selection
                         arch=vm.arch,
+                        # Container runtime config from BaseImage
+                        container_config=base_image_record.container_config if base_image_record else None,
                     )
             else:
                 # Container (standard Docker container) or snapshot-based VM
@@ -1223,6 +1231,8 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
                         # Network DNS configuration
                         dns_servers=network.dns_servers,
                         dns_search=network.dns_search,
+                        # Container runtime config from BaseImage
+                        container_config=base_image_record.container_config if base_image_record else None,
                     )
 
             vm.container_id = container_id

@@ -1,12 +1,13 @@
 // frontend/src/pages/VMLibrary.tsx
 import { useEffect, useState } from 'react'
 import { imagesApi, BaseImageUpdate, GoldenImageUpdate } from '../services/api'
-import type { BaseImage, GoldenImageLibrary, SnapshotWithLineage, LibraryStats } from '../types'
-import { Pencil, Trash2, Loader2, X, Server, HardDrive, Star, Camera, Upload, Database, ArrowRight, RefreshCw, LayoutGrid, List } from 'lucide-react'
+import type { BaseImage, GoldenImageLibrary, SnapshotWithLineage, LibraryStats, ContainerConfig } from '../types'
+import { Pencil, Trash2, Loader2, X, Server, HardDrive, Star, Camera, Upload, Database, ArrowRight, RefreshCw, LayoutGrid, List, ChevronDown } from 'lucide-react'
 import clsx from 'clsx'
 import { ConfirmDialog } from '../components/common/ConfirmDialog'
 import { toast } from '../stores/toastStore'
 import { Link } from 'react-router-dom'
+import { ContainerConfigEditor } from '../components/ContainerConfigEditor'
 
 // Tab type for the VM Library
 type VMLibraryTab = 'base' | 'golden' | 'snapshots'
@@ -150,6 +151,7 @@ export default function VMLibrary() {
           default_cpu: editingBaseImage.default_cpu,
           default_ram_mb: editingBaseImage.default_ram_mb,
           default_disk_gb: editingBaseImage.default_disk_gb,
+          container_config: editingBaseImage.container_config,
         }
         await imagesApi.updateBaseImage(editingBaseImage.id, update)
         toast.success('Base image updated')
@@ -1000,6 +1002,30 @@ export default function VMLibrary() {
                     />
                   </div>
                 </div>
+
+                {/* Container Runtime Options - only for container base images */}
+                {editingBaseImage?.image_type === 'container' && (
+                  <details className="border border-gray-200 rounded-md bg-gray-50 mt-4">
+                    <summary className="cursor-pointer p-4 text-sm font-medium text-gray-700 flex items-center hover:bg-gray-100 rounded-t-md">
+                      <ChevronDown className="h-4 w-4 mr-2" />
+                      Container Runtime Options
+                      {editingBaseImage.container_config && Object.keys(editingBaseImage.container_config).length > 0 && (
+                        <span className="ml-2 px-2 py-0.5 bg-blue-100 text-blue-700 text-xs rounded-full">
+                          Configured
+                        </span>
+                      )}
+                    </summary>
+                    <div className="p-4 pt-0 border-t border-gray-200">
+                      <ContainerConfigEditor
+                        value={editingBaseImage.container_config}
+                        onChange={(config: ContainerConfig | null) => setEditingBaseImage({
+                          ...editingBaseImage,
+                          container_config: config
+                        })}
+                      />
+                    </div>
+                  </details>
+                )}
 
                 <div className="flex justify-end space-x-3 pt-4">
                   <button

@@ -909,6 +909,21 @@ export type ImageLibraryImageType = 'container' | 'iso'
 export type GoldenImageSource = 'snapshot' | 'import'
 
 /**
+ * Container runtime configuration for Docker containers.
+ * Applied when creating containers from BaseImages.
+ */
+export interface ContainerConfig {
+  privileged?: boolean
+  cap_add?: string[]
+  cap_drop?: string[]
+  security_opt?: string[]
+  devices?: string[]
+  sysctls?: Record<string, string>
+  shm_size?: string
+  ulimits?: Record<string, { soft: number; hard: number }>
+}
+
+/**
  * Base Image - Foundation layer of the Image Library.
  * Contains container images (from Docker pulls) and cached ISOs.
  */
@@ -937,6 +952,8 @@ export interface BaseImage {
   is_global: boolean
   created_by: string | null
   tags: string[]
+  // Container runtime config
+  container_config: ContainerConfig | null
   created_at: string
   updated_at: string
 }

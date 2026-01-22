@@ -800,7 +800,7 @@ export const walkthroughApi = {
 }
 
 // Snapshots API (for creating snapshots from VMs)
-import type { Snapshot, BaseImage, GoldenImageLibrary, SnapshotWithLineage, LibraryImage, LibraryStats, SyncResult } from '../types'
+import type { Snapshot, BaseImage, GoldenImageLibrary, SnapshotWithLineage, LibraryImage, LibraryStats, SyncResult, ContainerConfig } from '../types'
 
 export interface SnapshotCreate {
   vm_id: string
@@ -854,6 +854,7 @@ export interface BaseImageUpdate {
   default_ram_mb?: number
   default_disk_gb?: number
   tags?: string[]
+  container_config?: ContainerConfig | null
 }
 
 export interface GoldenImageCreate {

@@ -70,6 +70,10 @@ class BaseImage(Base, UUIDMixin, TimestampMixin):
     # Categorization
     tags: Mapped[List[str]] = mapped_column(JSON, default=list)
 
+    # Container runtime configuration (capabilities, devices, security options)
+    # See: https://docs.docker.com/engine/reference/run/
+    container_config: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+
     # Relationships
     golden_images: Mapped[List["GoldenImage"]] = relationship(
         "GoldenImage", back_populates="base_image"

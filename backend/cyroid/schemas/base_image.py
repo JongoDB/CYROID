@@ -18,6 +18,7 @@ class BaseImageBase(BaseModel):
     default_ram_mb: int = Field(default=4096, ge=512, le=131072)
     default_disk_gb: int = Field(default=40, ge=10, le=1000)
     tags: List[str] = Field(default_factory=list)
+    container_config: Optional[dict] = None
 
 
 class BaseImageCreate(BaseImageBase):
@@ -44,6 +45,7 @@ class BaseImageUpdate(BaseModel):
     default_disk_gb: Optional[int] = Field(None, ge=10, le=1000)
     tags: Optional[List[str]] = None
     is_global: Optional[bool] = None
+    container_config: Optional[dict] = None
 
 
 class BaseImageResponse(BaseImageBase):
@@ -57,6 +59,7 @@ class BaseImageResponse(BaseImageBase):
     size_bytes: Optional[int] = None
     is_global: bool
     created_by: Optional[UUID] = None
+    container_config: Optional[dict] = None
     created_at: datetime
     updated_at: datetime
 

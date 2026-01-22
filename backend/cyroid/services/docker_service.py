@@ -103,7 +103,38 @@ class DockerService:
             DockerClient for operating on the range
         """
         return self.dind_service.get_range_client(str(range_id), docker_url)
-    
+
+    def _merge_container_config(
+        self,
+        base_config: dict,
+        container_config: Optional[dict]
+    ) -> dict:
+        """Merge container_config into base host_config, handling lists specially.
+
+        Args:
+            base_config: The base host_config dict being built
+            container_config: Optional container runtime config from BaseImage
+
+        Returns:
+            Merged config dict with lists extended (avoiding duplicates) and scalars overridden
+        """
+        if not container_config:
+            return base_config
+
+        result = base_config.copy()
+        list_keys = {"cap_add", "cap_drop", "devices", "security_opt", "dns", "dns_search"}
+
+        for key, value in container_config.items():
+            if key in list_keys and isinstance(value, list):
+                # Extend lists, avoid duplicates
+                existing = result.get(key, [])
+                result[key] = list(dict.fromkeys(existing + value))
+            else:
+                # Override scalar values
+                result[key] = value
+
+        return result
+
     def _verify_connection(self) -> None:
         """Verify connection to Docker daemon."""
         try:
@@ -569,7 +600,8 @@ class DockerService:
         linux_password: Optional[str] = None,
         linux_user_sudo: bool = True,
         dns_servers: Optional[str] = None,
-        dns_search: Optional[str] = None
+        dns_search: Optional[str] = None,
+        container_config: Optional[dict] = None
     ) -> str:
         """
         Create a Docker container for a Linux VM.
@@ -591,6 +623,7 @@ class DockerService:
             linux_user_sudo: Grant sudo privileges (for LinuxServer containers)
             dns_servers: Comma-separated DNS servers (e.g., "8.8.8.8,8.8.4.4")
             dns_search: DNS search domain (e.g., "corp.local")
+            container_config: Optional container runtime config from BaseImage
 
         Returns:
             Container ID
@@ -658,6 +691,9 @@ class DockerService:
             if dns_search_list:
                 host_config_args["dns_search"] = dns_search_list
 
+            # Merge container_config from BaseImage
+            host_config_args = self._merge_container_config(host_config_args, container_config)
+
             container = self.client.api.create_container(
                 image=image,
                 name=name,
@@ -714,6 +750,8 @@ class DockerService:
         oem_script_path: Optional[str] = None,
         # Target architecture (x86_64 or arm64, defaults to host)
         arch: Optional[str] = None,
+        # Container runtime config from BaseImage
+        container_config: Optional[dict] = None,
     ) -> str:
         """
         Create a Windows VM container using dockur/windows or dockur/windows-arm.
@@ -955,6 +993,9 @@ class DockerService:
             if binds:
                 host_config_args["binds"] = binds
 
+            # Merge container_config from BaseImage
+            host_config_args = self._merge_container_config(host_config_args, container_config)
+
             container = self.client.api.create_container(
                 image=image,
                 name=name,
@@ -988,6 +1029,7 @@ class DockerService:
         labels: Optional[Dict[str, str]] = None,
         storage_path: Optional[str] = None,
         display_type: str = "desktop",
+        container_config: Optional[dict] = None,
     ) -> str:
         """
         Create a macOS VM container using dockur/macos.
@@ -1098,6 +1140,9 @@ class DockerService:
             if binds:
                 host_config_args["binds"] = binds
 
+            # Merge container_config from BaseImage
+            host_config_args = self._merge_container_config(host_config_args, container_config)
+
             container = self.client.api.create_container(
                 image=image,
                 name=name,
@@ -1152,6 +1197,8 @@ class DockerService:
         linux_user_sudo: bool = True,
         # Target architecture (x86_64 or arm64, defaults to host)
         arch: Optional[str] = None,
+        # Container runtime config from BaseImage
+        container_config: Optional[dict] = None,
     ) -> str:
         """
         Create a Linux VM container using qemux/qemu.
@@ -1433,6 +1480,9 @@ local-hostname: {name}
                 host_config_args["devices"] = ["/dev/kvm:/dev/kvm"]
             if binds:
                 host_config_args["binds"] = binds
+
+            # Merge container_config from BaseImage
+            host_config_args = self._merge_container_config(host_config_args, container_config)
 
             container = self.client.api.create_container(
                 image=image,
