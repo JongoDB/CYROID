@@ -800,23 +800,35 @@ def get_vnc_status(range_id: UUID, db: DBSession, current_user: CurrentUser):
 
         vm_vnc_status.append(status_info)
 
-    # Check iptables rules for DinD ranges
-    iptables_rules = []
+    # Check socat processes and network config for DinD ranges
+    socat_processes = []
+    network_interfaces = []
     if range_obj.dind_container_id and range_obj.dind_docker_url:
         try:
             docker = get_docker_service()
             host_client = docker.client
             dind_container = host_client.containers.get(range_obj.dind_container_id)
 
-            # Get DNAT rules from DinD container
+            # Get running socat VNC proxies
             exec_result = dind_container.exec_run(
-                "iptables -t nat -L PREROUTING -n -v",
+                "ps aux | grep socat | grep -v grep",
                 user="root"
             )
             if exec_result.exit_code == 0:
-                iptables_rules = exec_result.output.decode("utf-8").split("\n")
+                socat_processes = exec_result.output.decode("utf-8").split("\n")
+            else:
+                socat_processes = ["No socat processes running"]
+
+            # Get network interfaces inside DinD
+            exec_result = dind_container.exec_run(
+                "ip -br addr",
+                user="root"
+            )
+            if exec_result.exit_code == 0:
+                network_interfaces = exec_result.output.decode("utf-8").split("\n")
+
         except Exception as e:
-            iptables_rules = [f"Error getting iptables rules: {str(e)}"]
+            socat_processes = [f"Error getting socat processes: {str(e)}"]
 
     return {
         "range_id": str(range_id),
@@ -828,7 +840,8 @@ def get_vnc_status(range_id: UUID, db: DBSession, current_user: CurrentUser):
         "vnc_mappings_count": len(vnc_mappings),
         "traefik_routes_exist": traefik_routes_exist,
         "traefik_route_file": str(traefik_route_file),
-        "iptables_rules": iptables_rules,
+        "socat_processes": socat_processes,
+        "network_interfaces": network_interfaces,
         "vms": vm_vnc_status,
         "summary": {
             "total_vms": len(range_obj.vms),

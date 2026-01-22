@@ -679,13 +679,15 @@ class DinDService:
         existing_mappings: Optional[dict] = None,
     ) -> dict[str, dict]:
         """
-        Set up iptables DNAT rules for VNC port forwarding inside DinD.
+        Set up TCP port forwarding for VNC access inside DinD using socat.
 
-        Instead of using nginx proxy, this uses iptables PREROUTING DNAT rules
-        to forward traffic from the DinD management IP to VM VNC ports.
+        Uses socat to create a simple TCP proxy from the DinD management IP
+        to VM VNC ports. This is more reliable than iptables DNAT because
+        it works at the application level and doesn't require complex
+        netfilter/NAT configuration.
 
         Architecture:
-            Traefik (host) -> 172.30.1.5:15900 -> iptables DNAT -> vm-container:8006
+            Traefik (host) -> 172.30.1.5:15900 -> socat -> vm-container:8006
 
         Args:
             range_id: Range identifier
@@ -721,6 +723,13 @@ class DinDService:
         if not dind_mgmt_ip:
             raise ValueError(f"Cannot get management IP for DinD container (range {range_id})")
 
+        # Ensure socat is available in DinD container
+        exit_code, _ = dind_container.exec_run("which socat", privileged=True)
+        if exit_code != 0:
+            # Try to install socat (Alpine-based DinD image)
+            logger.info("Installing socat in DinD container...")
+            dind_container.exec_run("apk add --no-cache socat", privileged=True)
+
         # Get set of currently allocated ports
         allocated_ports = set()
         if existing_mappings:
@@ -738,15 +747,20 @@ class DinDService:
 
         port_mappings = {}
 
-        # Build iptables rules for each VM
+        # Set up socat proxy for each VM
         for vm_info in vm_ports:
             vm_id = vm_info["vm_id"]
             vm_ip = vm_info["ip_address"]
             vnc_port = vm_info["vnc_port"]
+            hostname = vm_info.get("hostname", vm_id[:8])
 
             # Skip if this VM already has a mapping
             if vm_id in (existing_mappings or {}):
                 logger.debug(f"VM {vm_id} already has VNC mapping, skipping")
+                continue
+
+            if not vm_ip:
+                logger.warning(f"VM {vm_id} has no IP address, skipping VNC setup")
                 continue
 
             # Allocate next available port
@@ -759,70 +773,47 @@ class DinDService:
                 "original_port": vnc_port,
             }
 
-            # First, remove any existing rules for this port to avoid duplicates
-            # This handles cases where VMs were restarted and got different IPs
-            cleanup_cmd = (
-                f"iptables -t nat -S PREROUTING | grep -E 'dport {external_port}' | "
-                f"sed 's/-A /-D /' | while read rule; do iptables -t nat $rule 2>/dev/null; done"
-            )
-            try:
-                dind_container.exec_run(["sh", "-c", cleanup_cmd], privileged=True)
-            except Exception:
-                pass  # Ignore cleanup errors
+            # Kill any existing socat on this port
+            kill_cmd = f"pkill -f 'socat.*:{external_port}' 2>/dev/null || true"
+            dind_container.exec_run(["sh", "-c", kill_cmd], privileged=True)
 
-            # DNAT rule: forward traffic from external_port to vm_ip:vnc_port
-            # -d {dind_mgmt_ip} matches traffic destined for DinD's management IP
-            dnat_rule = (
-                f"iptables -t nat -A PREROUTING -p tcp "
-                f"-d {dind_mgmt_ip} --dport {external_port} "
-                f"-j DNAT --to-destination {vm_ip}:{vnc_port}"
+            # Start socat as a TCP proxy in the background
+            # socat listens on external_port and forwards to vm_ip:vnc_port
+            # Using fork option to handle multiple connections
+            socat_cmd = (
+                f"nohup socat TCP-LISTEN:{external_port},fork,reuseaddr "
+                f"TCP:{vm_ip}:{vnc_port} "
+                f">/dev/null 2>&1 &"
             )
 
             try:
-                exit_code, output = dind_container.exec_run(dnat_rule, privileged=True)
-                if exit_code != 0:
-                    output_str = output.decode() if isinstance(output, bytes) else str(output)
-                    logger.warning(f"VNC DNAT rule failed: {dnat_rule} -> {output_str}")
-                else:
-                    logger.debug(f"Applied VNC DNAT rule: {dnat_rule}")
-            except Exception as e:
-                logger.warning(f"Error applying VNC DNAT rule: {e}")
+                exit_code, output = dind_container.exec_run(
+                    ["sh", "-c", socat_cmd],
+                    privileged=True,
+                    detach=False  # Wait for the shell to start the background process
+                )
 
-        # Ensure FORWARD chain allows the forwarded traffic
-        # (May already be set by setup_network_isolation_in_dind, but ensure it)
-        try:
-            # Insert at the beginning to take precedence
-            dind_container.exec_run(
-                "iptables -I FORWARD 1 -m state --state NEW,ESTABLISHED,RELATED -j ACCEPT",
-                privileged=True
-            )
-        except Exception as e:
-            logger.debug(f"Forward rule may already exist: {e}")
-
-        # Ensure MASQUERADE is set for return traffic from VMs
-        # This is required so that VMs can respond to VNC traffic that was DNATed
-        # The rule masquerades traffic from the management network going to internal bridges
-        try:
-            # Check if MASQUERADE rule already exists
-            exit_code, output = dind_container.exec_run(
-                "iptables -t nat -C POSTROUTING -s 172.30.0.0/16 -o br-+ -j MASQUERADE",
-                privileged=True
-            )
-            if exit_code != 0:
-                # Rule doesn't exist, add it
-                dind_container.exec_run(
-                    "iptables -t nat -A POSTROUTING -s 172.30.0.0/16 -o br-+ -j MASQUERADE",
+                # Verify socat is running
+                check_cmd = f"pgrep -f 'socat.*:{external_port}' || echo 'NOT_RUNNING'"
+                exit_code, check_output = dind_container.exec_run(
+                    ["sh", "-c", check_cmd],
                     privileged=True
                 )
-                logger.debug("Added MASQUERADE rule for VNC return traffic")
-        except Exception as e:
-            logger.debug(f"MASQUERADE rule setup: {e}")
+                check_result = check_output.decode().strip() if check_output else ""
+
+                if "NOT_RUNNING" in check_result:
+                    logger.warning(f"VNC proxy failed to start for {hostname} on port {external_port}")
+                else:
+                    logger.info(f"VNC proxy started for {hostname}: {dind_mgmt_ip}:{external_port} -> {vm_ip}:{vnc_port}")
+
+            except Exception as e:
+                logger.error(f"Failed to start VNC proxy for {hostname}: {e}")
 
         if port_mappings:
             allocated = [m["proxy_port"] for m in port_mappings.values()]
             logger.info(
                 f"Set up VNC port forwarding for range {range_id}: "
-                f"{len(port_mappings)} ports via iptables DNAT (ports: {sorted(allocated)})"
+                f"{len(port_mappings)} ports via socat proxy (ports: {sorted(allocated)})"
             )
 
         return port_mappings
@@ -834,7 +825,7 @@ class DinDService:
         proxy_info: dict,
     ) -> bool:
         """
-        Remove VNC port forwarding iptables rule for a specific VM.
+        Remove VNC port forwarding for a specific VM by killing its socat process.
 
         Args:
             range_id: Range identifier
@@ -842,52 +833,33 @@ class DinDService:
             proxy_info: Dict with proxy_port, proxy_host, original_port
 
         Returns:
-            True if rule was removed, False otherwise
+            True if proxy was removed, False otherwise
         """
         dind_container = self._find_container_by_range_id(range_id)
         if not dind_container:
-            logger.warning(f"Cannot find DinD container for range {range_id} - rule may already be removed")
+            logger.warning(f"Cannot find DinD container for range {range_id} - proxy may already be removed")
             return False
 
         proxy_port = proxy_info.get("proxy_port")
-        proxy_host = proxy_info.get("proxy_host")
 
-        if not proxy_port or not proxy_host:
+        if not proxy_port:
             logger.warning(f"Invalid proxy info for VM {vm_id}: {proxy_info}")
             return False
 
-        # Delete the DNAT rule by matching the port
-        # Note: We delete by --dport since we don't know the destination anymore
-        delete_rule = (
-            f"iptables -t nat -D PREROUTING -p tcp "
-            f"-d {proxy_host} --dport {proxy_port} -j DNAT"
-        )
-
         try:
-            # First, list rules to find the exact rule
-            exit_code, output = dind_container.exec_run(
-                f"iptables -t nat -S PREROUTING",
+            # Kill socat process listening on this port
+            kill_cmd = f"pkill -f 'socat.*:{proxy_port}' 2>/dev/null"
+            exit_code, _ = dind_container.exec_run(
+                ["sh", "-c", kill_cmd],
                 privileged=True
             )
-            if exit_code == 0:
-                rules = output.decode() if isinstance(output, bytes) else str(output)
-                # Find and delete rules matching our port
-                for line in rules.split('\n'):
-                    if f"--dport {proxy_port}" in line and f"-d {proxy_host}" in line:
-                        # Extract the full rule and delete it
-                        rule_to_delete = line.replace('-A ', '-D ')
-                        exit_code, _ = dind_container.exec_run(
-                            f"iptables -t nat {rule_to_delete}",
-                            privileged=True
-                        )
-                        if exit_code == 0:
-                            logger.info(f"Removed VNC DNAT rule for VM {vm_id} (port {proxy_port})")
-                            return True
 
-            logger.warning(f"Could not find DNAT rule for VM {vm_id} (port {proxy_port})")
-            return False
+            # pkill returns 1 if no processes matched, which is fine
+            logger.info(f"Removed VNC proxy for VM {vm_id} (port {proxy_port})")
+            return True
+
         except Exception as e:
-            logger.warning(f"Error removing VNC DNAT rule for VM {vm_id}: {e}")
+            logger.warning(f"Error removing VNC proxy for VM {vm_id}: {e}")
             return False
 
     async def teardown_vnc_port_forwarding(
@@ -895,17 +867,27 @@ class DinDService:
         range_id: str,
     ) -> None:
         """
-        Remove VNC port forwarding iptables rules.
+        Remove all VNC port forwarding proxies for a range.
 
-        Note: This is effectively a no-op since destroying the DinD container
-        automatically removes all iptables rules. This method exists for
-        symmetry and potential future use cases.
+        This kills all socat processes in the port range 15900-16899.
+        In practice, destroying the DinD container automatically removes all
+        processes, so this is mainly for cleanup without destroying the container.
 
         Args:
             range_id: Range identifier
         """
-        # No explicit action needed - destroying DinD container removes all rules
-        logger.debug(f"Teardown VNC port forwarding for range {range_id} (no-op)")
+        dind_container = self._find_container_by_range_id(range_id)
+        if not dind_container:
+            logger.debug(f"DinD container not found for range {range_id} - nothing to teardown")
+            return
+
+        try:
+            # Kill all socat processes for VNC proxy ports
+            kill_cmd = "pkill -f 'socat.*TCP-LISTEN:15' 2>/dev/null || true"
+            dind_container.exec_run(["sh", "-c", kill_cmd], privileged=True)
+            logger.debug(f"Teardown VNC port forwarding for range {range_id}")
+        except Exception as e:
+            logger.warning(f"Error during VNC teardown for range {range_id}: {e}")
 
     async def setup_inter_network_routing(
         self,

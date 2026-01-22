@@ -135,6 +135,12 @@ export function VncStatus({ rangeId, onRefresh }: VncStatusProps) {
                 <span className="text-gray-400">VNC Mappings:</span>
                 <span className="ml-2 text-white">{vncStatus.vnc_mappings_count}</span>
               </div>
+              <div>
+                <span className="text-gray-400">Socat Proxies:</span>
+                <span className={`ml-2 ${vncStatus.socat_processes && vncStatus.socat_processes.length > 0 && !vncStatus.socat_processes[0].includes('No socat') ? 'text-green-400' : 'text-yellow-400'}`}>
+                  {vncStatus.socat_processes && vncStatus.socat_processes.length > 0 && !vncStatus.socat_processes[0].includes('No socat') ? `${vncStatus.socat_processes.filter(p => p.trim()).length} running` : 'None running'}
+                </span>
+              </div>
             </div>
           )}
 
@@ -225,14 +231,26 @@ export function VncStatus({ rangeId, onRefresh }: VncStatusProps) {
             </div>
           )}
 
-          {/* iptables Rules (collapsible) */}
-          {isDind && vncStatus.iptables_rules.length > 0 && (
+          {/* Socat Processes (collapsible) */}
+          {isDind && vncStatus.socat_processes && vncStatus.socat_processes.length > 0 && (
             <details className="pt-2">
               <summary className="text-sm text-gray-400 cursor-pointer hover:text-gray-300">
-                View iptables DNAT Rules ({vncStatus.iptables_rules.length} lines)
+                View Socat Proxy Processes ({vncStatus.socat_processes.filter(p => p.trim()).length} lines)
               </summary>
               <pre className="mt-2 p-2 bg-gray-900 rounded text-xs font-mono text-gray-300 overflow-x-auto">
-                {vncStatus.iptables_rules.join('\n')}
+                {vncStatus.socat_processes.join('\n')}
+              </pre>
+            </details>
+          )}
+
+          {/* Network Interfaces (collapsible) */}
+          {isDind && vncStatus.network_interfaces && vncStatus.network_interfaces.length > 0 && (
+            <details className="pt-2">
+              <summary className="text-sm text-gray-400 cursor-pointer hover:text-gray-300">
+                View DinD Network Interfaces ({vncStatus.network_interfaces.filter(i => i.trim()).length} lines)
+              </summary>
+              <pre className="mt-2 p-2 bg-gray-900 rounded text-xs font-mono text-gray-300 overflow-x-auto">
+                {vncStatus.network_interfaces.join('\n')}
               </pre>
             </details>
           )}

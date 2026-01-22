@@ -207,7 +207,8 @@ export interface VncStatusResponse {
   vnc_mappings_count: number
   traefik_routes_exist: boolean
   traefik_route_file: string
-  iptables_rules: string[]
+  socat_processes: string[]
+  network_interfaces: string[]
   vms: VncVmStatus[]
   summary: {
     total_vms: number
