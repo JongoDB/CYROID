@@ -498,7 +498,7 @@ def delete_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
                 dind_service = get_dind_service()
                 traefik_service = get_traefik_route_service()
 
-                # Remove iptables DNAT rule
+                # Remove VNC proxy
                 asyncio.run(dind_service.remove_vnc_port_forwarding(
                     range_id=str(vm.range_id),
                     vm_id=vm_id_str,
