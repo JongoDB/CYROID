@@ -3,6 +3,7 @@ import os
 import platform
 import subprocess
 from pydantic_settings import BaseSettings
+from pydantic import field_validator
 from functools import lru_cache
 
 
@@ -23,8 +24,8 @@ def _get_default_data_dir() -> str:
 def _get_version() -> str:
     """Get version from VERSION file, env var, git tag, or fallback to 'dev'."""
     # First check environment variable (for Docker builds)
-    # Skip if it's the default "dev" value from Dockerfile
-    if (version := os.environ.get("APP_VERSION")) and version != "dev":
+    # Skip if it's empty or the default "dev" value from Dockerfile
+    if (version := os.environ.get("APP_VERSION")) and version not in ("", "dev"):
         return version
 
     # Try VERSION file locations (in order of preference)
@@ -60,9 +61,17 @@ def _get_version() -> str:
 
 class Settings(BaseSettings):
     # Application version (from VERSION file, APP_VERSION env, git tag, or "dev")
-    app_version: str = _get_version()
+    app_version: str = "dev"
     git_commit: str = os.environ.get("GIT_COMMIT", "dev")
     build_date: str = os.environ.get("BUILD_DATE", "")
+
+    @field_validator("app_version", mode="after")
+    @classmethod
+    def resolve_app_version(cls, v: str) -> str:
+        """If version is 'dev' or empty, try to get actual version from file/git."""
+        if v in ("", "dev"):
+            return _get_version()
+        return v
 
     # Database
     database_url: str = "postgresql://cyroid:cyroid@db:5432/cyroid"

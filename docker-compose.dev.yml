@@ -19,6 +19,8 @@ services:
       dockerfile: Dockerfile
     image: cyroid-api:latest
     environment:
+      # Unset APP_VERSION so it reads from mounted VERSION file
+      APP_VERSION: ""
       # Use local DinD image for development
       DIND_IMAGE: ${DIND_IMAGE:-cyroid-dind:latest}
     volumes:
@@ -45,6 +47,8 @@ services:
       dockerfile: Dockerfile
     image: cyroid-worker:latest
     environment:
+      # Unset APP_VERSION so it reads from mounted VERSION file
+      APP_VERSION: ""
       # Use local DinD image for development
       DIND_IMAGE: ${DIND_IMAGE:-cyroid-dind:latest}
     volumes:
