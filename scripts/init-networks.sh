@@ -38,19 +38,8 @@ else
     echo "cyroid-ranges network already exists"
 fi
 
-# Create traefik-routing network if not exists
-if ! docker network inspect traefik-routing &>/dev/null; then
-    echo "Creating traefik-routing network..."
-    docker network create \
-        --driver bridge \
-        traefik-routing
-    echo "Created traefik-routing"
-else
-    echo "traefik-routing network already exists"
-fi
-
 echo ""
 echo "=== Networks initialized ==="
-docker network ls | grep -E "(cyroid|traefik)"
+docker network ls | grep cyroid
 echo ""
 echo "Ready to start CYROID with: docker-compose up -d"
