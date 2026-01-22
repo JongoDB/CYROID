@@ -720,7 +720,7 @@ export const cacheApi = {
   deleteCustomISO: (filename: string) =>
     api.delete(`/cache/custom-isos/${encodeURIComponent(filename)}`),
 
-  // ISO Uploads
+  // ISO Uploads (legacy - specific version)
   uploadWindowsISO: (file: File, version: string) => {
     const formData = new FormData()
     formData.append('file', file)
@@ -742,6 +742,33 @@ export const cacheApi = {
     formData.append('file', file)
     formData.append('version', version)
     return api.post<ISOUploadResponse>('/cache/macos-isos/upload', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  },
+  // ISO Uploads (custom - category + name)
+  uploadWindowsISOCustom: (file: File, category: string, name: string) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('category', category)
+    formData.append('name', name)
+    return api.post<ISOUploadResponse>('/cache/isos/upload-custom', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  },
+  uploadLinuxISOCustom: (file: File, category: string, name: string) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('category', category)
+    formData.append('name', name)
+    return api.post<ISOUploadResponse>('/cache/linux-isos/upload-custom', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  },
+  uploadMacOSISOCustom: (file: File, name: string) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('name', name)
+    return api.post<ISOUploadResponse>('/cache/macos-isos/upload-custom', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     })
   },

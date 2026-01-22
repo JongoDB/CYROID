@@ -1640,12 +1640,18 @@ def get_linux_versions(current_user: CurrentUser):
 
     linux_iso_dir = get_linux_iso_dir()
 
-    # Get list of cached ISO files
+    # Get list of cached ISO files and calculate total size
     cached_isos = set()
+    total_size_bytes = 0
     if os.path.exists(linux_iso_dir):
         for filename in os.listdir(linux_iso_dir):
             if filename.endswith((".iso", ".img", ".qcow2")):
                 cached_isos.add(filename.lower())
+                filepath = os.path.join(linux_iso_dir, filename)
+                try:
+                    total_size_bytes += os.path.getsize(filepath)
+                except OSError:
+                    pass
 
     # Add cached status and architecture info to each version
     def add_cached_status(version_list):
@@ -1694,6 +1700,8 @@ def get_linux_versions(current_user: CurrentUser):
         "cache_dir": linux_iso_dir,
         "cached_count": cached_count,
         "total_count": len(all_versions),
+        "total_size_bytes": total_size_bytes,
+        "total_size_gb": round(total_size_bytes / (1024**3), 2),
         "host_arch": HOST_ARCH,
         "arm64_supported_distros": list(ARM64_NATIVE_DISTROS),
         "note": "ISOs are automatically downloaded by qemux/qemu when the VM starts. Pre-caching is optional but speeds up first boot."
@@ -2079,9 +2087,18 @@ def get_macos_versions(current_user: CurrentUser):
     macos_dir = get_macos_iso_dir()
     os.makedirs(macos_dir, exist_ok=True)
 
+    # Get list of cached ISO files and calculate total size
     cached_isos = set()
+    total_size_bytes = 0
     if os.path.exists(macos_dir):
-        cached_isos = {f.lower() for f in os.listdir(macos_dir) if f.endswith('.iso')}
+        for filename in os.listdir(macos_dir):
+            if filename.endswith('.iso'):
+                cached_isos.add(filename.lower())
+                filepath = os.path.join(macos_dir, filename)
+                try:
+                    total_size_bytes += os.path.getsize(filepath)
+                except OSError:
+                    pass
 
     versions = []
     cached_count = 0
@@ -2105,6 +2122,8 @@ def get_macos_versions(current_user: CurrentUser):
         "cache_dir": macos_dir,
         "cached_count": cached_count,
         "total_count": len(DOCKUR_MACOS_VERSIONS),
+        "total_size_bytes": total_size_bytes,
+        "total_size_gb": round(total_size_bytes / (1024**3), 2),
         "host_arch": HOST_ARCH,
         "x86_64_only": True,
         "note": "macOS VMs only work on x86_64 hosts. dockur/macos downloads images at runtime if not pre-cached.",
@@ -2335,6 +2354,65 @@ async def upload_macos_iso(
         )
 
 
+# Simplified ISO upload endpoints with category + name (no version validation)
+
+@router.post("/macos-isos/upload-custom", status_code=status.HTTP_201_CREATED)
+async def upload_macos_iso_custom(
+    file: UploadFile = File(...),
+    name: str = Form(...),
+    current_user: AdminUser = None,
+):
+    """
+    Upload a macOS ISO file with a custom name.
+    No version validation - just stores with the given name.
+    Admin only.
+    """
+    import re
+    import aiofiles
+
+    if not file.filename or not file.filename.lower().endswith('.iso'):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File must be an ISO file"
+        )
+
+    macos_dir = get_macos_iso_dir()
+    os.makedirs(macos_dir, exist_ok=True)
+
+    # Sanitize name for filename
+    safe_name = re.sub(r'[^\w\-.]', '_', name)
+    filename = f"macos-custom-{safe_name}.iso"
+    filepath = os.path.join(macos_dir, filename)
+
+    if os.path.exists(filepath):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"ISO '{name}' already exists. Delete it first to replace."
+        )
+
+    try:
+        async with aiofiles.open(filepath, 'wb') as out_file:
+            while content := await file.read(1024 * 1024):
+                await out_file.write(content)
+
+        size = os.path.getsize(filepath)
+        return {
+            "status": "uploaded",
+            "name": name,
+            "filename": filename,
+            "path": filepath,
+            "size_bytes": size,
+            "size_gb": round(size / (1024**3), 2),
+        }
+    except Exception as e:
+        if os.path.exists(filepath):
+            os.remove(filepath)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to upload ISO: {str(e)}"
+        )
+
+
 @router.delete("/macos-isos/{version}")
 def delete_macos_iso(version: str, current_user: AdminUser):
     """Delete a cached macOS ISO. Admin only."""
@@ -2507,10 +2585,15 @@ def list_custom_isos(current_user: CurrentUser):
             metadata = {}
 
     isos = []
+    total_size_bytes = 0
     for filename in os.listdir(custom_iso_dir):
         if filename.endswith(".iso"):
             filepath = os.path.join(custom_iso_dir, filename)
-            size = os.path.getsize(filepath)
+            try:
+                size = os.path.getsize(filepath)
+                total_size_bytes += size
+            except OSError:
+                size = 0
             iso_metadata = metadata.get(filename, {})
             isos.append({
                 "name": iso_metadata.get("name", filename.replace(".iso", "")),
@@ -2525,6 +2608,8 @@ def list_custom_isos(current_user: CurrentUser):
     return {
         "cache_dir": custom_iso_dir,
         "total_count": len(isos),
+        "total_size_bytes": total_size_bytes,
+        "total_size_gb": round(total_size_bytes / (1024**3), 2),
         "isos": isos
     }
 
@@ -2940,6 +3025,73 @@ def get_recommended_images(current_user: CurrentUser):
 # ISO Upload endpoints
 
 
+@router.post("/isos/upload-custom", status_code=status.HTTP_201_CREATED)
+async def upload_windows_iso_custom(
+    file: UploadFile = File(...),
+    category: str = Form(...),
+    name: str = Form(...),
+    current_user: AdminUser = None,
+):
+    """
+    Upload a Windows ISO file with a custom name and category.
+    Categories: desktop, server, legacy
+    Admin only.
+    """
+    import re
+    import aiofiles
+    from cyroid.config import get_settings
+
+    valid_categories = ['desktop', 'server', 'legacy']
+    if category not in valid_categories:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid category '{category}'. Valid categories: {', '.join(valid_categories)}"
+        )
+
+    if not file.filename or not file.filename.lower().endswith('.iso'):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File must be an ISO file"
+        )
+
+    windows_iso_dir = get_windows_iso_dir()
+    os.makedirs(windows_iso_dir, exist_ok=True)
+
+    # Sanitize name for filename
+    safe_name = re.sub(r'[^\w\-.]', '_', name)
+    filename = f"windows-custom-{category}-{safe_name}.iso"
+    filepath = os.path.join(windows_iso_dir, filename)
+
+    if os.path.exists(filepath):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"ISO '{name}' already exists. Delete it first to replace."
+        )
+
+    try:
+        async with aiofiles.open(filepath, 'wb') as out_file:
+            while content := await file.read(1024 * 1024):
+                await out_file.write(content)
+
+        file_size = os.path.getsize(filepath)
+        return {
+            "status": "uploaded",
+            "category": category,
+            "name": name,
+            "filename": filename,
+            "path": filepath,
+            "size_bytes": file_size,
+            "size_gb": round(file_size / (1024**3), 2)
+        }
+    except Exception as e:
+        if os.path.exists(filepath):
+            os.remove(filepath)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to upload ISO: {str(e)}"
+        )
+
+
 @router.post("/isos/upload", status_code=status.HTTP_201_CREATED)
 async def upload_windows_iso(
     file: UploadFile = File(...),
@@ -3000,6 +3152,75 @@ async def upload_windows_iso(
         }
     except Exception as e:
         # Clean up on failure
+        if os.path.exists(filepath):
+            os.remove(filepath)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to upload ISO: {str(e)}"
+        )
+
+
+@router.post("/linux-isos/upload-custom", status_code=status.HTTP_201_CREATED)
+async def upload_linux_iso_custom(
+    file: UploadFile = File(...),
+    category: str = Form(...),
+    name: str = Form(...),
+    current_user: AdminUser = None,
+):
+    """
+    Upload a Linux ISO file with a custom name and category.
+    Categories: desktop, security, server
+    Admin only.
+    """
+    import re
+    import aiofiles
+    from cyroid.utils.arch import HOST_ARCH
+
+    valid_categories = ['desktop', 'security', 'server']
+    if category not in valid_categories:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid category '{category}'. Valid categories: {', '.join(valid_categories)}"
+        )
+
+    if not file.filename or not file.filename.lower().endswith('.iso'):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File must be an ISO file"
+        )
+
+    linux_iso_dir = get_linux_iso_dir()
+    os.makedirs(linux_iso_dir, exist_ok=True)
+
+    # Sanitize name for filename
+    safe_name = re.sub(r'[^\w\-.]', '_', name)
+    arch_suffix = HOST_ARCH
+    filename = f"linux-custom-{category}-{safe_name}-{arch_suffix}.iso"
+    filepath = os.path.join(linux_iso_dir, filename)
+
+    if os.path.exists(filepath):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"ISO '{name}' already exists. Delete it first to replace."
+        )
+
+    try:
+        async with aiofiles.open(filepath, 'wb') as out_file:
+            while content := await file.read(1024 * 1024):
+                await out_file.write(content)
+
+        file_size = os.path.getsize(filepath)
+        return {
+            "status": "uploaded",
+            "category": category,
+            "name": name,
+            "arch": arch_suffix,
+            "filename": filename,
+            "path": filepath,
+            "size_bytes": file_size,
+            "size_gb": round(file_size / (1024**3), 2)
+        }
+    except Exception as e:
         if os.path.exists(filepath):
             os.remove(filepath)
         raise HTTPException(

@@ -549,6 +549,8 @@ export interface LinuxVersionsResponse {
   cache_dir: string
   cached_count: number
   total_count: number
+  total_size_bytes?: number
+  total_size_gb?: number
   note: string
   host_arch?: 'x86_64' | 'arm64'
   arm64_supported_distros?: string[]
@@ -628,6 +630,8 @@ export interface MacOSVersionsResponse {
   cache_dir: string
   cached_count: number
   total_count: number
+  total_size_bytes?: number
+  total_size_gb?: number
   host_arch: 'x86_64' | 'arm64'
   x86_64_only: boolean
   note: string
@@ -672,6 +676,8 @@ export interface CustomISO {
 export interface CustomISOList {
   cache_dir: string
   total_count: number
+  total_size_bytes?: number
+  total_size_gb?: number
   isos: CustomISO[]
 }
 

@@ -83,6 +83,7 @@ export default function ImageCache() {
   const [uploadFile, setUploadFile] = useState<File | null>(null)
   const [uploadVersion, setUploadVersion] = useState('')
   const [uploadName, setUploadName] = useState('')
+  const [uploadCategory, setUploadCategory] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Download state for tracking Windows ISO downloads
@@ -1024,29 +1025,39 @@ export default function ImageCache() {
     setError(null)
     try {
       if (showUploadModal === 'windows') {
-        if (!uploadVersion) {
-          setError('Please select a Windows version')
+        if (!uploadCategory) {
+          setError('Please select a category')
           setActionLoading(null)
           return
         }
-        await cacheApi.uploadWindowsISO(uploadFile, uploadVersion)
-        setSuccess(`Uploaded Windows ${uploadVersion} ISO`)
+        if (!uploadName) {
+          setError('Please enter a name for the ISO')
+          setActionLoading(null)
+          return
+        }
+        await cacheApi.uploadWindowsISOCustom(uploadFile, uploadCategory, uploadName)
+        setSuccess(`Uploaded Windows ISO: ${uploadName}`)
       } else if (showUploadModal === 'linux') {
-        if (!uploadVersion) {
-          setError('Please select a Linux distribution')
+        if (!uploadCategory) {
+          setError('Please select a category')
           setActionLoading(null)
           return
         }
-        await cacheApi.uploadLinuxISO(uploadFile, uploadVersion)
-        setSuccess(`Uploaded Linux ${uploadVersion} ISO`)
+        if (!uploadName) {
+          setError('Please enter a name for the ISO')
+          setActionLoading(null)
+          return
+        }
+        await cacheApi.uploadLinuxISOCustom(uploadFile, uploadCategory, uploadName)
+        setSuccess(`Uploaded Linux ISO: ${uploadName}`)
       } else if (showUploadModal === 'macos') {
-        if (!uploadVersion) {
-          setError('Please select a macOS version')
+        if (!uploadName) {
+          setError('Please enter a name for the ISO')
           setActionLoading(null)
           return
         }
-        await cacheApi.uploadMacOSISO(uploadFile, uploadVersion)
-        setSuccess(`Uploaded macOS ${uploadVersion} ISO`)
+        await cacheApi.uploadMacOSISOCustom(uploadFile, uploadName)
+        setSuccess(`Uploaded macOS ISO: ${uploadName}`)
       } else if (showUploadModal === 'docker') {
         const result = await cacheApi.uploadDockerImage(uploadFile)
         setSuccess(`Loaded ${result.data.count} image(s): ${result.data.images.join(', ')}`)
@@ -1063,6 +1074,7 @@ export default function ImageCache() {
       setUploadFile(null)
       setUploadVersion('')
       setUploadName('')
+      setUploadCategory('')
       await loadData()
     } catch (err: any) {
       setError(err.response?.data?.detail || `Failed to upload ${showUploadModal === 'docker' ? 'Docker image' : 'ISO'}`)
@@ -1229,9 +1241,7 @@ export default function ImageCache() {
                   <p className="text-2xl font-semibold text-gray-900">
                     {linuxVersions?.cached_count || 0}/{linuxVersions?.total_count || 0}
                   </p>
-                  <p className="text-sm text-gray-500">
-                    {linuxVersions?.host_arch === 'arm64' ? 'ARM64' : 'x86_64'} host
-                  </p>
+                  <p className="text-sm text-gray-500">{linuxVersions?.total_size_gb || 0} GB cached</p>
                 </div>
               </div>
             </div>
@@ -1243,7 +1253,7 @@ export default function ImageCache() {
                   <p className="text-2xl font-semibold text-gray-900">
                     {macosVersions?.cached_count || 0}/{macosVersions?.total_count || 5}
                   </p>
-                  <p className="text-sm text-gray-500">x86_64 only</p>
+                  <p className="text-sm text-gray-500">{macosVersions?.total_size_gb || 0} GB cached</p>
                 </div>
               </div>
             </div>
@@ -1255,7 +1265,7 @@ export default function ImageCache() {
                   <p className="text-2xl font-semibold text-gray-900">
                     {customISOs?.total_count || 0}
                   </p>
-                  <p className="text-sm text-gray-500">uploaded</p>
+                  <p className="text-sm text-gray-500">{customISOs?.total_size_gb || 0} GB cached</p>
                 </div>
               </div>
             </div>
@@ -2287,80 +2297,72 @@ export default function ImageCache() {
                 </h3>
               </div>
               <div className="px-6 py-4 space-y-4">
-                {showUploadModal === 'windows' && windowsVersions && (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Windows Version</label>
-                    <select
-                      value={uploadVersion}
-                      onChange={(e) => setUploadVersion(e.target.value)}
-                      className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-                    >
-                      <option value="">Select version...</option>
-                      <optgroup label="Desktop">
-                        {windowsVersions.desktop.filter(v => !v.cached).map(v => (
-                          <option key={v.version} value={v.version}>{v.name} ({v.version})</option>
-                        ))}
-                      </optgroup>
-                      <optgroup label="Server">
-                        {windowsVersions.server.filter(v => !v.cached).map(v => (
-                          <option key={v.version} value={v.version}>{v.name} ({v.version})</option>
-                        ))}
-                      </optgroup>
-                      <optgroup label="Legacy">
-                        {windowsVersions.legacy.filter(v => !v.cached).map(v => (
-                          <option key={v.version} value={v.version}>{v.name} ({v.version})</option>
-                        ))}
-                      </optgroup>
-                    </select>
-                  </div>
+                {showUploadModal === 'windows' && (
+                  <>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Category</label>
+                      <select
+                        value={uploadCategory}
+                        onChange={(e) => setUploadCategory(e.target.value)}
+                        className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                      >
+                        <option value="">Select category...</option>
+                        <option value="desktop">Desktop (Windows 10, 11)</option>
+                        <option value="server">Server (Windows Server)</option>
+                        <option value="legacy">Legacy (Windows 7, 8, XP)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">ISO Name</label>
+                      <input
+                        type="text"
+                        value={uploadName}
+                        onChange={(e) => setUploadName(e.target.value)}
+                        placeholder="e.g., Windows 11 Pro"
+                        className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                      />
+                    </div>
+                  </>
                 )}
 
-                {showUploadModal === 'linux' && linuxVersions && (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Linux Distribution</label>
-                    <select
-                      value={uploadVersion}
-                      onChange={(e) => setUploadVersion(e.target.value)}
-                      className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-                    >
-                      <option value="">Select distribution...</option>
-                      <optgroup label="Desktop">
-                        {linuxVersions.desktop.filter(v => !v.cached).map(v => (
-                          <option key={v.version} value={v.version}>{v.name}</option>
-                        ))}
-                      </optgroup>
-                      <optgroup label="Security">
-                        {linuxVersions.security.filter(v => !v.cached).map(v => (
-                          <option key={v.version} value={v.version}>{v.name}</option>
-                        ))}
-                      </optgroup>
-                      <optgroup label="Server">
-                        {linuxVersions.server.filter(v => !v.cached).map(v => (
-                          <option key={v.version} value={v.version}>{v.name}</option>
-                        ))}
-                      </optgroup>
-                    </select>
-                    <p className="mt-1 text-xs text-gray-500">
-                      Select a distribution to associate with the uploaded ISO
-                    </p>
-                  </div>
+                {showUploadModal === 'linux' && (
+                  <>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Category</label>
+                      <select
+                        value={uploadCategory}
+                        onChange={(e) => setUploadCategory(e.target.value)}
+                        className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                      >
+                        <option value="">Select category...</option>
+                        <option value="desktop">Desktop (Ubuntu, Mint, Fedora)</option>
+                        <option value="security">Security (Kali, Parrot, BlackArch)</option>
+                        <option value="server">Server (Ubuntu Server, Rocky, Debian)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">ISO Name</label>
+                      <input
+                        type="text"
+                        value={uploadName}
+                        onChange={(e) => setUploadName(e.target.value)}
+                        placeholder="e.g., Ubuntu 24.04 LTS"
+                        className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                      />
+                    </div>
+                  </>
                 )}
 
-                {showUploadModal === 'macos' && macosVersions && (
+                {showUploadModal === 'macos' && (
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">macOS Version</label>
-                    <select
-                      value={uploadVersion}
-                      onChange={(e) => setUploadVersion(e.target.value)}
+                    <label className="block text-sm font-medium text-gray-700 mb-2">ISO Name</label>
+                    <input
+                      type="text"
+                      value={uploadName}
+                      onChange={(e) => setUploadName(e.target.value)}
+                      placeholder="e.g., macOS Sonoma 14.2"
                       className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-                    >
-                      <option value="">Select version...</option>
-                      {macosVersions.versions.filter(v => !v.cached).map(v => (
-                        <option key={v.version} value={v.version}>
-                          {v.name} ({v.version}){v.note ? ` - ${v.note}` : ''}
-                        </option>
-                      ))}
-                    </select>
+                    />
                     <p className="mt-1 text-xs text-gray-500">
                       macOS VMs only work on x86_64 hosts
                     </p>
@@ -2435,6 +2437,7 @@ export default function ImageCache() {
                     setUploadFile(null)
                     setUploadVersion('')
                     setUploadName('')
+                    setUploadCategory('')
                   }}
                   className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
                 >
@@ -2442,7 +2445,13 @@ export default function ImageCache() {
                 </button>
                 <button
                   onClick={handleUploadISO}
-                  disabled={actionLoading === 'upload' || !uploadFile || (showUploadModal === 'docker' ? false : showUploadModal === 'windows' || showUploadModal === 'linux' || showUploadModal === 'macos' ? !uploadVersion : !uploadName)}
+                  disabled={
+                    actionLoading === 'upload' ||
+                    !uploadFile ||
+                    (showUploadModal === 'docker' ? false :
+                     showUploadModal === 'windows' || showUploadModal === 'linux' ? (!uploadCategory || !uploadName) :
+                     showUploadModal === 'macos' || showUploadModal === 'custom' ? !uploadName : true)
+                  }
                   className="px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-md hover:bg-primary-700 disabled:opacity-50"
                 >
                   {actionLoading === 'upload' ? (
