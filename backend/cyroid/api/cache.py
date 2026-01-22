@@ -2892,6 +2892,8 @@ RECOMMENDED_DOCKER_IMAGES = {
         {"name": "CYROID Proxy", "image": "ghcr.io/jongodb/cyroid-proxy:latest", "description": "Traefik reverse proxy for routing and SSL termination", "category": "cyroid"},
         {"name": "CYROID DinD", "image": "ghcr.io/jongodb/cyroid-dind:latest", "description": "Docker-in-Docker for range network isolation", "category": "cyroid"},
         {"name": "CYROID Storage", "image": "ghcr.io/jongodb/cyroid-storage:latest", "description": "MinIO S3-compatible object storage for artifacts", "category": "cyroid"},
+        {"name": "CYROID Database", "image": "ghcr.io/jongodb/cyroid-db:latest", "description": "PostgreSQL database for range and user data", "category": "cyroid"},
+        {"name": "CYROID Redis", "image": "ghcr.io/jongodb/cyroid-redis:latest", "description": "Redis for caching and task queue", "category": "cyroid"},
         {"name": "CYROID API", "image": "ghcr.io/jongodb/cyroid-api:latest", "description": "FastAPI backend for range orchestration", "category": "cyroid"},
         {"name": "CYROID Frontend", "image": "ghcr.io/jongodb/cyroid-frontend:latest", "description": "React web interface", "category": "cyroid"},
         {"name": "CYROID Worker", "image": "ghcr.io/jongodb/cyroid-worker:latest", "description": "Dramatiq task worker for async operations", "category": "cyroid"},

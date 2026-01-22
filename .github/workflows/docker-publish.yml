@@ -97,6 +97,10 @@ jobs:
             base: docker:24-dind
           - image: cyroid-storage
             base: minio/minio:latest
+          - image: cyroid-db
+            base: postgres:16-alpine
+          - image: cyroid-redis
+            base: redis:7-alpine
 
     steps:
       - name: Checkout repository
