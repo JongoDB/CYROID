@@ -21,8 +21,8 @@ services:
     environment:
       # Unset APP_VERSION so it reads from mounted VERSION file
       APP_VERSION: ""
-      # Use local DinD image for development
-      DIND_IMAGE: ${DIND_IMAGE:-cyroid-dind:latest}
+      # Use GHCR DinD image (same as production)
+      DIND_IMAGE: ${DIND_IMAGE:-ghcr.io/jongodb/cyroid-dind:latest}
     volumes:
       # Mount source code for hot-reload
       - ./backend:/app
@@ -49,8 +49,8 @@ services:
     environment:
       # Unset APP_VERSION so it reads from mounted VERSION file
       APP_VERSION: ""
-      # Use local DinD image for development
-      DIND_IMAGE: ${DIND_IMAGE:-cyroid-dind:latest}
+      # Use GHCR DinD image (same as production)
+      DIND_IMAGE: ${DIND_IMAGE:-ghcr.io/jongodb/cyroid-dind:latest}
     volumes:
       # Mount source code for hot-reload
       - ./backend:/app

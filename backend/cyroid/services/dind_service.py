@@ -100,15 +100,45 @@ class DinDService:
         """Get the network name for range DinD containers."""
         return getattr(settings, "cyroid_ranges_network", "cyroid-ranges")
 
-    async def ensure_dind_image(self) -> None:
-        """Ensure the DinD image is available locally."""
+    async def ensure_dind_image(self) -> str:
+        """Ensure the DinD image is available locally.
+
+        Returns the actual image name to use (may differ from configured if fallback needed).
+        """
+        configured_image = self.dind_image
+
+        # Check if configured image exists locally
         try:
-            self.host_client.images.get(self.dind_image)
-            logger.debug(f"DinD image '{self.dind_image}' already available")
+            self.host_client.images.get(configured_image)
+            logger.debug(f"DinD image '{configured_image}' already available")
+            return configured_image
         except NotFound:
-            logger.info(f"Pulling DinD image '{self.dind_image}'...")
-            self.host_client.images.pull(self.dind_image)
-            logger.info(f"Successfully pulled DinD image '{self.dind_image}'")
+            pass
+
+        # Try to pull configured image
+        try:
+            logger.info(f"Pulling DinD image '{configured_image}'...")
+            self.host_client.images.pull(configured_image)
+            logger.info(f"Successfully pulled DinD image '{configured_image}'")
+            return configured_image
+        except APIError as e:
+            # If configured image is not a valid registry path, fall back to GHCR
+            if "ghcr.io" not in configured_image:
+                logger.warning(
+                    f"Failed to pull '{configured_image}': {e}. "
+                    f"Falling back to GHCR image '{self.DIND_IMAGE}'..."
+                )
+                try:
+                    self.host_client.images.get(self.DIND_IMAGE)
+                    logger.info(f"Using existing GHCR image '{self.DIND_IMAGE}'")
+                    return self.DIND_IMAGE
+                except NotFound:
+                    logger.info(f"Pulling GHCR fallback image '{self.DIND_IMAGE}'...")
+                    self.host_client.images.pull(self.DIND_IMAGE)
+                    logger.info(f"Successfully pulled GHCR image '{self.DIND_IMAGE}'")
+                    return self.DIND_IMAGE
+            else:
+                raise
 
     async def ensure_ranges_network(self) -> None:
         """Ensure the ranges network exists on the host."""
@@ -149,7 +179,7 @@ class DinDService:
             dict with container_name, container_id, mgmt_ip, docker_url
         """
         # Ensure prerequisites
-        await self.ensure_dind_image()
+        actual_dind_image = await self.ensure_dind_image()
         await self.ensure_ranges_network()
 
         # Generate container name: cyroid-range-{name}-{short_id}
@@ -203,7 +233,7 @@ class DinDService:
                 logger.warning(f"Skipping {description} mount - path does not exist: {host_path}")
 
         container_config = {
-            "image": self.dind_image,
+            "image": actual_dind_image,
             "name": container_name,
             "detach": True,
             "privileged": True,  # Required for DinD
