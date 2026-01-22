@@ -856,7 +856,7 @@ def repair_vnc_for_range(range_id: UUID, db: DBSession, current_user: CurrentUse
     """Repair VNC configuration for all VMs in a range.
 
     This endpoint:
-    1. Re-creates iptables DNAT rules for VNC port forwarding
+    1. Creates socat TCP proxies for VNC port forwarding inside DinD
     2. Re-generates Traefik routing configuration
     3. Updates database with VNC mappings
 
