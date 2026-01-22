@@ -1,7 +1,7 @@
 """add container_config to base_image
 
 Revision ID: j2k3l4m5n6o7
-Revises: i1m2a3g4e5l6
+Revises: b2c3d4e5f6a7
 Create Date: 2026-01-21
 
 Adds container_config JSON field to base_images table for storing
@@ -15,7 +15,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = 'j2k3l4m5n6o7'
-down_revision: Union[str, None] = 'i1m2a3g4e5l6'
+down_revision: Union[str, None] = 'b2c3d4e5f6a7'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
