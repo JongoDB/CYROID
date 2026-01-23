@@ -2800,6 +2800,7 @@ local-hostname: {name}
         environment: Optional[Dict[str, str]] = None,
         labels: Optional[Dict[str, str]] = None,
         privileged: bool = False,
+        cap_add: Optional[List[str]] = None,
         hostname: Optional[str] = None,
         dns_servers: Optional[str] = None,
         dns_search: Optional[str] = None,
@@ -2850,12 +2851,17 @@ local-hostname: {name}
         if environment is None:
             environment = {}
 
+        # Merge capabilities - always include NET_ADMIN plus any custom caps
+        all_caps = ["NET_ADMIN"]
+        if cap_add:
+            all_caps = list(set(all_caps + cap_add))
+
         host_config_args = {
             "cpu_count": cpu_limit,
             "mem_limit": f"{memory_limit_mb}m",
             "binds": volumes,
             "privileged": privileged,
-            "cap_add": ["NET_ADMIN"],
+            "cap_add": all_caps,
             "restart_policy": {"Name": "unless-stopped"},
             "dns": dns_list
         }

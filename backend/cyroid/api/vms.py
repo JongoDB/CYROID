@@ -1199,6 +1199,13 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
                         if vm.linux_user_sudo:
                             environment["SUDO_ACCESS"] = "true"
 
+                    # Extract container_config from base image (privileged, cap_add, etc.)
+                    container_config = {}
+                    if base_image_record and base_image_record.container_config:
+                        container_config = base_image_record.container_config
+                    is_privileged = container_config.get('privileged', False) if container_config else False
+                    extra_caps = container_config.get('cap_add', []) if container_config else []
+
                     container_id = asyncio.run(docker.create_range_container_dind(
                         range_id=str(vm.range_id),
                         docker_url=range_obj.dind_docker_url,
@@ -1211,6 +1218,8 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
                         hostname=vm.hostname,
                         labels=labels,
                         environment=environment if environment else None,
+                        privileged=is_privileged,
+                        cap_add=extra_caps if extra_caps else None,
                         dns_servers=network.dns_servers,
                         dns_search=network.dns_search,
                     ))
