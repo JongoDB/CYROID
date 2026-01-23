@@ -1604,13 +1604,11 @@ def get_vm_vnc_info(vm_id: UUID, db: DBSession, current_user: CurrentUser, reque
             if proxy_mapping:
                 # VNC proxy is configured - return connection info
                 # Determine websocket_path based on VM type:
-                # - KasmVNC containers use vnc/{vm.id} (Issue #77)
-                # - QEMU VMs (Windows, Linux) use websockify (standard noVNC path)
+                # - Container VMs use vnc/{vm.id} path (KasmVNC websocket)
+                # - QEMU VMs (linux_vm, windows_vm) use websockify
                 websocket_path = "websockify"  # Default for QEMU VMs
                 if vm.base_image and vm.base_image.vm_type == "container":
-                    image_tag = (vm.base_image.docker_image_tag or "").lower()
-                    if "kasmweb" in image_tag:
-                        websocket_path = f"vnc/{vm.id}"  # KasmVNC builds WS URL as host + path
+                    websocket_path = f"vnc/{vm.id}"  # Container VMs use KasmVNC path
 
                 return {
                     "vm_id": str(vm.id),

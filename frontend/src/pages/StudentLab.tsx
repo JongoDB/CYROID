@@ -1,8 +1,7 @@
 // frontend/src/pages/StudentLab.tsx
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { useParams } from 'react-router-dom'
-import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from 'react-resizable-panels'
-import { BookOpen, Loader2, AlertCircle } from 'lucide-react'
+import { BookOpen, Loader2, AlertCircle, ChevronRight, GripVertical } from 'lucide-react'
 import { rangesApi, vmsApi, walkthroughApi } from '../services/api'
 import { Range, VM, Walkthrough } from '../types'
 import { WalkthroughPanel } from '../components/walkthrough'
@@ -17,6 +16,14 @@ export default function StudentLab() {
   const [isCollapsed, setIsCollapsed] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+
+  // Panel width state (percentage) - default 40% walkthrough, 60% console
+  const [walkthroughWidth, setWalkthroughWidth] = useState(() => {
+    const saved = localStorage.getItem('student-lab-width')
+    return saved ? parseInt(saved, 10) : 40
+  })
+  const [isDragging, setIsDragging] = useState(false)
+  const containerRef = useRef<HTMLDivElement>(null)
 
   const token = localStorage.getItem('token') || ''
   const selectedVm = vms.find(vm => vm.id === selectedVmId) || null
@@ -74,6 +81,39 @@ export default function StudentLab() {
     }
   }
 
+  // Handle drag to resize
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    setIsDragging(true)
+  }, [])
+
+  useEffect(() => {
+    if (!isDragging) return
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!containerRef.current) return
+      const containerRect = containerRef.current.getBoundingClientRect()
+      const newWidth = ((e.clientX - containerRect.left) / containerRect.width) * 100
+      // Clamp between 20% and 60%
+      const clampedWidth = Math.max(20, Math.min(60, newWidth))
+      setWalkthroughWidth(clampedWidth)
+    }
+
+    const handleMouseUp = () => {
+      setIsDragging(false)
+      // Save to localStorage
+      localStorage.setItem('student-lab-width', walkthroughWidth.toString())
+    }
+
+    document.addEventListener('mousemove', handleMouseMove)
+    document.addEventListener('mouseup', handleMouseUp)
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+    }
+  }, [isDragging, walkthroughWidth])
+
   if (loading) {
     return (
       <div className="h-screen w-screen bg-gray-900 flex items-center justify-center">
@@ -118,54 +158,70 @@ export default function StudentLab() {
 
   return (
     <div className="h-screen w-screen bg-gray-900 flex flex-col">
-      <PanelGroup orientation="horizontal" className="flex-1">
-        {/* Walkthrough Panel */}
+      <div ref={containerRef} className="flex-1 flex overflow-hidden">
+        {/* Walkthrough Panel - Guide on the left */}
         {!isCollapsed && (
           <>
-            <Panel defaultSize={30} minSize={20} maxSize={50}>
+            <div
+              className="h-full bg-gray-900 overflow-hidden flex-shrink-0"
+              style={{ width: `${walkthroughWidth}%` }}
+            >
               <WalkthroughPanel
                 rangeId={rangeId!}
                 walkthrough={walkthrough}
                 onOpenVM={handleOpenVM}
                 onCollapse={() => setIsCollapsed(true)}
               />
-            </Panel>
-            <PanelResizeHandle className="w-1 bg-gray-700 hover:bg-blue-500 transition-colors cursor-col-resize" />
+            </div>
+
+            {/* Resize Handle */}
+            <div
+              className={`w-2 flex-shrink-0 cursor-col-resize flex items-center justify-center transition-colors ${
+                isDragging ? 'bg-blue-500' : 'bg-gray-700 hover:bg-blue-500'
+              }`}
+              onMouseDown={handleMouseDown}
+            >
+              <GripVertical className={`w-4 h-4 ${isDragging ? 'text-white' : 'text-gray-500'}`} />
+            </div>
           </>
         )}
 
-        {/* Console Panel */}
-        <Panel defaultSize={isCollapsed ? 100 : 70}>
-          <div className="h-full flex flex-col relative">
-            {/* Collapse toggle when collapsed */}
-            {isCollapsed && (
-              <button
-                onClick={() => setIsCollapsed(false)}
-                className="absolute left-2 top-2 z-10 p-2 bg-gray-800 rounded hover:bg-gray-700"
-                title="Show walkthrough"
-              >
-                <BookOpen className="w-5 h-5 text-blue-400" />
-              </button>
-            )}
+        {/* Console Panel - VNC on the right */}
+        <div className="flex-1 h-full flex flex-col relative bg-gray-900 min-w-0">
+          {/* Expand button when collapsed */}
+          {isCollapsed && (
+            <button
+              onClick={() => setIsCollapsed(false)}
+              className="absolute left-2 top-2 z-10 p-2 bg-gray-800 rounded hover:bg-gray-700 flex items-center gap-2 border border-gray-700"
+              title="Show walkthrough"
+            >
+              <BookOpen className="w-5 h-5 text-blue-400" />
+              <ChevronRight className="w-4 h-4 text-gray-400" />
+            </button>
+          )}
 
-            {/* Console */}
-            <div className="flex-1">
-              <ConsoleEmbed
-                vmId={selectedVmId}
-                vmHostname={selectedVm?.hostname || null}
-                token={token}
-              />
-            </div>
-
-            {/* VM Selector */}
-            <VMSelector
-              vms={vms}
-              selectedVmId={selectedVmId}
-              onSelectVM={setSelectedVmId}
+          {/* Console */}
+          <div className="flex-1 min-h-0">
+            <ConsoleEmbed
+              vmId={selectedVmId}
+              vmHostname={selectedVm?.hostname || null}
+              token={token}
             />
           </div>
-        </Panel>
-      </PanelGroup>
+
+          {/* VM Selector */}
+          <VMSelector
+            vms={vms}
+            selectedVmId={selectedVmId}
+            onSelectVM={setSelectedVmId}
+          />
+        </div>
+      </div>
+
+      {/* Drag overlay to prevent iframe from capturing mouse events */}
+      {isDragging && (
+        <div className="fixed inset-0 z-50 cursor-col-resize" />
+      )}
     </div>
   )
 }
