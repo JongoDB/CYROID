@@ -16,6 +16,23 @@ export default function StudentLab() {
   const [selectedVmId, setSelectedVmId] = useState<string | null>(null)
   const [isWalkthroughCollapsed, setIsWalkthroughCollapsed] = useState(false)
   const [isConsoleCollapsed, setIsConsoleCollapsed] = useState(false)
+
+  // Trigger iframe resize when panel visibility changes
+  useEffect(() => {
+    // Delay to let layout settle after collapse/expand
+    const timer = setTimeout(() => {
+      const iframes = document.querySelectorAll('iframe')
+      iframes.forEach(iframe => {
+        try {
+          iframe.contentWindow?.dispatchEvent(new Event('resize'))
+        } catch {
+          // Cross-origin iframe
+        }
+      })
+      window.dispatchEvent(new Event('resize'))
+    }, 150)
+    return () => clearTimeout(timer)
+  }, [isWalkthroughCollapsed, isConsoleCollapsed])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -89,6 +106,20 @@ export default function StudentLab() {
     setIsDragging(true)
   }, [])
 
+  // Trigger resize on any iframes (for VNC to recalculate dimensions)
+  const triggerIframeResize = useCallback(() => {
+    const iframes = document.querySelectorAll('iframe')
+    iframes.forEach(iframe => {
+      try {
+        iframe.contentWindow?.dispatchEvent(new Event('resize'))
+      } catch {
+        // Cross-origin iframe, can't dispatch event directly
+      }
+    })
+    // Also dispatch on window for any listeners
+    window.dispatchEvent(new Event('resize'))
+  }, [])
+
   useEffect(() => {
     if (!isDragging) return
 
@@ -105,6 +136,8 @@ export default function StudentLab() {
       setIsDragging(false)
       // Save to localStorage
       localStorage.setItem('student-lab-width', walkthroughWidth.toString())
+      // Trigger resize after a short delay to let layout settle
+      setTimeout(triggerIframeResize, 100)
     }
 
     document.addEventListener('mousemove', handleMouseMove)
@@ -114,7 +147,7 @@ export default function StudentLab() {
       document.removeEventListener('mousemove', handleMouseMove)
       document.removeEventListener('mouseup', handleMouseUp)
     }
-  }, [isDragging, walkthroughWidth])
+  }, [isDragging, walkthroughWidth, triggerIframeResize])
 
   if (loading) {
     return (
