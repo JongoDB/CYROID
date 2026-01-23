@@ -1,7 +1,8 @@
 // frontend/src/components/console/VncConsole.tsx
-import { useEffect, useState, useRef } from 'react'
-import { Maximize2, Minimize2, X, RefreshCw, Monitor, AlertTriangle, Clock } from 'lucide-react'
+import { useEffect, useState, useRef, useCallback } from 'react'
+import { Maximize2, Minimize2, X, RefreshCw, Monitor, AlertTriangle, Clock, Check } from 'lucide-react'
 import clsx from 'clsx'
+import { useVmClipboardOptional } from '../../contexts'
 
 interface VncConsoleProps {
   vmId: string
@@ -28,8 +29,11 @@ export function VncConsole({ vmId, vmHostname, token, onClose }: VncConsoleProps
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('connecting')
   const [iframeKey, setIframeKey] = useState(0)
   const [showHelp, setShowHelp] = useState(false)
+  const [clipboardSynced, setClipboardSynced] = useState(false)
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const iframeRef = useRef<HTMLIFrameElement>(null)
+  const lastSyncedRef = useRef<number | null>(null)
+  const vmClipboard = useVmClipboardOptional()
 
   useEffect(() => {
     // Fetch VM info to get VNC proxy URL
@@ -118,6 +122,66 @@ export function VncConsole({ vmId, vmHostname, token, onClose }: VncConsoleProps
     setIframeKey(prev => prev + 1)
   }
 
+  // Send clipboard content to KasmVNC - tries multiple methods
+  const sendClipboardToVM = useCallback((text: string): boolean => {
+    if (!text || !iframeRef.current?.contentWindow) {
+      return false
+    }
+
+    // Type for KasmVNC/noVNC window with RFB object
+    const win = iframeRef.current.contentWindow as Window & {
+      rfb?: { clipboardPasteFrom?: (text: string) => void }
+      UI?: { rfb?: { clipboardPasteFrom?: (text: string) => void } }
+    }
+
+    try {
+      // Method 1: Direct RFB access (KasmVNC/noVNC exposes this on same origin)
+      if (win.rfb?.clipboardPasteFrom) {
+        win.rfb.clipboardPasteFrom(text)
+        console.log('[VNC Clipboard] Sent via rfb.clipboardPasteFrom')
+        return true
+      }
+
+      // Method 2: UI.rfb (some noVNC builds use this structure)
+      if (win.UI?.rfb?.clipboardPasteFrom) {
+        win.UI.rfb.clipboardPasteFrom(text)
+        console.log('[VNC Clipboard] Sent via UI.rfb.clipboardPasteFrom')
+        return true
+      }
+
+      // Method 3: postMessage - various formats for different VNC implementations
+      win.postMessage({ action: 'clipboard', text }, '*')
+      win.postMessage({ type: 'clipboard', data: text }, '*')
+      win.postMessage({ cmd: 'paste', text }, '*')
+      console.log('[VNC Clipboard] Sent via postMessage')
+      return true
+
+    } catch (err) {
+      console.error('[VNC Clipboard] Failed to send:', err)
+      return false
+    }
+  }, [])
+
+  // Automatically sync clipboard when content changes
+  useEffect(() => {
+    if (
+      connectionStatus !== 'connected' ||
+      !vmClipboard?.clipboardText ||
+      !vmClipboard?.lastCopiedAt ||
+      vmClipboard.lastCopiedAt === lastSyncedRef.current
+    ) {
+      return
+    }
+
+    // Sync the clipboard
+    const success = sendClipboardToVM(vmClipboard.clipboardText)
+    if (success) {
+      lastSyncedRef.current = vmClipboard.lastCopiedAt
+      setClipboardSynced(true)
+      setTimeout(() => setClipboardSynced(false), 2000)
+    }
+  }, [connectionStatus, vmClipboard?.clipboardText, vmClipboard?.lastCopiedAt, sendClipboardToVM])
+
   const getStatusColor = () => {
     switch (connectionStatus) {
       case 'connected': return 'bg-green-500'
@@ -159,6 +223,13 @@ export function VncConsole({ vmId, vmHostname, token, onClose }: VncConsoleProps
           )}
         </div>
         <div className="flex items-center gap-1">
+          {/* Clipboard sync indicator - shows briefly when text is synced */}
+          {clipboardSynced && (
+            <div className="px-2 py-1 text-xs rounded bg-green-600 text-white flex items-center gap-1.5 animate-pulse">
+              <Check className="w-3 h-3" />
+              <span>Clipboard synced!</span>
+            </div>
+          )}
           <button
             onClick={() => setShowHelp(!showHelp)}
             className={clsx(
@@ -203,6 +274,7 @@ export function VncConsole({ vmId, vmHostname, token, onClose }: VncConsoleProps
             <li>• <strong>KasmVNC containers</strong> may take 1-2 minutes to initialize on first boot.</li>
             <li>• <strong>Windows VMs</strong> require the dockur image with VNC support.</li>
             <li>• Try the <strong>Reload</strong> button if the display appears frozen.</li>
+            <li>• <strong>Clipboard:</strong> Copy code from the walkthrough - it auto-syncs to VM. Use Ctrl+V to paste.</li>
           </ul>
         </div>
       )}

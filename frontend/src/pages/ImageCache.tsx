@@ -81,7 +81,7 @@ export default function ImageCache() {
   // Upload modal state
   const [showUploadModal, setShowUploadModal] = useState<'windows' | 'linux' | 'macos' | 'custom' | 'docker' | null>(null)
   const [uploadFile, setUploadFile] = useState<File | null>(null)
-  const [uploadVersion, setUploadVersion] = useState('')
+  const [_uploadVersion, setUploadVersion] = useState('')
   const [uploadName, setUploadName] = useState('')
   const [uploadCategory, setUploadCategory] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
