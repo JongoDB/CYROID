@@ -60,6 +60,12 @@ class Range(Base, UUIDMixin, TimestampMixin):
     created_by: Mapped[UUID] = mapped_column(ForeignKey("users.id"))
     created_by_user = relationship("User", back_populates="ranges")
 
+    # Training content link (from Content Library)
+    student_guide_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey("content.id", ondelete="SET NULL"), nullable=True
+    )
+    student_guide = relationship("Content", foreign_keys=[student_guide_id])
+
     # Relationships
     networks: Mapped[List["Network"]] = relationship(
         "Network", back_populates="range", cascade="all, delete-orphan"

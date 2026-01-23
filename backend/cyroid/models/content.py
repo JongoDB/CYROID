@@ -33,6 +33,10 @@ class Content(Base, UUIDMixin, TimestampMixin):
     body_markdown: Mapped[str] = mapped_column(Text, default="")
     body_html: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Cached rendered HTML
 
+    # Structured walkthrough data (for student_guide type)
+    # Schema: {"title": str, "phases": [{"id": str, "name": str, "steps": [{"id": str, "title": str, "vm": str?, "hints": str[]?, "content": str}]}]}
+    walkthrough_data: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+
     # Metadata
     version: Mapped[str] = mapped_column(String(20), default="1.0")
     tags: Mapped[List[str]] = mapped_column(JSON, default=list)

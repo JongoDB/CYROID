@@ -58,12 +58,18 @@ def create_content(
     # Render HTML from markdown
     body_html = render_markdown_to_html(data.body_markdown) if data.body_markdown else None
 
+    # Convert walkthrough_data to dict if provided
+    walkthrough_dict = None
+    if data.walkthrough_data:
+        walkthrough_dict = data.walkthrough_data.model_dump()
+
     content = Content(
         title=data.title,
         description=data.description,
         content_type=data.content_type,
         body_markdown=data.body_markdown,
         body_html=body_html,
+        walkthrough_data=walkthrough_dict,
         tags=data.tags,
         organization=data.organization,
         created_by_id=current_user.id,
@@ -157,6 +163,11 @@ def update_content(
     # Re-render HTML if markdown changed
     if "body_markdown" in update_data:
         update_data["body_html"] = render_markdown_to_html(update_data["body_markdown"])
+
+    # Convert walkthrough_data from Pydantic model to dict if needed
+    if "walkthrough_data" in update_data and update_data["walkthrough_data"] is not None:
+        # It's already a dict from model_dump, but ensure it's stored correctly
+        pass
 
     for field, value in update_data.items():
         setattr(content, field, value)
@@ -488,3 +499,22 @@ def get_content_types():
         {"value": ct.value, "label": ct.value.replace("_", " ").title()}
         for ct in ContentType
     ]
+
+
+# ============ Student Guides ============
+
+@router.get("/student-guides/available", response_model=List[ContentListResponse])
+def list_available_student_guides(
+    db: DBSession,
+    current_user: CurrentUser,
+):
+    """
+    List published student guides available for range assignment.
+
+    Returns only content of type 'student_guide' that has been published.
+    Used by the Training tab in Range settings.
+    """
+    return db.query(Content).filter(
+        Content.content_type == ContentType.STUDENT_GUIDE,
+        Content.is_published == True
+    ).order_by(Content.title).all()

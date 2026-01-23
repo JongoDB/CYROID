@@ -53,6 +53,8 @@ export interface Range {
   networks?: Network[]
   vms?: VM[]
   router?: RangeRouter | null
+  // Training content link (from Content Library)
+  student_guide_id?: string | null
 }
 
 export interface Network {
@@ -829,6 +831,7 @@ export interface WalkthroughStep {
   title: string
   content: string
   vm?: string
+  hints?: string[]
 }
 
 export interface WalkthroughPhase {
