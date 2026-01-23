@@ -6,6 +6,7 @@ import { rangesApi, vmsApi, walkthroughApi } from '../services/api'
 import { Range, VM, Walkthrough } from '../types'
 import { WalkthroughPanel } from '../components/walkthrough'
 import { VMSelector, ConsoleEmbed } from '../components/lab'
+import { VmClipboardProvider } from '../contexts'
 
 export default function StudentLab() {
   const { rangeId } = useParams<{ rangeId: string }>()
@@ -157,71 +158,73 @@ export default function StudentLab() {
   }
 
   return (
-    <div className="h-screen w-screen bg-gray-900 flex flex-col">
-      <div ref={containerRef} className="flex-1 flex overflow-hidden">
-        {/* Walkthrough Panel - Guide on the left */}
-        {!isCollapsed && (
-          <>
-            <div
-              className="h-full bg-gray-900 overflow-hidden flex-shrink-0"
-              style={{ width: `${walkthroughWidth}%` }}
-            >
-              <WalkthroughPanel
-                rangeId={rangeId!}
-                walkthrough={walkthrough}
-                onOpenVM={handleOpenVM}
-                onCollapse={() => setIsCollapsed(true)}
+    <VmClipboardProvider>
+      <div className="h-screen w-screen bg-gray-900 flex flex-col">
+        <div ref={containerRef} className="flex-1 flex overflow-hidden">
+          {/* Walkthrough Panel - Guide on the left */}
+          {!isCollapsed && (
+            <>
+              <div
+                className="h-full bg-gray-900 overflow-hidden flex-shrink-0"
+                style={{ width: `${walkthroughWidth}%` }}
+              >
+                <WalkthroughPanel
+                  rangeId={rangeId!}
+                  walkthrough={walkthrough}
+                  onOpenVM={handleOpenVM}
+                  onCollapse={() => setIsCollapsed(true)}
+                />
+              </div>
+
+              {/* Resize Handle */}
+              <div
+                className={`w-2 flex-shrink-0 cursor-col-resize flex items-center justify-center transition-colors ${
+                  isDragging ? 'bg-blue-500' : 'bg-gray-700 hover:bg-blue-500'
+                }`}
+                onMouseDown={handleMouseDown}
+              >
+                <GripVertical className={`w-4 h-4 ${isDragging ? 'text-white' : 'text-gray-500'}`} />
+              </div>
+            </>
+          )}
+
+          {/* Console Panel - VNC on the right */}
+          <div className="flex-1 h-full flex flex-col relative bg-gray-900 min-w-0">
+            {/* Expand button when collapsed */}
+            {isCollapsed && (
+              <button
+                onClick={() => setIsCollapsed(false)}
+                className="absolute left-2 top-2 z-10 p-2 bg-gray-800 rounded hover:bg-gray-700 flex items-center gap-2 border border-gray-700"
+                title="Show walkthrough"
+              >
+                <BookOpen className="w-5 h-5 text-blue-400" />
+                <ChevronRight className="w-4 h-4 text-gray-400" />
+              </button>
+            )}
+
+            {/* Console */}
+            <div className="flex-1 min-h-0">
+              <ConsoleEmbed
+                vmId={selectedVmId}
+                vmHostname={selectedVm?.hostname || null}
+                token={token}
               />
             </div>
 
-            {/* Resize Handle */}
-            <div
-              className={`w-2 flex-shrink-0 cursor-col-resize flex items-center justify-center transition-colors ${
-                isDragging ? 'bg-blue-500' : 'bg-gray-700 hover:bg-blue-500'
-              }`}
-              onMouseDown={handleMouseDown}
-            >
-              <GripVertical className={`w-4 h-4 ${isDragging ? 'text-white' : 'text-gray-500'}`} />
-            </div>
-          </>
-        )}
-
-        {/* Console Panel - VNC on the right */}
-        <div className="flex-1 h-full flex flex-col relative bg-gray-900 min-w-0">
-          {/* Expand button when collapsed */}
-          {isCollapsed && (
-            <button
-              onClick={() => setIsCollapsed(false)}
-              className="absolute left-2 top-2 z-10 p-2 bg-gray-800 rounded hover:bg-gray-700 flex items-center gap-2 border border-gray-700"
-              title="Show walkthrough"
-            >
-              <BookOpen className="w-5 h-5 text-blue-400" />
-              <ChevronRight className="w-4 h-4 text-gray-400" />
-            </button>
-          )}
-
-          {/* Console */}
-          <div className="flex-1 min-h-0">
-            <ConsoleEmbed
-              vmId={selectedVmId}
-              vmHostname={selectedVm?.hostname || null}
-              token={token}
+            {/* VM Selector */}
+            <VMSelector
+              vms={vms}
+              selectedVmId={selectedVmId}
+              onSelectVM={setSelectedVmId}
             />
           </div>
-
-          {/* VM Selector */}
-          <VMSelector
-            vms={vms}
-            selectedVmId={selectedVmId}
-            onSelectVM={setSelectedVmId}
-          />
         </div>
-      </div>
 
-      {/* Drag overlay to prevent iframe from capturing mouse events */}
-      {isDragging && (
-        <div className="fixed inset-0 z-50 cursor-col-resize" />
-      )}
-    </div>
+        {/* Drag overlay to prevent iframe from capturing mouse events */}
+        {isDragging && (
+          <div className="fixed inset-0 z-50 cursor-col-resize" />
+        )}
+      </div>
+    </VmClipboardProvider>
   )
 }
