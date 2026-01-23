@@ -19,6 +19,7 @@ export default function ExportRangeDialog({
   // Export options
   const [includeTemplates, setIncludeTemplates] = useState(true)
   const [includeMsel, setIncludeMsel] = useState(true)
+  const [includeWalkthrough, setIncludeWalkthrough] = useState(true)
   const [includeArtifacts, setIncludeArtifacts] = useState(true)
   const [includeSnapshots, setIncludeSnapshots] = useState(false)
   const [includeDockerImages, setIncludeDockerImages] = useState(false)
@@ -59,6 +60,7 @@ export default function ExportRangeDialog({
     const options: ExportRequest = {
       include_templates: includeTemplates,
       include_msel: includeMsel,
+      include_walkthrough: includeWalkthrough,
       include_artifacts: includeArtifacts,
       include_snapshots: includeSnapshots,
       include_docker_images: includeDockerImages,
@@ -99,6 +101,7 @@ export default function ExportRangeDialog({
     rangeName,
     includeTemplates,
     includeMsel,
+    includeWalkthrough,
     includeArtifacts,
     includeSnapshots,
     includeDockerImages,
@@ -245,6 +248,19 @@ export default function ExportRangeDialog({
                   <div className="ml-3">
                     <span className="text-sm font-medium text-gray-900">MSEL & Injects</span>
                     <p className="text-xs text-gray-500">Include scenario timeline and events</p>
+                  </div>
+                </label>
+
+                <label className="flex items-start">
+                  <input
+                    type="checkbox"
+                    checked={includeWalkthrough}
+                    onChange={(e) => setIncludeWalkthrough(e.target.checked)}
+                    className="mt-1 h-4 w-4 text-primary-600 border-gray-300 rounded focus:ring-primary-500"
+                  />
+                  <div className="ml-3">
+                    <span className="text-sm font-medium text-gray-900">Walkthrough / Student Guide</span>
+                    <p className="text-xs text-gray-500">Include linked Content Library walkthrough</p>
                   </div>
                 </label>
 

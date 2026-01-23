@@ -1,9 +1,9 @@
 // frontend/src/pages/Ranges.tsx
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import { rangesApi, RangeCreate } from '../services/api'
 import type { Range } from '../types'
-import { Plus, Loader2, Network, X, Play, Square, Trash2, Upload, Wand2 } from 'lucide-react'
+import { Plus, Loader2, Network, X, Play, Square, Trash2, Upload, Wand2, Rocket } from 'lucide-react'
 import clsx from 'clsx'
 import ImportRangeWizard from '../components/import/ImportRangeWizard'
 import { ConfirmDialog } from '../components/common/ConfirmDialog'
@@ -30,21 +30,56 @@ export default function Ranges() {
     range: Range | null
     isLoading: boolean
   }>({ range: null, isLoading: false })
+  const [deployingRanges, setDeployingRanges] = useState<Set<string>>(new Set())
+  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  const fetchRanges = async () => {
+  const fetchRanges = useCallback(async (silent = false) => {
     try {
       const response = await rangesApi.list()
       setRanges(response.data)
+
+      // Update deploying set based on actual status
+      const stillDeploying = new Set(
+        response.data
+          .filter((r: Range) => r.status === 'deploying')
+          .map((r: Range) => r.id)
+      )
+      setDeployingRanges(stillDeploying)
     } catch (err) {
       console.error('Failed to fetch ranges:', err)
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
-  }
+  }, [])
 
+  // Initial fetch
   useEffect(() => {
     fetchRanges()
-  }, [])
+  }, [fetchRanges])
+
+  // Poll while any range is deploying
+  useEffect(() => {
+    const hasDeploying = ranges.some(r => r.status === 'deploying') || deployingRanges.size > 0
+
+    if (hasDeploying) {
+      // Poll every 3 seconds while deploying
+      pollIntervalRef.current = setInterval(() => {
+        fetchRanges(true)
+      }, 3000)
+    } else {
+      // Clear polling when nothing is deploying
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current)
+        pollIntervalRef.current = null
+      }
+    }
+
+    return () => {
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current)
+      }
+    }
+  }, [ranges, deployingRanges, fetchRanges])
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -63,12 +98,36 @@ export default function Ranges() {
     }
   }
 
+  const handleDeploy = async (range: Range) => {
+    // Optimistic update - immediately show deploying status
+    setDeployingRanges(prev => new Set(prev).add(range.id))
+    setRanges(prev =>
+      prev.map(r => (r.id === range.id ? { ...r, status: 'deploying' } : r))
+    )
+    toast.success(`Deploying "${range.name}"...`)
+
+    try {
+      await rangesApi.deploy(range.id)
+      // Fetch to get the actual status
+      fetchRanges(true)
+    } catch (err: any) {
+      // Revert optimistic update on error
+      setDeployingRanges(prev => {
+        const next = new Set(prev)
+        next.delete(range.id)
+        return next
+      })
+      fetchRanges(true)
+      toast.error(err.response?.data?.detail || 'Failed to deploy range')
+    }
+  }
+
   const handleStart = async (range: Range) => {
     try {
       await rangesApi.start(range.id)
       fetchRanges()
     } catch (err: any) {
-      alert(err.response?.data?.detail || 'Failed to start range')
+      toast.error(err.response?.data?.detail || 'Failed to start range')
     }
   }
 
@@ -175,12 +234,17 @@ export default function Ranges() {
                       <div className="flex-shrink-0">
                         <div className={clsx(
                           "rounded-md p-2",
-                          range.status === 'running' ? 'bg-green-100' : 'bg-gray-100'
+                          range.status === 'running' ? 'bg-green-100' :
+                          range.status === 'deploying' ? 'bg-yellow-100' : 'bg-gray-100'
                         )}>
-                          <Network className={clsx(
-                            "h-6 w-6",
-                            range.status === 'running' ? 'text-green-600' : 'text-gray-600'
-                          )} />
+                          {range.status === 'deploying' ? (
+                            <Loader2 className="h-6 w-6 text-yellow-600 animate-spin" />
+                          ) : (
+                            <Network className={clsx(
+                              "h-6 w-6",
+                              range.status === 'running' ? 'text-green-600' : 'text-gray-600'
+                            )} />
+                          )}
                         </div>
                       </div>
                       <div className="ml-4 flex-1">
@@ -205,7 +269,19 @@ export default function Ranges() {
                     </div>
                   </Link>
                   <div className="ml-4 flex items-center space-x-2">
-                    {range.status === 'stopped' || range.status === 'draft' ? (
+                    {range.status === 'deploying' ? (
+                      <div className="p-2 text-indigo-600" title="Deploying...">
+                        <Loader2 className="h-5 w-5 animate-spin" />
+                      </div>
+                    ) : range.status === 'draft' || range.status === 'error' ? (
+                      <button
+                        onClick={() => handleDeploy(range)}
+                        className="p-2 text-gray-400 hover:text-indigo-600"
+                        title="Deploy"
+                      >
+                        <Rocket className="h-5 w-5" />
+                      </button>
+                    ) : range.status === 'stopped' ? (
                       <button
                         onClick={() => handleStart(range)}
                         className="p-2 text-gray-400 hover:text-green-600"
