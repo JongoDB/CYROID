@@ -119,8 +119,10 @@ export function VncConsole({ vmId, vmHostname, token, onClose }: VncConsoleProps
         const origin = window.location.origin
 
         // Build VNC URL with proper WebSocket path
+        // resize=remote changes VM resolution to match window (best for dynamic sizing)
+        // resize=scale would just stretch the image (lower quality)
         const websocketPath = data.websocket_path ?? 'websockify'
-        const vncUrl = `${origin}${data.path}/?autoconnect=1&resize=scale&path=${websocketPath}&show_control_bar=true`
+        const vncUrl = `${origin}${data.path}/?autoconnect=1&resize=remote&path=${websocketPath}&show_control_bar=true`
 
         setVncInfo({
           url: vncUrl,
