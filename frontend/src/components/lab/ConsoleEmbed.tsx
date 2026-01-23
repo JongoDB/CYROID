@@ -6,9 +6,10 @@ interface ConsoleEmbedProps {
   vmId: string | null
   vmHostname: string | null
   token: string
+  onCollapse?: () => void
 }
 
-export function ConsoleEmbed({ vmId, vmHostname, token }: ConsoleEmbedProps) {
+export function ConsoleEmbed({ vmId, vmHostname, token, onCollapse }: ConsoleEmbedProps) {
   if (!vmId || !vmHostname) {
     return (
       <div className="h-full flex items-center justify-center bg-gray-900">
@@ -28,7 +29,7 @@ export function ConsoleEmbed({ vmId, vmHostname, token }: ConsoleEmbedProps) {
       vmId={vmId}
       vmHostname={vmHostname}
       token={token}
-      onClose={() => {}}
+      onClose={onCollapse || (() => {})}
     />
   )
 }

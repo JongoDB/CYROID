@@ -1,7 +1,7 @@
 // frontend/src/pages/StudentLab.tsx
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { useParams } from 'react-router-dom'
-import { BookOpen, Loader2, AlertCircle, ChevronRight, GripVertical } from 'lucide-react'
+import { BookOpen, Loader2, AlertCircle, ChevronRight, ChevronLeft, GripVertical, Monitor } from 'lucide-react'
 import { rangesApi, vmsApi, walkthroughApi } from '../services/api'
 import { Range, VM, Walkthrough } from '../types'
 import { WalkthroughPanel } from '../components/walkthrough'
@@ -14,7 +14,8 @@ export default function StudentLab() {
   const [vms, setVMs] = useState<VM[]>([])
   const [walkthrough, setWalkthrough] = useState<Walkthrough | null>(null)
   const [selectedVmId, setSelectedVmId] = useState<string | null>(null)
-  const [isCollapsed, setIsCollapsed] = useState(false)
+  const [isWalkthroughCollapsed, setIsWalkthroughCollapsed] = useState(false)
+  const [isConsoleCollapsed, setIsConsoleCollapsed] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -162,7 +163,7 @@ export default function StudentLab() {
       <div className="h-screen w-screen bg-gray-900 flex flex-col">
         <div ref={containerRef} className="flex-1 flex overflow-hidden">
           {/* Walkthrough Panel - Guide on the left */}
-          {!isCollapsed && (
+          {!isWalkthroughCollapsed && (
             <>
               <div
                 className="h-full bg-gray-900 overflow-hidden flex-shrink-0"
@@ -172,52 +173,71 @@ export default function StudentLab() {
                   rangeId={rangeId!}
                   walkthrough={walkthrough}
                   onOpenVM={handleOpenVM}
-                  onCollapse={() => setIsCollapsed(true)}
+                  onCollapse={() => setIsWalkthroughCollapsed(true)}
                 />
               </div>
 
-              {/* Resize Handle */}
-              <div
-                className={`w-2 flex-shrink-0 cursor-col-resize flex items-center justify-center transition-colors ${
-                  isDragging ? 'bg-blue-500' : 'bg-gray-700 hover:bg-blue-500'
-                }`}
-                onMouseDown={handleMouseDown}
-              >
-                <GripVertical className={`w-4 h-4 ${isDragging ? 'text-white' : 'text-gray-500'}`} />
-              </div>
+              {/* Resize Handle - only show when both panels are visible */}
+              {!isConsoleCollapsed && (
+                <div
+                  className={`w-2 flex-shrink-0 cursor-col-resize flex items-center justify-center transition-colors ${
+                    isDragging ? 'bg-blue-500' : 'bg-gray-700 hover:bg-blue-500'
+                  }`}
+                  onMouseDown={handleMouseDown}
+                >
+                  <GripVertical className={`w-4 h-4 ${isDragging ? 'text-white' : 'text-gray-500'}`} />
+                </div>
+              )}
             </>
           )}
 
           {/* Console Panel - VNC on the right */}
-          <div className="flex-1 h-full flex flex-col relative bg-gray-900 min-w-0">
-            {/* Expand button when collapsed */}
-            {isCollapsed && (
-              <button
-                onClick={() => setIsCollapsed(false)}
-                className="absolute left-2 top-2 z-10 p-2 bg-gray-800 rounded hover:bg-gray-700 flex items-center gap-2 border border-gray-700"
-                title="Show walkthrough"
-              >
-                <BookOpen className="w-5 h-5 text-blue-400" />
-                <ChevronRight className="w-4 h-4 text-gray-400" />
-              </button>
-            )}
+          {!isConsoleCollapsed && (
+            <div className="flex-1 h-full flex flex-col relative bg-gray-900 min-w-0">
+              {/* Expand walkthrough button when collapsed */}
+              {isWalkthroughCollapsed && (
+                <button
+                  onClick={() => setIsWalkthroughCollapsed(false)}
+                  className="absolute left-2 top-2 z-10 p-2 bg-gray-800 rounded hover:bg-gray-700 flex items-center gap-2 border border-gray-700"
+                  title="Show walkthrough"
+                >
+                  <BookOpen className="w-5 h-5 text-blue-400" />
+                  <ChevronRight className="w-4 h-4 text-gray-400" />
+                </button>
+              )}
 
-            {/* Console */}
-            <div className="flex-1 min-h-0">
-              <ConsoleEmbed
-                vmId={selectedVmId}
-                vmHostname={selectedVm?.hostname || null}
-                token={token}
+              {/* Console */}
+              <div className="flex-1 min-h-0">
+                <ConsoleEmbed
+                  vmId={selectedVmId}
+                  vmHostname={selectedVm?.hostname || null}
+                  token={token}
+                  onCollapse={() => setIsConsoleCollapsed(true)}
+                />
+              </div>
+
+              {/* VM Selector */}
+              <VMSelector
+                vms={vms}
+                selectedVmId={selectedVmId}
+                onSelectVM={setSelectedVmId}
               />
             </div>
+          )}
 
-            {/* VM Selector */}
-            <VMSelector
-              vms={vms}
-              selectedVmId={selectedVmId}
-              onSelectVM={setSelectedVmId}
-            />
-          </div>
+          {/* Expand console button when collapsed - shows on the right */}
+          {isConsoleCollapsed && (
+            <div className="w-12 h-full bg-gray-800 border-l border-gray-700 flex flex-col items-center pt-2">
+              <button
+                onClick={() => setIsConsoleCollapsed(false)}
+                className="p-2 bg-gray-700 rounded hover:bg-gray-600 flex flex-col items-center gap-1 border border-gray-600"
+                title="Show console"
+              >
+                <ChevronLeft className="w-4 h-4 text-gray-400" />
+                <Monitor className="w-5 h-5 text-green-400" />
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Drag overlay to prevent iframe from capturing mouse events */}
