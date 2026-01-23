@@ -133,6 +133,18 @@ export function WalkthroughPanel({ rangeId, walkthrough, onOpenVM, onCollapse }:
     [walkthrough]
   )
 
+  // Set of valid step IDs in current walkthrough
+  const validStepIds = useMemo(() =>
+    new Set(allSteps.map(s => s.id)),
+    [allSteps]
+  )
+
+  // Only count completed steps that exist in the current walkthrough
+  const validCompletedCount = useMemo(() =>
+    Array.from(completedSteps).filter(id => validStepIds.has(id)).length,
+    [completedSteps, validStepIds]
+  )
+
   const currentStepIndex = useMemo(() =>
     allSteps.findIndex(s => s.id === currentStep),
     [allSteps, currentStep]
@@ -185,7 +197,7 @@ export function WalkthroughPanel({ rangeId, walkthrough, onOpenVM, onCollapse }:
 
       {/* Progress */}
       <ProgressBar
-        completed={completedSteps.size}
+        completed={validCompletedCount}
         total={totalSteps}
         isDirty={isDirty}
         isSyncing={isSyncing}
