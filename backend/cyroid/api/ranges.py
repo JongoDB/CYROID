@@ -7,12 +7,13 @@ from uuid import UUID
 import logging
 import os
 
-from fastapi import APIRouter, HTTPException, status, Query
+from fastapi import APIRouter, HTTPException, status, Query, Depends
 from pydantic import BaseModel
 
 from cyroid.config import get_settings
 
 from cyroid.api.deps import DBSession, CurrentUser, filter_by_visibility, check_resource_access
+from cyroid.database import get_db
 from cyroid.models.range import Range, RangeStatus
 from cyroid.models.network import Network
 from cyroid.models.vm import VM, VMStatus
@@ -35,7 +36,7 @@ from cyroid.schemas.deployment_status import (
     DeploymentStatusResponse, DeploymentSummary, ResourceStatus, NetworkStatus, VMStatus as VMStatusSchema
 )
 from cyroid.schemas.scenario import ApplyScenarioRequest, ApplyScenarioResponse
-from sqlalchemy.orm import joinedload
+from sqlalchemy.orm import joinedload, Session
 from cyroid.schemas.user import ResourceTagCreate, ResourceTagsResponse
 
 logger = logging.getLogger(__name__)
@@ -1733,7 +1734,7 @@ def export_range_full(
 def _run_offline_export(range_id: UUID, job_id: str, options: ExportRequest, user_id: UUID):
     """Background task for offline export with Docker images."""
     from cyroid.services.export_service import get_export_service
-    from cyroid.database import SessionLocal
+    from cyroid.database import get_session_local
 
     redis_client = get_redis_client()
 
@@ -1750,6 +1751,7 @@ def _run_offline_export(range_id: UUID, job_id: str, options: ExportRequest, use
                 job_status.model_dump_json()
             )
 
+    SessionLocal = get_session_local()
     db = SessionLocal()
     try:
         user = db.query(User).filter(User.id == user_id).first()
@@ -1810,8 +1812,30 @@ def get_export_job_status(job_id: str, current_user: CurrentUser):
 
 
 @router.get("/export/jobs/{job_id}/download")
-def download_export(job_id: str, current_user: CurrentUser):
-    """Download a completed export archive."""
+def download_export(
+    job_id: str,
+    token: str = None,
+    db: Session = Depends(get_db),
+):
+    """Download a completed export archive.
+
+    Uses query param token for direct browser downloads of large files.
+    This avoids loading multi-GB files into memory as blobs.
+    """
+    from cyroid.utils.security import decode_access_token
+    from cyroid.models.user import User
+
+    if not token:
+        raise HTTPException(status_code=401, detail="Token required for download")
+
+    user_id = decode_access_token(token)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+    current_user = db.query(User).filter(User.id == user_id).first()
+    if not current_user:
+        raise HTTPException(status_code=401, detail="User not found")
+
     redis_client = get_redis_client()
 
     # Check job status
