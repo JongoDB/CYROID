@@ -73,10 +73,21 @@ export function StepContent({ step, onOpenVM }: StepContentProps) {
             pre({ children }: { children?: React.ReactNode }) {
               return <PreBlock>{children}</PreBlock>
             },
-            // Handle <code> elements - just style them (no copy button for inline)
-            code({ className, children, ...props }: { className?: string; children?: React.ReactNode }) {
+            // Handle <code> elements - inline code gets simple styling
+            code({ className, children, node, ...props }: { className?: string; children?: React.ReactNode; node?: unknown }) {
+              // Check if this is inline code (not inside a pre block)
+              // In react-markdown v10+, inline code has no className for language
+              const isInline = !className
+              if (isInline) {
+                return (
+                  <code className="bg-gray-700 px-1.5 py-0.5 rounded text-blue-300 text-sm" {...props}>
+                    {children}
+                  </code>
+                )
+              }
+              // Block code (inside pre) - just return the code element
               return (
-                <code className={className || 'bg-gray-700 px-1 rounded'} {...props}>
+                <code className={className} {...props}>
                   {children}
                 </code>
               )
