@@ -354,6 +354,13 @@ export const rangesApi = {
     api.get<RangeConsoleIptables>(`/ranges/${rangeId}/console/iptables`),
   getConsoleRoutes: (rangeId: string) =>
     api.get<RangeConsoleRoutes>(`/ranges/${rangeId}/console/routes`),
+
+  // Training content
+  setStudentGuide: (rangeId: string, studentGuideId: string | null) =>
+    api.patch<{ student_guide_id: string | null; student_guide_title: string | null }>(
+      `/ranges/${rangeId}/student-guide`,
+      { student_guide_id: studentGuideId }
+    ),
 }
 
 // Networks API
@@ -1536,6 +1543,7 @@ export interface Content {
   content_type: ContentType
   body_markdown: string
   body_html?: string
+  walkthrough_data?: Walkthrough | null
   version: string
   tags: string[]
   is_published: boolean
@@ -1564,6 +1572,7 @@ export interface ContentCreate {
   description?: string
   content_type?: ContentType
   body_markdown?: string
+  walkthrough_data?: Walkthrough | null
   tags?: string[]
   organization?: string
 }
@@ -1573,6 +1582,7 @@ export interface ContentUpdate {
   description?: string
   content_type?: ContentType
   body_markdown?: string
+  walkthrough_data?: Walkthrough | null
   tags?: string[]
   organization?: string
   is_published?: boolean
@@ -1659,6 +1669,10 @@ export const contentApi = {
 
   getTypes: () =>
     api.get<ContentTypeOption[]>('/content/types/available'),
+
+  // Student guides for range assignment
+  listStudentGuides: () =>
+    api.get<ContentListItem[]>('/content/student-guides/available'),
 }
 
 // ============ Training Events API ============

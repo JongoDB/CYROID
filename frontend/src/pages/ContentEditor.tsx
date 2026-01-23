@@ -40,6 +40,8 @@ import {
   Tag,
 } from 'lucide-react'
 import { contentApi, Content, ContentCreate, ContentUpdate, ContentType, ContentAsset } from '../services/api'
+import { WalkthroughEditor } from '../components/content/WalkthroughEditor'
+import type { Walkthrough } from '../types'
 
 const lowlight = createLowlight(common)
 
@@ -237,6 +239,7 @@ export default function ContentEditor() {
   const [tagInput, setTagInput] = useState('')
   const [organization, setOrganization] = useState('')
   const [isPublished, setIsPublished] = useState(false)
+  const [walkthroughData, setWalkthroughData] = useState<Walkthrough | null>(null)
 
   // Assets
   const [assets, setAssets] = useState<ContentAsset[]>([])
@@ -294,6 +297,7 @@ export default function ContentEditor() {
       setOrganization(data.organization || '')
       setIsPublished(data.is_published)
       setAssets(data.assets)
+      setWalkthroughData(data.walkthrough_data || null)
 
       // Set editor content from markdown (convert to HTML for TipTap)
       if (editor && data.body_html) {
@@ -355,7 +359,8 @@ export default function ContentEditor() {
           title,
           description: description || undefined,
           content_type: contentType,
-          body_markdown: markdown,
+          body_markdown: contentType === 'student_guide' ? '' : markdown,
+          walkthrough_data: contentType === 'student_guide' ? walkthroughData : undefined,
           tags,
           organization: organization || undefined,
         }
@@ -366,7 +371,8 @@ export default function ContentEditor() {
           title,
           description: description || undefined,
           content_type: contentType,
-          body_markdown: markdown,
+          body_markdown: contentType === 'student_guide' ? '' : markdown,
+          walkthrough_data: contentType === 'student_guide' ? walkthroughData : undefined,
           tags,
           organization: organization || undefined,
           is_published: isPublished,
@@ -484,17 +490,19 @@ export default function ContentEditor() {
               )}
             </button>
           )}
-          <button
-            onClick={() => setShowPreview(!showPreview)}
-            className={`inline-flex items-center px-3 py-2 border rounded-md text-sm font-medium ${
-              showPreview
-                ? 'border-primary-500 bg-primary-50 text-primary-700'
-                : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
-            }`}
-          >
-            <Eye className="h-4 w-4 mr-2" />
-            Preview
-          </button>
+          {contentType !== 'student_guide' && (
+            <button
+              onClick={() => setShowPreview(!showPreview)}
+              className={`inline-flex items-center px-3 py-2 border rounded-md text-sm font-medium ${
+                showPreview
+                  ? 'border-primary-500 bg-primary-50 text-primary-700'
+                  : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
+              }`}
+            >
+              <Eye className="h-4 w-4 mr-2" />
+              Preview
+            </button>
+          )}
           <button
             onClick={handleSave}
             disabled={saving}
@@ -528,21 +536,30 @@ export default function ContentEditor() {
           </div>
 
           {/* Editor */}
-          <div className="bg-white shadow rounded-lg overflow-hidden">
-            {showPreview ? (
-              <div className="p-6">
-                <div
-                  className="prose prose-sm sm:prose max-w-none"
-                  dangerouslySetInnerHTML={{ __html: previewHtml }}
-                />
-              </div>
-            ) : (
-              <>
-                <EditorToolbar editor={editor} />
-                <EditorContent editor={editor} />
-              </>
-            )}
-          </div>
+          {contentType === 'student_guide' ? (
+            <div className="bg-white shadow rounded-lg">
+              <WalkthroughEditor
+                value={walkthroughData}
+                onChange={setWalkthroughData}
+              />
+            </div>
+          ) : (
+            <div className="bg-white shadow rounded-lg overflow-hidden">
+              {showPreview ? (
+                <div className="p-6">
+                  <div
+                    className="prose prose-sm sm:prose max-w-none"
+                    dangerouslySetInnerHTML={{ __html: previewHtml }}
+                  />
+                </div>
+              ) : (
+                <>
+                  <EditorToolbar editor={editor} />
+                  <EditorContent editor={editor} />
+                </>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Sidebar */}

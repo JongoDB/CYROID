@@ -57,6 +57,8 @@ class RangeResponse(RangeBase):
     stopped_at: Optional[datetime] = None
     network_count: int = 0
     vm_count: int = 0
+    # Training content link
+    student_guide_id: Optional[UUID] = None
 
     class Config:
         from_attributes = True
@@ -83,6 +85,7 @@ class RangeResponse(RangeBase):
             stopped_at=range_obj.stopped_at,
             network_count=len(range_obj.networks) if range_obj.networks else 0,
             vm_count=len(range_obj.vms) if range_obj.vms else 0,
+            student_guide_id=range_obj.student_guide_id,
         )
 
 

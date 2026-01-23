@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from cyroid.api.deps import get_db, get_current_user
 from cyroid.models.user import User
 from cyroid.models.range import Range
-from cyroid.models.msel import MSEL
+from cyroid.models.content import Content
 from cyroid.models.walkthrough_progress import WalkthroughProgress
 
 
@@ -43,13 +43,17 @@ def get_walkthrough(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Get the walkthrough content for a range."""
+    """Get the walkthrough content for a range from Content Library."""
     range_obj = db.query(Range).filter(Range.id == range_id).first()
     if not range_obj:
         raise HTTPException(status_code=404, detail="Range not found")
 
-    msel = db.query(MSEL).filter(MSEL.range_id == range_id).first()
-    walkthrough = msel.walkthrough if msel else None
+    # Fetch walkthrough from Content Library via student_guide relationship
+    walkthrough = None
+    if range_obj.student_guide_id:
+        content = db.query(Content).filter(Content.id == range_obj.student_guide_id).first()
+        if content and content.walkthrough_data:
+            walkthrough = content.walkthrough_data
 
     return WalkthroughResponse(walkthrough=walkthrough)
 

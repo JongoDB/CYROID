@@ -1,12 +1,36 @@
 # backend/cyroid/schemas/content.py
 """Pydantic schemas for Content API."""
 from datetime import datetime
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, Field
 
 from cyroid.models.content import ContentType
+
+
+# ============ Walkthrough Schemas ============
+
+class WalkthroughStepSchema(BaseModel):
+    """A single step in a walkthrough phase."""
+    id: str
+    title: str
+    content: str
+    vm: Optional[str] = None
+    hints: Optional[List[str]] = None
+
+
+class WalkthroughPhaseSchema(BaseModel):
+    """A phase containing multiple steps."""
+    id: str
+    name: str
+    steps: List[WalkthroughStepSchema] = Field(default_factory=list)
+
+
+class WalkthroughSchema(BaseModel):
+    """Complete walkthrough structure."""
+    title: str
+    phases: List[WalkthroughPhaseSchema] = Field(default_factory=list)
 
 
 # ============ Content Asset Schemas ============
@@ -43,6 +67,7 @@ class ContentBase(BaseModel):
 
 class ContentCreate(ContentBase):
     body_markdown: str = ""
+    walkthrough_data: Optional[WalkthroughSchema] = None
     organization: Optional[str] = None
 
 
@@ -51,6 +76,7 @@ class ContentUpdate(BaseModel):
     description: Optional[str] = None
     content_type: Optional[ContentType] = None
     body_markdown: Optional[str] = None
+    walkthrough_data: Optional[WalkthroughSchema] = None
     tags: Optional[List[str]] = None
     organization: Optional[str] = None
     is_published: Optional[bool] = None
@@ -60,6 +86,7 @@ class ContentResponse(ContentBase):
     id: UUID
     body_markdown: str
     body_html: Optional[str] = None
+    walkthrough_data: Optional[Dict[str, Any]] = None
     version: str
     is_published: bool
     organization: Optional[str] = None

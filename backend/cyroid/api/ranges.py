@@ -24,6 +24,7 @@ from cyroid.models.user import User
 from cyroid.models.router import RangeRouter, RouterStatus
 from cyroid.models.event_log import EventType
 from cyroid.models.msel import MSEL
+from cyroid.models.content import Content, ContentType
 from cyroid.services.scenario_filesystem import get_scenario
 from cyroid.models.inject import Inject, InjectStatus
 from cyroid.models.blueprint import RangeInstance
@@ -2344,3 +2345,63 @@ def exec_in_dind(
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to execute command: {e}")
+
+
+# ============ Training Content ============
+
+class SetStudentGuideRequest(BaseModel):
+    """Request body for setting a student guide on a range."""
+    student_guide_id: Optional[UUID] = None
+
+
+class SetStudentGuideResponse(BaseModel):
+    """Response after setting student guide."""
+    student_guide_id: Optional[UUID] = None
+    student_guide_title: Optional[str] = None
+
+
+@router.patch("/{range_id}/student-guide", response_model=SetStudentGuideResponse)
+def set_student_guide(
+    range_id: UUID,
+    data: SetStudentGuideRequest,
+    db: DBSession,
+    current_user: CurrentUser,
+):
+    """
+    Associate a student guide from Content Library with this range.
+
+    The selected guide will be displayed in the Student Lab view.
+    Pass student_guide_id=null to remove the association.
+    """
+    range_obj = db.query(Range).filter(Range.id == range_id).first()
+    if not range_obj:
+        raise HTTPException(status_code=404, detail="Range not found")
+
+    # Check permission (owner or admin)
+    if range_obj.created_by != current_user.id and current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Not authorized to modify this range")
+
+    # Validate content exists and is student_guide type
+    content_title = None
+    if data.student_guide_id:
+        content = db.query(Content).filter(Content.id == data.student_guide_id).first()
+        if not content:
+            raise HTTPException(status_code=404, detail="Content not found")
+        if content.content_type != ContentType.STUDENT_GUIDE:
+            raise HTTPException(
+                status_code=400,
+                detail="Content must be of type 'student_guide'"
+            )
+        content_title = content.title
+
+    range_obj.student_guide_id = data.student_guide_id
+    db.commit()
+
+    logger.info(
+        f"Range {range_id} student guide set to {data.student_guide_id} by {current_user.username}"
+    )
+
+    return SetStudentGuideResponse(
+        student_guide_id=data.student_guide_id,
+        student_guide_title=content_title
+    )

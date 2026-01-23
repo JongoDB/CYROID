@@ -20,6 +20,7 @@ import { useRealtimeRange } from '../hooks/useRealtimeRange'
 import { toast } from '../stores/toastStore'
 import { DiagnosticsTab } from '../components/diagnostics'
 import { ActivityTab } from '../components/range/ActivityTab'
+import { TrainingTab } from '../components/range/TrainingTab'
 import { ConfirmDialog } from '../components/common/ConfirmDialog'
 import { SaveBlueprintModal } from '../components/blueprints'
 import { CreateSnapshotModal } from '../components/range/CreateSnapshotModal'
@@ -49,7 +50,7 @@ export default function RangeDetail() {
   const [loading, setLoading] = useState(true)
 
   // Tab state
-  const [activeTab, setActiveTab] = useState<'builder' | 'diagnostics' | 'activity'>('builder')
+  const [activeTab, setActiveTab] = useState<'builder' | 'training' | 'diagnostics' | 'activity'>('builder')
 
   // Network modal state
   const [showNetworkModal, setShowNetworkModal] = useState(false)
@@ -981,6 +982,18 @@ export default function RangeDetail() {
             Builder
           </button>
           <button
+            onClick={() => setActiveTab('training')}
+            className={clsx(
+              "py-2 px-1 border-b-2 font-medium text-sm flex items-center gap-2",
+              activeTab === 'training'
+                ? "border-primary-500 text-primary-600"
+                : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+            )}
+          >
+            <BookOpen className="h-4 w-4" />
+            Training
+          </button>
+          <button
             onClick={() => setActiveTab('diagnostics')}
             className={clsx(
               "py-2 px-1 border-b-2 font-medium text-sm flex items-center gap-2",
@@ -1245,6 +1258,17 @@ export default function RangeDetail() {
         </div>
       </div>
         </>
+      )}
+
+      {/* Training Tab Content */}
+      {activeTab === 'training' && (
+        <div className="bg-white shadow rounded-lg">
+          <TrainingTab
+            rangeId={range.id}
+            studentGuideId={range.student_guide_id || null}
+            onUpdate={fetchData}
+          />
+        </div>
       )}
 
       {/* Diagnostics Tab Content */}
