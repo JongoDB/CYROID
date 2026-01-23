@@ -110,19 +110,20 @@ export default function ExportRangeDialog({
     if (!jobStatus?.job_id) return
 
     try {
-      const response = await rangesApi.downloadExport(jobStatus.job_id)
-      if (response.data instanceof Blob) {
-        const blob = response.data
-        const url = window.URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        a.download = `range-export-${rangeName.replace(/[^a-zA-Z0-9]/g, '_')}-offline.tar.gz`
-        document.body.appendChild(a)
-        a.click()
-        window.URL.revokeObjectURL(url)
-        document.body.removeChild(a)
-        onClose()
-      }
+      // For large files (like offline exports with Docker images), use direct URL download
+      // instead of blob to avoid memory issues with multi-GB files
+      const token = localStorage.getItem('token')
+      const downloadUrl = `/api/v1/ranges/export/jobs/${jobStatus.job_id}/download`
+
+      // Create a hidden link and trigger download directly
+      // The browser will handle streaming the large file
+      const a = document.createElement('a')
+      a.href = downloadUrl + (token ? `?token=${token}` : '')
+      a.download = `range-export-${rangeName.replace(/[^a-zA-Z0-9]/g, '_')}-offline.tar.gz`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      onClose()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Download failed')
     }
