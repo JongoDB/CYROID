@@ -249,8 +249,8 @@ export interface ResourceStatus {
   id?: string
   name: string
   status: 'pending' | 'creating' | 'starting' | 'running' | 'created' | 'stopped' | 'failed'
-  statusDetail?: string
-  durationMs?: number
+  status_detail?: string
+  duration_ms?: number
 }
 
 export interface NetworkStatus extends ResourceStatus {
@@ -265,15 +265,15 @@ export interface VMStatus extends ResourceStatus {
 export interface DeploymentSummary {
   total: number
   completed: number
-  inProgress: number
+  in_progress: number
   failed: number
   pending: number
 }
 
 export interface DeploymentStatusResponse {
   status: string
-  elapsedSeconds: number
-  startedAt?: string
+  elapsed_seconds: number
+  started_at?: string
   summary: DeploymentSummary
   router?: ResourceStatus
   networks: NetworkStatus[]
@@ -711,6 +711,7 @@ export interface CustomISOStatusResponse {
 export interface ExportRequest {
   include_templates: boolean
   include_msel: boolean
+  include_walkthrough: boolean
   include_artifacts: boolean
   include_snapshots: boolean
   include_docker_images: boolean

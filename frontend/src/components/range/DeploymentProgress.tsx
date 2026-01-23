@@ -53,7 +53,7 @@ export function DeploymentProgress({
           // Find error details from failed resources
           const failedVm = response.data.vms.find(v => v.status === 'failed')
           const failedNet = response.data.networks.find(n => n.status === 'failed')
-          const errorDetail = failedVm?.statusDetail || failedNet?.statusDetail || response.data.router?.statusDetail
+          const errorDetail = failedVm?.status_detail || failedNet?.status_detail || response.data.router?.status_detail
           setError(errorDetail || 'Deployment failed')
         }
       } catch (err) {
@@ -100,9 +100,12 @@ export function DeploymentProgress({
     return new Date(timestamp).toLocaleTimeString()
   }
 
-  const formatElapsed = (seconds: number) => {
+  const formatElapsed = (seconds: number | undefined | null) => {
+    if (seconds === undefined || seconds === null || isNaN(seconds)) {
+      return '00:00'
+    }
     const mins = Math.floor(seconds / 60)
-    const secs = seconds % 60
+    const secs = Math.floor(seconds % 60)
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
   }
 
@@ -136,7 +139,7 @@ export function DeploymentProgress({
             <h3 className="text-lg font-semibold text-white">Deploying Range...</h3>
           </div>
           <span className="text-gray-400 text-sm">
-            Elapsed: {formatElapsed(status.elapsedSeconds)}
+            Elapsed: {formatElapsed(status.elapsed_seconds)}
           </span>
         </div>
 
@@ -164,8 +167,8 @@ export function DeploymentProgress({
               name={status.router.name}
               detail="Docker-in-Docker"
               status={status.router.status}
-              statusDetail={status.router.statusDetail}
-              durationMs={status.router.durationMs}
+              statusDetail={status.router.status_detail}
+              durationMs={status.router.duration_ms}
             />
           </ResourceSection>
         )}
@@ -178,8 +181,8 @@ export function DeploymentProgress({
               name={network.name}
               detail={network.subnet}
               status={network.status}
-              statusDetail={network.statusDetail}
-              durationMs={network.durationMs}
+              statusDetail={network.status_detail}
+              durationMs={network.duration_ms}
             />
           ))}
         </ResourceSection>
@@ -192,8 +195,8 @@ export function DeploymentProgress({
               name={vm.hostname}
               detail={vm.ip}
               status={vm.status}
-              statusDetail={vm.statusDetail}
-              durationMs={vm.durationMs}
+              statusDetail={vm.status_detail}
+              durationMs={vm.duration_ms}
             />
           ))}
         </ResourceSection>
