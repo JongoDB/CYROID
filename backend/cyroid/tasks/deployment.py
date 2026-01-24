@@ -3,6 +3,7 @@
 import asyncio
 import base64
 import dramatiq
+import json
 import logging
 from uuid import UUID
 
@@ -17,7 +18,9 @@ from cyroid.models.base_image import BaseImage
 from cyroid.models.golden_image import GoldenImage
 from cyroid.models.snapshot import Snapshot
 from cyroid.models.router import RangeRouter, RouterStatus
+from cyroid.models.event_log import EventType
 from cyroid.config import get_settings
+from cyroid.services.event_service import EventService
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +43,23 @@ def deploy_range_task(range_id: str):
             logger.error(f"Range {range_id} not found")
             return
 
+        # Count resources for event
+        networks = db.query(Network).filter(Network.range_id == UUID(range_id)).all()
+        vms = db.query(VM).filter(VM.range_id == UUID(range_id)).all()
+
+        # Log deployment start event (needed for elapsed time calculation)
+        event_service = EventService(db)
+        event_service.log_event(
+            range_id=UUID(range_id),
+            event_type=EventType.DEPLOYMENT_STARTED,
+            message=f"Starting DinD deployment of range '{range_obj.name}'",
+            extra_data=json.dumps({
+                "total_networks": len(networks),
+                "total_vms": len(vms),
+                "isolation": "dind"
+            })
+        )
+
         # Run async deployment synchronously
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
@@ -48,6 +68,18 @@ def deploy_range_task(range_id: str):
                 deployment_service.deploy_range(db, UUID(range_id))
             )
             logger.info(f"Range {range_id} deployed successfully: {result}")
+
+            # Log deployment completion
+            event_service.log_event(
+                range_id=UUID(range_id),
+                event_type=EventType.DEPLOYMENT_COMPLETED,
+                message=f"Range '{range_obj.name}' deployed successfully with DinD isolation",
+                extra_data=json.dumps({
+                    "networks_deployed": len(networks),
+                    "vms_deployed": len(vms),
+                    "dind_container_id": range_obj.dind_container_id
+                })
+            )
         finally:
             loop.close()
 
@@ -58,6 +90,17 @@ def deploy_range_task(range_id: str):
             range_obj.status = RangeStatus.ERROR
             range_obj.error_message = str(e)[:1000]
             db.commit()
+
+            # Log deployment failure
+            try:
+                event_service = EventService(db)
+                event_service.log_event(
+                    range_id=UUID(range_id),
+                    event_type=EventType.DEPLOYMENT_FAILED,
+                    message=f"Deployment failed: {str(e)[:500]}",
+                )
+            except Exception:
+                pass
     finally:
         db.close()
 

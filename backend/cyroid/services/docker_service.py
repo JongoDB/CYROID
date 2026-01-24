@@ -3027,27 +3027,38 @@ local-hostname: {name}
 
         image_size = 0
 
-        # Check if image exists on host
-        try:
-            host_image = self.client.images.get(image)
-            image_size = host_image.attrs.get('Size', 0)
-            logger.debug(f"Image '{image}' found on host (size: {image_size})")
-            report_progress(0, image_size, 'found_on_host')
-        except docker.errors.ImageNotFound:
+        # Check if image exists on host - try with and without :latest tag
+        host_image = None
+        image_variants = [image]
+        if ":" not in image:
+            image_variants.append(f"{image}:latest")
+
+        for img_name in image_variants:
+            try:
+                host_image = self.client.images.get(img_name)
+                image_size = host_image.attrs.get('Size', 0)
+                logger.info(f"Image '{img_name}' found on host (size: {image_size / 1024 / 1024:.1f} MB, tags: {host_image.tags})")
+                report_progress(0, image_size, 'found_on_host')
+                break
+            except docker.errors.ImageNotFound:
+                logger.debug(f"Image '{img_name}' not found on host")
+                continue
+
+        if host_image is None:
             if pull_if_missing:
                 logger.info(f"Image '{image}' not on host, pulling...")
                 report_progress(0, 0, 'pulling_to_host')
                 try:
                     host_image = self.client.images.pull(image)
                     image_size = host_image.attrs.get('Size', 0)
-                    logger.info(f"Pulled '{image}' to host (size: {image_size})")
+                    logger.info(f"Pulled '{image}' to host (size: {image_size / 1024 / 1024:.1f} MB)")
                     report_progress(image_size, image_size, 'pulled_to_host')
                 except Exception as e:
                     logger.error(f"Failed to pull '{image}' to host: {e}")
                     report_progress(0, 0, 'error')
                     return False
             else:
-                logger.error(f"Image '{image}' not found on host")
+                logger.error(f"Image '{image}' not found on host (tried: {image_variants})")
                 report_progress(0, 0, 'error')
                 return False
 
@@ -3065,27 +3076,78 @@ local-hostname: {name}
                 pass  # Need to transfer
 
             # Export image from host and import to DinD
-            # Use generator to stream in chunks for large images
-            logger.info(f"Streaming image '{image}' from host to DinD...")
+            logger.info(f"Exporting image '{image}' ({image_size / 1024 / 1024:.1f} MB) from host...")
             report_progress(0, image_size, 'transferring')
 
             # Get image as tar stream from host
-            image_data = host_image.save(named=True)
+            # named=True preserves the image tags
+            try:
+                logger.info(f"Starting image export (tags: {host_image.tags})...")
+                image_data = host_image.save(named=True)
+                logger.info(f"Image export stream created, loading into DinD at {docker_url}...")
+            except Exception as save_err:
+                logger.error(f"Failed to export image '{image}' from host: {type(save_err).__name__}: {save_err}")
+                import traceback
+                logger.error(f"Export traceback: {traceback.format_exc()}")
+                report_progress(0, image_size, 'error')
+                return False
+
+            # Wrap the generator to track progress
+            import time
+            transferred_bytes = [0]
+            last_progress_report = [time.time()]
+            start_time = time.time()
+
+            def progress_wrapper(data_generator):
+                """Wrap generator to track bytes transferred and report progress."""
+                for chunk in data_generator:
+                    transferred_bytes[0] += len(chunk)
+                    # Report progress every 2 seconds to avoid spamming
+                    now = time.time()
+                    if now - last_progress_report[0] >= 2.0:
+                        last_progress_report[0] = now
+                        if image_size > 0:
+                            pct = min(100, int((transferred_bytes[0] / image_size) * 100))
+                            elapsed = int(now - start_time)
+                            transferred_mb = transferred_bytes[0] / 1024 / 1024
+                            total_mb = image_size / 1024 / 1024
+                            report_progress(transferred_bytes[0], image_size, f'transferring:{pct}')
+                            logger.info(f"Transfer progress: {transferred_mb:.1f}/{total_mb:.1f} MB ({pct}%) - {elapsed}s elapsed")
+                    yield chunk
 
             # Load into DinD - images.load accepts an iterator of bytes
-            result = range_client.images.load(image_data)
+            try:
+                logger.info(f"Loading image into DinD (this may take a while for large images)...")
+                result = range_client.images.load(progress_wrapper(image_data))
+                elapsed = int(time.time() - start_time)
+                logger.info(f"Image load completed in {elapsed}s")
+            except Exception as load_err:
+                logger.error(f"Failed to load image '{image}' into DinD: {type(load_err).__name__}: {load_err}")
+                import traceback
+                logger.error(f"Load traceback: {traceback.format_exc()}")
+                # Check for common issues
+                if "connection" in str(load_err).lower() or "timeout" in str(load_err).lower():
+                    logger.error(f"Connection issue during image transfer - DinD may have restarted or network issue")
+                report_progress(0, image_size, 'error')
+                return False
 
             if result:
                 loaded_images = [img.tags[0] if img.tags else img.id for img in result]
                 logger.info(f"Successfully transferred to DinD: {loaded_images}")
             else:
-                logger.info(f"Successfully transferred '{image}' to DinD")
+                logger.info(f"Successfully transferred '{image}' to DinD (no result metadata)")
 
             report_progress(image_size, image_size, 'complete')
             return True
 
+        except docker.errors.APIError as e:
+            logger.error(f"Docker API error transferring image '{image}' to DinD: {e}")
+            report_progress(0, image_size, 'error')
+            return False
         except Exception as e:
-            logger.error(f"Error transferring image '{image}' to DinD: {e}")
+            logger.error(f"Unexpected error transferring image '{image}' to DinD: {type(e).__name__}: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             report_progress(0, image_size, 'error')
             return False
 
@@ -3093,23 +3155,52 @@ local-hostname: {name}
         self,
         range_id: str,
         docker_url: str,
-        image: str
+        image: str,
+        progress_callback: Optional[Callable[[int, int, str], None]] = None,
     ) -> None:
         """
         Pull/transfer a Docker image into a range's DinD container.
 
         First attempts to transfer from host, falls back to pulling directly
         into DinD if transfer fails.
+
+        Args:
+            progress_callback: Optional callback for progress reporting.
+                Signature: (transferred: int, total: int, status: str) -> None
         """
         # Try host-to-DinD transfer first (handles local images and snapshots)
-        if await self.transfer_image_to_dind(range_id, docker_url, image):
+        if await self.transfer_image_to_dind(range_id, docker_url, image, progress_callback=progress_callback):
             return
+
+        # Check if this is a local-only image (no registry prefix like docker.io/, ghcr.io/, etc.)
+        # Local images like "cyroid/redteam-kali" can't be pulled from a registry
+        is_local_only = "/" in image and not any(
+            image.startswith(prefix) for prefix in [
+                "docker.io/", "ghcr.io/", "gcr.io/", "quay.io/",
+                "registry.", "localhost:", "127.0.0.1:"
+            ]
+        ) and "." not in image.split("/")[0]
+
+        if is_local_only:
+            # Don't try to pull local-only images - they need to be transferred
+            raise RuntimeError(
+                f"Image '{image}' appears to be a local image that could not be transferred to DinD. "
+                f"Ensure the image exists on the host with 'docker images | grep {image.split('/')[0]}'"
+            )
 
         # Fallback: try direct pull into DinD (requires internet in DinD)
         logger.info(f"Falling back to direct pull of '{image}' into DinD")
-        range_client = self.get_range_client_sync(range_id, docker_url)
-        range_client.images.pull(image)
-        logger.info(f"Successfully pulled '{image}' into DinD")
+        try:
+            range_client = self.get_range_client_sync(range_id, docker_url)
+            range_client.images.pull(image)
+            logger.info(f"Successfully pulled '{image}' into DinD")
+        except docker.errors.APIError as e:
+            if "pull access denied" in str(e) or "repository does not exist" in str(e):
+                raise RuntimeError(
+                    f"Cannot pull image '{image}' into DinD: image not found in registry. "
+                    f"If this is a local image, ensure it exists on the host Docker daemon."
+                ) from e
+            raise
 
     async def create_snapshot_dind(
         self,
