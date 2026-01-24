@@ -23,6 +23,7 @@ import {
 import clsx from 'clsx'
 import PasswordChangeModal from '../common/PasswordChangeModal'
 import { ToastContainer } from '../common/Toast'
+import { NotificationBell } from '../notifications'
 
 interface LayoutProps {
   children: ReactNode
@@ -150,8 +151,9 @@ export default function Layout({ children }: LayoutProps) {
       {/* Desktop sidebar */}
       <div className="hidden lg:fixed lg:inset-y-0 lg:flex lg:w-64 lg:flex-col">
         <div className="flex flex-col flex-grow bg-gray-900 overflow-y-auto">
-          <div className="flex items-center h-16 px-4 bg-gray-800">
+          <div className="flex items-center justify-between h-16 px-4 bg-gray-800">
             <span className="text-xl font-bold text-white">CYROID</span>
+            <NotificationBell />
           </div>
           <nav className="mt-4 flex-1 px-2 space-y-1">
             {navigation.map((item) => (
@@ -240,8 +242,9 @@ export default function Layout({ children }: LayoutProps) {
           >
             <Menu className="h-6 w-6" />
           </button>
-          <div className="flex items-center flex-1 px-4">
+          <div className="flex items-center justify-between flex-1 px-4">
             <span className="text-lg font-semibold text-gray-900">CYROID</span>
+            <NotificationBell />
           </div>
         </div>
 
