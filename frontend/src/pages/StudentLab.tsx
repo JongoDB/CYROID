@@ -81,6 +81,25 @@ export default function StudentLab() {
     }
   }
 
+  // Trigger resize on iframes (for VNC to recalculate dimensions)
+  const triggerIframeResize = useCallback(() => {
+    const iframes = document.querySelectorAll('iframe')
+    iframes.forEach(iframe => {
+      try {
+        iframe.contentWindow?.dispatchEvent(new Event('resize'))
+      } catch {
+        // Cross-origin iframe, can't dispatch event directly
+      }
+    })
+    window.dispatchEvent(new Event('resize'))
+  }, [])
+
+  // Trigger resize when walkthrough is collapsed/expanded
+  useEffect(() => {
+    const timer = setTimeout(triggerIframeResize, 150)
+    return () => clearTimeout(timer)
+  }, [isCollapsed, triggerIframeResize])
+
   // Handle drag to resize
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
@@ -103,6 +122,8 @@ export default function StudentLab() {
       setIsDragging(false)
       // Save to localStorage
       localStorage.setItem('student-lab-width', walkthroughWidth.toString())
+      // Trigger iframe resize after layout settles
+      setTimeout(triggerIframeResize, 100)
     }
 
     document.addEventListener('mousemove', handleMouseMove)
@@ -112,7 +133,7 @@ export default function StudentLab() {
       document.removeEventListener('mousemove', handleMouseMove)
       document.removeEventListener('mouseup', handleMouseUp)
     }
-  }, [isDragging, walkthroughWidth])
+  }, [isDragging, walkthroughWidth, triggerIframeResize])
 
   if (loading) {
     return (
