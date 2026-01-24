@@ -250,6 +250,57 @@ class DockerPullRequest(BaseModel):
     image: str
 
 
+def _create_base_image_for_build(full_tag: str, image_id: str, image_project_name: str):
+    """
+    Create or update a BaseImage record after a successful Docker build.
+
+    Args:
+        full_tag: The full Docker image tag (e.g., cyroid/kali-attack:latest)
+        image_id: The Docker image ID (sha256 hash)
+        image_project_name: The Dockerfile project directory name (e.g., kali-attack)
+    """
+    try:
+        from cyroid.database import get_session_local
+        from cyroid.models.base_image import BaseImage
+
+        SessionLocal = get_session_local()
+        db = SessionLocal()
+        try:
+            # Check if BaseImage already exists for this tag
+            existing = db.query(BaseImage).filter(
+                BaseImage.docker_image_tag == full_tag
+            ).first()
+
+            if existing:
+                # Update existing record with new image ID and project name
+                existing.docker_image_id = image_id
+                existing.image_project_name = image_project_name
+                db.commit()
+                logger.info(f"Updated BaseImage record for {full_tag} with project_name={image_project_name}")
+            else:
+                # Create new BaseImage record
+                # Parse image name from tag for display
+                display_name = full_tag.split("/")[-1].split(":")[0]
+                base_image = BaseImage(
+                    name=display_name,
+                    description=f"Container image built from Dockerfile: {image_project_name}",
+                    image_type="container",
+                    docker_image_id=image_id,
+                    docker_image_tag=full_tag,
+                    image_project_name=image_project_name,
+                    os_type="linux",  # Default, can be updated later
+                    vm_type="container",
+                    is_global=True,
+                )
+                db.add(base_image)
+                db.commit()
+                logger.info(f"Created BaseImage record for {full_tag} with project_name={image_project_name}")
+        finally:
+            db.close()
+    except Exception as e:
+        logger.warning(f"Failed to create/update BaseImage record for {full_tag}: {e}")
+
+
 def _pull_docker_image_async(image: str):
     """Background task to pull Docker image with progress tracking."""
     import docker
@@ -689,6 +740,9 @@ def _build_docker_image_async(image_name: str, tag: str, no_cache: bool):
                     "current_step_name": "Build complete!",
                 })
                 logger.info(f"Docker build completed: {full_tag} ({image_id})")
+
+                # Create/update BaseImage record with image_project_name
+                _create_base_image_for_build(full_tag, image_id, image_name)
                 return
 
         # If we get here without aux, check if image exists
@@ -700,6 +754,8 @@ def _build_docker_image_async(image_name: str, tag: str, no_cache: bool):
                 "image_id": built_image.id,
                 "current_step_name": "Build complete!",
             })
+            # Create/update BaseImage record with image_project_name
+            _create_base_image_for_build(full_tag, built_image.id, image_name)
         except Exception:
             _active_docker_builds[build_key].update({
                 "status": "completed",

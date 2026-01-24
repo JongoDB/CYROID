@@ -44,6 +44,7 @@ class BaseImage(Base, UUIDMixin, TimestampMixin):
     # Container-specific fields
     docker_image_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)  # sha256:hash
     docker_image_tag: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, unique=True)  # e.g., kasmweb/ubuntu-jammy-desktop:1.14.0
+    image_project_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, index=True)  # Links to /data/images/{project_name}/
 
     # ISO-specific fields
     iso_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True, unique=True)  # Path to cached ISO file
