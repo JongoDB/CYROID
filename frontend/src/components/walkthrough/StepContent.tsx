@@ -4,6 +4,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { ExternalLink, Copy, Check } from 'lucide-react'
 import { WalkthroughStep } from '../../types'
+import { useVmClipboardOptional } from '../../contexts'
 
 interface StepContentProps {
   step: WalkthroughStep
@@ -13,6 +14,7 @@ interface StepContentProps {
 // Code block with copy button - used for <pre> elements (fenced code blocks)
 function PreBlock({ children }: { children?: React.ReactNode }) {
   const [copied, setCopied] = useState(false)
+  const vmClipboard = useVmClipboardOptional()
 
   const handleCopy = () => {
     // Extract text content from children
@@ -20,6 +22,10 @@ function PreBlock({ children }: { children?: React.ReactNode }) {
     navigator.clipboard.writeText(text).then(() => {
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
+      // Also store in VM clipboard context for sending to VNC
+      if (vmClipboard) {
+        vmClipboard.setClipboardText(text)
+      }
     })
   }
 
@@ -31,7 +37,7 @@ function PreBlock({ children }: { children?: React.ReactNode }) {
       <button
         onClick={handleCopy}
         className="absolute top-2 right-2 p-1.5 rounded bg-gray-700 hover:bg-gray-600 text-gray-300 hover:text-white opacity-0 group-hover:opacity-100 transition-opacity"
-        title={copied ? 'Copied!' : 'Copy to clipboard'}
+        title={copied ? 'Copied! Click "Send to VM" in console header to paste in VM' : 'Copy to clipboard'}
       >
         {copied ? (
           <Check className="w-4 h-4 text-green-400" />

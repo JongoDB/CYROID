@@ -1,7 +1,8 @@
 // frontend/src/components/console/VncConsole.tsx
-import { useEffect, useState, useRef } from 'react'
-import { Maximize2, Minimize2, X, RefreshCw, Monitor, AlertTriangle, Clock } from 'lucide-react'
+import { useEffect, useState, useRef, useCallback } from 'react'
+import { Maximize2, Minimize2, X, RefreshCw, Monitor, AlertTriangle, Clock, Check } from 'lucide-react'
 import clsx from 'clsx'
+import { useVmClipboardOptional } from '../../contexts'
 
 interface VncConsoleProps {
   vmId: string
@@ -21,6 +22,64 @@ type ConnectionStatus = 'connecting' | 'connected' | 'timeout' | 'error'
 
 const CONNECTION_TIMEOUT_MS = 30000 // 30 seconds
 
+// Clipboard bridge script injected into KasmVNC iframe
+// Enables automatic clipboard sync from walkthrough to VM console
+const CLIPBOARD_BRIDGE_SCRIPT = `
+(function() {
+  if (window.__cyroidClipboardBridge) return;
+  window.__cyroidClipboardBridge = true;
+
+  // Find and fill KasmVNC's clipboard textarea
+  function fillClipboardUI(text) {
+    var selectors = [
+      '#noVNC_clipboard_text',
+      '#clipboard-text',
+      'textarea[id*="clipboard"]'
+    ];
+
+    for (var i = 0; i < selectors.length; i++) {
+      var el = document.querySelector(selectors[i]);
+      if (el && el.tagName === 'TEXTAREA') {
+        el.value = text;
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // Listen for clipboard messages from parent frame
+  window.addEventListener('message', function(event) {
+    var data = event.data;
+    if (!data || typeof data !== 'object') return;
+
+    var text = null;
+    if (data.action === 'clipboard' && data.text) {
+      text = data.text;
+    } else if (data.type === 'clipboard' && data.data) {
+      text = data.data;
+    }
+
+    if (text) {
+      var success = fillClipboardUI(text);
+
+      if (event.source && event.source !== window) {
+        event.source.postMessage({
+          type: 'clipboard-ack',
+          success: success
+        }, '*');
+      }
+    }
+  });
+
+  // Notify parent that bridge is ready
+  if (window.parent && window.parent !== window) {
+    window.parent.postMessage({ type: 'clipboard-bridge-ready' }, '*');
+  }
+})();
+`;
+
 export function VncConsole({ vmId, vmHostname, token, onClose }: VncConsoleProps) {
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -28,14 +87,21 @@ export function VncConsole({ vmId, vmHostname, token, onClose }: VncConsoleProps
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('connecting')
   const [iframeKey, setIframeKey] = useState(0)
   const [showHelp, setShowHelp] = useState(false)
+  const [clipboardSynced, setClipboardSynced] = useState(false)
+  const [bridgeReady, setBridgeReady] = useState(false)
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const iframeRef = useRef<HTMLIFrameElement>(null)
+  const lastSyncedRef = useRef<number | null>(null)
+  const bridgeInjectedRef = useRef(false)
+  const vmClipboard = useVmClipboardOptional()
 
   useEffect(() => {
     // Fetch VM info to get VNC proxy URL
     const fetchVmInfo = async () => {
       setConnectionStatus('connecting')
       setError(null)
+      setBridgeReady(false)
+      bridgeInjectedRef.current = false
 
       try {
         const response = await fetch(`/api/v1/vms/${vmId}/vnc-info`, {
@@ -53,8 +119,6 @@ export function VncConsole({ vmId, vmHostname, token, onClose }: VncConsoleProps
         const origin = window.location.origin
 
         // Build VNC URL with proper WebSocket path
-        // noVNC resolves the path relative to its location, so we just need the websocket endpoint name
-        // If noVNC is served from /vnc/{uuid}/ and path=websockify, it connects to /vnc/{uuid}/websockify
         const websocketPath = data.websocket_path ?? 'websockify'
         // show_control_bar=true is required for KasmVNC to show sidebar when embedded in iframe
         // resize=remote changes VM resolution to match window (best for dynamic sizing)
@@ -69,7 +133,6 @@ export function VncConsole({ vmId, vmHostname, token, onClose }: VncConsoleProps
 
         // Start connection timeout
         timeoutRef.current = setTimeout(() => {
-          // Only show timeout if still in connecting state
           setConnectionStatus(prev => prev === 'connecting' ? 'timeout' : prev)
         }, CONNECTION_TIMEOUT_MS)
 
@@ -88,14 +151,80 @@ export function VncConsole({ vmId, vmHostname, token, onClose }: VncConsoleProps
     }
   }, [vmId, token, iframeKey])
 
+  // Listen for messages from iframe (bridge ready, clipboard ack)
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data?.type === 'clipboard-bridge-ready') {
+        setBridgeReady(true)
+      } else if (event.data?.type === 'clipboard-ack') {
+        if (event.data.success) {
+          setClipboardSynced(true)
+          setTimeout(() => setClipboardSynced(false), 2000)
+        }
+      }
+    }
+
+    window.addEventListener('message', handleMessage)
+    return () => window.removeEventListener('message', handleMessage)
+  }, [])
+
+  // Inject clipboard bridge script into iframe
+  const injectClipboardBridge = useCallback(() => {
+    if (bridgeInjectedRef.current) return false
+
+    const iframe = iframeRef.current
+    if (!iframe) return false
+
+    try {
+      // Access iframe's document (only works for same-origin)
+      const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document
+      if (!iframeDoc) return false
+
+      // Check if already injected
+      if (iframeDoc.getElementById('cyroid-clipboard-bridge')) {
+        bridgeInjectedRef.current = true
+        return true
+      }
+
+      // Create and inject script
+      const script = iframeDoc.createElement('script')
+      script.id = 'cyroid-clipboard-bridge'
+      script.textContent = CLIPBOARD_BRIDGE_SCRIPT
+
+      const target = iframeDoc.head || iframeDoc.body || iframeDoc.documentElement
+      if (target) {
+        target.appendChild(script)
+        bridgeInjectedRef.current = true
+        return true
+      }
+    } catch {
+      // Cross-origin or other access error - clipboard sync won't work
+    }
+    return false
+  }, [])
+
   // Handle iframe load event
-  const handleIframeLoad = () => {
-    // Clear timeout since iframe loaded
+  const handleIframeLoad = useCallback(() => {
     if (timeoutRef.current) {
       clearTimeout(timeoutRef.current)
     }
     setConnectionStatus('connected')
-  }
+
+    // Try to inject clipboard bridge with retries
+    // KasmVNC takes time to fully initialize its JS
+    const tryInject = () => {
+      if (!bridgeInjectedRef.current) {
+        injectClipboardBridge()
+      }
+    }
+
+    // Try at various intervals to catch the right moment
+    setTimeout(tryInject, 500)
+    setTimeout(tryInject, 1500)
+    setTimeout(tryInject, 3000)
+    setTimeout(tryInject, 5000)
+    setTimeout(tryInject, 8000)
+  }, [injectClipboardBridge])
 
   // Handle iframe error
   const handleIframeError = () => {
@@ -116,8 +245,41 @@ export function VncConsole({ vmId, vmHostname, token, onClose }: VncConsoleProps
     }
     setConnectionStatus('connecting')
     setError(null)
+    setBridgeReady(false)
+    bridgeInjectedRef.current = false
     setIframeKey(prev => prev + 1)
   }
+
+  // Send clipboard to VNC via postMessage
+  const sendClipboardToVM = useCallback((text: string) => {
+    const iframe = iframeRef.current
+    if (!iframe?.contentWindow || !text) return
+    iframe.contentWindow.postMessage({ action: 'clipboard', text }, '*')
+  }, [])
+
+  // Automatically sync clipboard when content changes
+  useEffect(() => {
+    if (
+      connectionStatus !== 'connected' ||
+      !vmClipboard?.clipboardText ||
+      !vmClipboard?.lastCopiedAt ||
+      vmClipboard.lastCopiedAt === lastSyncedRef.current
+    ) {
+      return
+    }
+
+    sendClipboardToVM(vmClipboard.clipboardText)
+    lastSyncedRef.current = vmClipboard.lastCopiedAt
+
+    // Show optimistic feedback - will be confirmed by ack if bridge works
+    if (bridgeReady) {
+      // Bridge is ready, wait for ack
+    } else {
+      // Bridge not confirmed, show feedback anyway
+      setClipboardSynced(true)
+      setTimeout(() => setClipboardSynced(false), 2000)
+    }
+  }, [connectionStatus, bridgeReady, vmClipboard?.clipboardText, vmClipboard?.lastCopiedAt, sendClipboardToVM])
 
   const getStatusColor = () => {
     switch (connectionStatus) {
@@ -130,7 +292,7 @@ export function VncConsole({ vmId, vmHostname, token, onClose }: VncConsoleProps
 
   const getStatusText = () => {
     switch (connectionStatus) {
-      case 'connected': return 'Connected via Traefik'
+      case 'connected': return bridgeReady ? 'Connected (clipboard ready)' : 'Connected'
       case 'connecting': return 'Connecting...'
       case 'timeout': return 'Connection slow'
       case 'error': return 'Error'
@@ -160,6 +322,13 @@ export function VncConsole({ vmId, vmHostname, token, onClose }: VncConsoleProps
           )}
         </div>
         <div className="flex items-center gap-1">
+          {/* Clipboard sync indicator */}
+          {clipboardSynced && (
+            <div className="px-2 py-1 text-xs rounded bg-green-600 text-white flex items-center gap-1.5">
+              <Check className="w-3 h-3" />
+              <span>Clipboard synced!</span>
+            </div>
+          )}
           <button
             onClick={() => setShowHelp(!showHelp)}
             className={clsx(
@@ -197,13 +366,13 @@ export function VncConsole({ vmId, vmHostname, token, onClose }: VncConsoleProps
       {/* Help panel */}
       {showHelp && (
         <div className="px-4 py-3 bg-gray-800/50 border-b border-gray-700 text-sm">
-          <p className="text-gray-300 font-medium mb-2">Troubleshooting Console Issues</p>
+          <p className="text-gray-300 font-medium mb-2">Console Help</p>
           <ul className="text-gray-400 space-y-1 text-xs">
-            <li>• <strong>Blank screen?</strong> The VM may still be booting. Wait 30-60 seconds and reload.</li>
-            <li>• <strong>Connection timeout?</strong> Check if the VM is running and Traefik is configured.</li>
-            <li>• <strong>KasmVNC containers</strong> may take 1-2 minutes to initialize on first boot.</li>
-            <li>• <strong>Windows VMs</strong> require the dockur image with VNC support.</li>
-            <li>• Try the <strong>Reload</strong> button if the display appears frozen.</li>
+            <li>• <strong>Clipboard:</strong> Copy code from walkthrough, then Ctrl+V in VM to paste.</li>
+            <li>• <strong>Blank screen?</strong> VM may still be booting. Wait 30-60 seconds and reload.</li>
+            <li>• <strong>Connection timeout?</strong> Check if VM is running.</li>
+            <li>• <strong>KasmVNC</strong> may take 1-2 minutes to initialize on first boot.</li>
+            <li>• Try the <strong>Reload</strong> button if display appears frozen.</li>
           </ul>
         </div>
       )}
