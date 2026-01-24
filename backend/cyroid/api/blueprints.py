@@ -17,6 +17,7 @@ from cyroid.schemas.blueprint_export import (
     BlueprintImportValidation,
     BlueprintImportOptions,
     BlueprintImportResult,
+    BlueprintExportOptions,
 )
 from cyroid.services.blueprint_service import (
     extract_config_from_range, extract_subnet_prefix, create_range_from_blueprint
@@ -183,22 +184,65 @@ def list_instances(blueprint_id: UUID, db: DBSession, current_user: CurrentUser)
 # ============ Export/Import Endpoints ============
 
 @router.get("/{blueprint_id}/export")
-def export_blueprint(blueprint_id: UUID, db: DBSession, current_user: CurrentUser):
+def export_blueprint(
+    blueprint_id: UUID,
+    db: DBSession,
+    current_user: CurrentUser,
+    include_dockerfiles: bool = Query(
+        default=True,
+        description="Include Dockerfiles from /data/images/ for referenced images"
+    ),
+    include_docker_images: bool = Query(
+        default=False,
+        description="Include Docker image tarballs (large, but enables fully offline deployment)"
+    ),
+    include_content: bool = Query(
+        default=True,
+        description="Include Content Library items (student guides, etc.)"
+    ),
+    content_id: str = Query(
+        default=None,
+        description="Specific Content Library ID to include (UUID)"
+    ),
+):
     """
-    Export a blueprint as a portable ZIP package.
+    Export a blueprint as a portable ZIP package (v3.0).
 
     The package includes:
     - Blueprint configuration (networks, VMs, MSEL)
-    - All referenced VM templates
+    - Dockerfiles from /data/images/ for referenced images
+    - Content Library items (student guides, etc.)
     - Manifest with checksums
+
+    Options:
+    - include_dockerfiles: Include Dockerfile projects for custom images
+    - include_docker_images: Include Docker image tarballs (very large)
+    - include_content: Include Content Library items
+    - content_id: Specific Content ID to include
     """
     export_service = get_blueprint_export_service()
 
     try:
+        options = BlueprintExportOptions(
+            include_dockerfiles=include_dockerfiles,
+            include_docker_images=include_docker_images,
+            include_content=include_content,
+        )
+
+        # Parse content_id if provided
+        parsed_content_id = None
+        if content_id:
+            try:
+                parsed_content_id = UUID(content_id)
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Invalid content_id UUID format")
+
         archive_path, filename = export_service.export_blueprint(
             blueprint_id=blueprint_id,
             user=current_user,
             db=db,
+            options=options,
+            content_id=parsed_content_id,
         )
 
         return FileResponse(
@@ -220,12 +264,14 @@ async def validate_blueprint_import(
     current_user: CurrentUser = None,
 ):
     """
-    Validate a blueprint import package (dry-run).
+    Validate a blueprint import package (dry-run) - v3.0.
 
     Checks for:
     - Blueprint name conflicts
-    - Template availability (exists or included in package)
-    - Missing dependencies
+    - Dockerfile project conflicts
+    - Missing Docker images that need to be built
+    - Content Library conflicts
+    - VM image source availability
     """
     if not file.filename or not file.filename.endswith(".zip"):
         raise HTTPException(status_code=400, detail="File must be a ZIP archive")
@@ -256,25 +302,41 @@ async def import_blueprint(
     file: UploadFile = File(...),
     template_conflict_strategy: str = Query(
         default="skip",
-        description="How to handle template conflicts: skip, update, or error"
+        description="(Deprecated) How to handle template conflicts: skip, update, or error"
     ),
     new_name: str = Query(
         default=None,
         description="Rename blueprint on import to avoid name conflicts"
     ),
+    dockerfile_conflict_strategy: str = Query(
+        default="skip",
+        description="How to handle Dockerfile conflicts: skip (use existing), overwrite, or error"
+    ),
+    content_conflict_strategy: str = Query(
+        default="skip",
+        description="How to handle Content Library conflicts: skip, rename, or use_existing"
+    ),
+    build_images: bool = Query(
+        default=True,
+        description="Automatically build Docker images from included Dockerfiles"
+    ),
     db: DBSession = None,
     current_user: CurrentUser = None,
 ):
     """
-    Import a blueprint from a ZIP package.
+    Import a blueprint from a ZIP package (v3.0).
 
     Creates:
-    - Missing VM templates from package
-    - The blueprint with new IDs
+    - Extracted Dockerfiles to /data/images/
+    - Built Docker images and BaseImage records
+    - Imported Content Library items
+    - The blueprint with proper references
 
     Options:
-    - template_conflict_strategy: skip (use existing), update (overwrite), error (fail)
     - new_name: Rename the blueprint to avoid conflicts
+    - dockerfile_conflict_strategy: skip (use existing), overwrite, error
+    - content_conflict_strategy: skip, rename, use_existing
+    - build_images: Auto-build Docker images from Dockerfiles
     """
     if not file.filename or not file.filename.endswith(".zip"):
         raise HTTPException(status_code=400, detail="File must be a ZIP archive")
@@ -289,6 +351,9 @@ async def import_blueprint(
         options = BlueprintImportOptions(
             template_conflict_strategy=template_conflict_strategy,
             new_name=new_name,
+            dockerfile_conflict_strategy=dockerfile_conflict_strategy,
+            content_conflict_strategy=content_conflict_strategy,
+            build_images=build_images,
         )
 
         export_service = get_blueprint_export_service()
