@@ -10,7 +10,7 @@ import asyncio
 import logging
 import os
 import re
-from typing import List, Optional
+from typing import List, Optional, Callable
 
 import docker
 from docker.errors import APIError, NotFound
@@ -165,6 +165,7 @@ class DinDService:
         range_name: Optional[str] = None,
         memory_limit: Optional[str] = None,
         cpu_limit: Optional[float] = None,
+        progress_callback: Optional[Callable[[str], None]] = None,
     ) -> dict:
         """
         Create a DinD container for range isolation.
@@ -174,12 +175,25 @@ class DinDService:
             range_name: Human-readable range name (used in container naming)
             memory_limit: Memory limit (e.g., "8g", "4096m")
             cpu_limit: CPU limit as float (e.g., 4.0 for 4 cores)
+            progress_callback: Optional callback for progress messages
 
         Returns:
             dict with container_name, container_id, mgmt_ip, docker_url
         """
+        def report_progress(msg: str) -> None:
+            if progress_callback:
+                try:
+                    progress_callback(msg)
+                except Exception:
+                    pass
+            logger.info(msg)
+
         # Ensure prerequisites
+        report_progress("Checking DinD image availability...")
         actual_dind_image = await self.ensure_dind_image()
+        report_progress(f"Using DinD image: {actual_dind_image}")
+
+        report_progress("Ensuring ranges network exists...")
         await self.ensure_ranges_network()
 
         # Generate container name: cyroid-range-{name}-{short_id}
@@ -255,7 +269,9 @@ class DinDService:
             container_config["nano_cpus"] = int(cpu_limit * 1e9)
 
         # Create the DinD container
+        report_progress(f"Creating DinD container '{container_name}'...")
         container = self.host_client.containers.run(**container_config)
+        report_progress(f"DinD container '{container_name}' created, getting network info...")
 
         # Get container info including IP
         container.reload()
@@ -277,10 +293,11 @@ class DinDService:
 
         docker_url = f"tcp://{mgmt_ip}:{self.dind_docker_port}"
 
-        logger.info(f"DinD container '{container_name}' created at {mgmt_ip}")
+        report_progress(f"DinD container at {mgmt_ip}, waiting for Docker daemon...")
 
         # Wait for inner Docker daemon to be ready
-        await self._wait_for_docker_ready(docker_url)
+        await self._wait_for_docker_ready(docker_url, progress_callback=progress_callback)
+        report_progress("Docker daemon ready inside DinD container")
 
         return {
             "container_name": container_name,
@@ -368,7 +385,11 @@ class DinDService:
         range_id_str = str(range_id)
         if range_id_str not in self._range_clients:
             logger.debug(f"Creating Docker client for range {range_id} at {docker_url}")
-            self._range_clients[range_id_str] = docker.DockerClient(base_url=docker_url)
+            # Set a longer timeout (10 min) for large image transfers
+            self._range_clients[range_id_str] = docker.DockerClient(
+                base_url=docker_url,
+                timeout=600  # 10 minute timeout for large image operations
+            )
 
         return self._range_clients[range_id_str]
 
@@ -389,7 +410,8 @@ class DinDService:
             self.close_range_client(range_id)
 
     async def _wait_for_docker_ready(
-        self, docker_url: str, timeout: Optional[int] = None
+        self, docker_url: str, timeout: Optional[int] = None,
+        progress_callback: Optional[Callable[[str], None]] = None
     ) -> None:
         """Wait for Docker daemon inside DinD to be ready."""
         timeout = timeout or self.dind_startup_timeout
@@ -404,7 +426,13 @@ class DinDService:
                 return
             except Exception as e:
                 if i % 10 == 0:
-                    logger.debug(f"Waiting for Docker at {docker_url}... ({i}s) - {e}")
+                    msg = f"Waiting for Docker daemon... ({i}s)"
+                    logger.debug(f"{msg} - {e}")
+                    if progress_callback:
+                        try:
+                            progress_callback(msg)
+                        except Exception:
+                            pass
                 await asyncio.sleep(1)
 
         raise TimeoutError(f"Docker daemon not ready at {docker_url} after {timeout}s")

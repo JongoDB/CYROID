@@ -81,11 +81,24 @@ export default function StudentLab() {
     }
   }
 
-  // Handle drag to resize
-  const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    e.preventDefault()
-    setIsDragging(true)
+  // Trigger resize on iframes (for VNC to recalculate dimensions)
+  const triggerIframeResize = useCallback(() => {
+    const iframes = document.querySelectorAll('iframe')
+    iframes.forEach(iframe => {
+      try {
+        iframe.contentWindow?.dispatchEvent(new Event('resize'))
+      } catch {
+        // Cross-origin iframe, can't dispatch event directly
+      }
+    })
+    window.dispatchEvent(new Event('resize'))
   }, [])
+
+  // Trigger resize when walkthrough is collapsed/expanded
+  useEffect(() => {
+    const timer = setTimeout(triggerIframeResize, 150)
+    return () => clearTimeout(timer)
+  }, [isCollapsed, triggerIframeResize])
 
   useEffect(() => {
     if (!isDragging) return
@@ -103,6 +116,8 @@ export default function StudentLab() {
       setIsDragging(false)
       // Save to localStorage
       localStorage.setItem('student-lab-width', walkthroughWidth.toString())
+      // Trigger iframe resize after layout settles
+      setTimeout(triggerIframeResize, 100)
     }
 
     document.addEventListener('mousemove', handleMouseMove)
@@ -112,7 +127,7 @@ export default function StudentLab() {
       document.removeEventListener('mousemove', handleMouseMove)
       document.removeEventListener('mouseup', handleMouseUp)
     }
-  }, [isDragging, walkthroughWidth])
+  }, [isDragging, walkthroughWidth, triggerIframeResize])
 
   if (loading) {
     return (
@@ -174,14 +189,19 @@ export default function StudentLab() {
               />
             </div>
 
-            {/* Resize Handle */}
+            {/* Resize Handle - z-[9999] needed to be above VNC iframe stacking context */}
             <div
-              className={`w-2 flex-shrink-0 cursor-col-resize flex items-center justify-center transition-colors ${
+              className={`w-3 flex-shrink-0 cursor-col-resize flex items-center justify-center transition-colors relative z-[9999] ${
                 isDragging ? 'bg-blue-500' : 'bg-gray-700 hover:bg-blue-500'
               }`}
-              onMouseDown={handleMouseDown}
+              onMouseDown={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                setIsDragging(true)
+              }}
+              style={{ pointerEvents: 'auto' }}
             >
-              <GripVertical className={`w-4 h-4 ${isDragging ? 'text-white' : 'text-gray-500'}`} />
+              <GripVertical className={`w-4 h-4 pointer-events-none ${isDragging ? 'text-white' : 'text-gray-500'}`} />
             </div>
           </>
         )}

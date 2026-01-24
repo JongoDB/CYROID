@@ -140,6 +140,29 @@ export function DeploymentProgress({
           </span>
         </div>
 
+        {/* Stage indicator */}
+        {status.currentStage && status.totalStages && (
+          <div className="mt-3 flex items-center gap-2">
+            <div className="flex gap-1">
+              {Array.from({ length: status.totalStages! }, (_, i) => (
+                <div
+                  key={i}
+                  className={`h-2 w-8 rounded-full transition-all duration-300 ${
+                    i + 1 < status.currentStage!
+                      ? 'bg-green-500'
+                      : i + 1 === status.currentStage!
+                      ? 'bg-blue-500 animate-pulse'
+                      : 'bg-gray-600'
+                  }`}
+                />
+              ))}
+            </div>
+            <span className="text-sm text-blue-300">
+              Stage {status.currentStage}/{status.totalStages}: {status.stageName || 'Processing'}
+            </span>
+          </div>
+        )}
+
         {/* Progress bar */}
         <div className="mt-3">
           <div className="flex items-center justify-between text-sm text-gray-400 mb-1">
@@ -152,6 +175,12 @@ export function DeploymentProgress({
               style={{ width: `${(status.summary.completed / status.summary.total) * 100}%` }}
             />
           </div>
+          {/* Current step message */}
+          {status.currentStep && (
+            <p className="mt-2 text-sm text-blue-300 truncate" title={status.currentStep}>
+              {status.currentStep}
+            </p>
+          )}
         </div>
       </div>
 

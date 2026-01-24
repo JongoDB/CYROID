@@ -274,6 +274,10 @@ export interface DeploymentStatusResponse {
   status: string
   elapsedSeconds: number
   startedAt?: string
+  currentStep?: string  // Latest deployment step message (e.g., image transfer progress)
+  currentStage?: number  // Current deployment stage (1-4)
+  totalStages?: number  // Total number of stages
+  stageName?: string  // Human-readable stage name
   summary: DeploymentSummary
   router?: ResourceStatus
   networks: NetworkStatus[]
@@ -675,6 +679,7 @@ export interface CustomISOStatusResponse {
 export interface ExportRequest {
   include_templates: boolean
   include_msel: boolean
+  include_walkthrough: boolean
   include_artifacts: boolean
   include_snapshots: boolean
   include_docker_images: boolean

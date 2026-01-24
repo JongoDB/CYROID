@@ -214,6 +214,12 @@ def create_range_from_blueprint(
             if fallback_image:
                 base_image_id = fallback_image.id
 
+        # Fallback: lookup by template_name (for seed blueprints and backward compatibility)
+        if not base_image_id and hasattr(vm_config, 'template_name') and vm_config.template_name:
+            fallback_image = db.query(BaseImage).filter(BaseImage.name == vm_config.template_name).first()
+            if fallback_image:
+                base_image_id = fallback_image.id
+
         # Try golden_image_id (no fallback chain yet)
         if vm_config.golden_image_id:
             try:
@@ -256,6 +262,27 @@ def create_range_from_blueprint(
             walkthrough=config.msel.walkthrough,
         )
         db.add(msel)
+
+        # Create Content Library entry for walkthrough if present (for StudentLab support)
+        if config.msel.walkthrough:
+            from cyroid.models.content import Content, ContentType
+
+            # Create new Content entry for this range's walkthrough
+            # Note: Each range gets its own content entry to allow independent editing
+            walkthrough_title = config.msel.walkthrough.get('title', f"{range_obj.name} - Student Guide")
+            content = Content(
+                title=walkthrough_title,
+                description=f"Auto-generated from blueprint deployment",
+                content_type=ContentType.STUDENT_GUIDE,
+                body_markdown="",
+                walkthrough_data=config.msel.walkthrough,
+                created_by_id=created_by,
+                tags=["auto-generated", "blueprint-walkthrough"],
+                is_published=True,
+            )
+            db.add(content)
+            db.flush()
+            range_obj.student_guide_id = content.id
 
     db.flush()
     return range_obj

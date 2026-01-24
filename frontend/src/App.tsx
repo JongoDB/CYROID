@@ -3,6 +3,7 @@ import { Routes, Route } from 'react-router-dom'
 import { useEffect } from 'react'
 import { useAuthStore } from './stores/authStore'
 import { useSystemStore } from './stores/systemStore'
+import { NotificationProvider } from './providers/NotificationProvider'
 import Login from './pages/Login'
 import Register from './pages/Register'
 import Dashboard from './pages/Dashboard'
@@ -41,9 +42,10 @@ function App() {
   }, [fetchSystemInfo])
 
   return (
-    <Routes>
-      <Route path="/login" element={<Login />} />
-      <Route path="/register" element={<Register />} />
+    <NotificationProvider>
+      <Routes>
+        <Route path="/login" element={<Login />} />
+        <Route path="/register" element={<Register />} />
       {/* Standalone console - protected but no layout (for pop-out windows) */}
       <Route
         path="/console/:vmId"
@@ -90,7 +92,8 @@ function App() {
           </ProtectedRoute>
         }
       />
-    </Routes>
+      </Routes>
+    </NotificationProvider>
   )
 }
 

@@ -71,15 +71,35 @@ def get_traefik_route_service():
 
 def compute_deployment_status(range_obj, events: list) -> DeploymentStatusResponse:
     """Compute per-resource deployment status from events."""
+    import re
     from datetime import timezone
     from cyroid.models.event_log import EventLog
 
-    # Find deployment start time
+    # Stage names for human-readable display
+    STAGE_NAMES = {
+        1: "Creating DinD Container",
+        2: "Creating Networks",
+        3: "Transferring Images",
+        4: "Creating VMs",
+    }
+
+    # Find deployment start time and track latest step message
     started_at = None
+    current_step = None
+    current_stage = None
+    total_stages = 4  # Default to 4 stages
+
     for event in events:
         if event.event_type == EventType.DEPLOYMENT_STARTED:
             started_at = event.created_at
-            break
+        # Track deployment_step events for current progress message
+        elif event.event_type == EventType.DEPLOYMENT_STEP:
+            current_step = event.message
+            # Extract stage info from message like "[Stage 2/4] Creating networks..."
+            stage_match = re.match(r'\[Stage (\d+)/(\d+)\]', event.message)
+            if stage_match:
+                current_stage = int(stage_match.group(1))
+                total_stages = int(stage_match.group(2))
 
     # Track timestamps for duration calculation
     resource_start_times = {}
@@ -179,6 +199,10 @@ def compute_deployment_status(range_obj, events: list) -> DeploymentStatusRespon
         status=range_obj.status.value if hasattr(range_obj.status, 'value') else range_obj.status,
         elapsed_seconds=elapsed_seconds,
         started_at=started_at.isoformat() if started_at else None,
+        current_step=current_step,
+        current_stage=current_stage,
+        total_stages=total_stages,
+        stage_name=STAGE_NAMES.get(current_stage) if current_stage else None,
         summary=summary,
         router=router_status,
         networks=list(network_statuses.values()),
@@ -422,9 +446,14 @@ async def validate_range_deployment(
 
 @router.post("/{range_id}/deploy", response_model=RangeResponse)
 def deploy_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
-    """Deploy a range using DinD isolation - creates isolated Docker environment with networks and VMs"""
-    from cyroid.services.range_deployment_service import get_range_deployment_service
+    """Deploy a range using DinD isolation - creates isolated Docker environment with networks and VMs.
+
+    This endpoint returns immediately after validation and dispatches deployment
+    to a background worker. Use GET /ranges/{range_id}/deployment-status to poll
+    for real-time progress updates.
+    """
     from cyroid.services.deployment_validator import DeploymentValidator
+    from cyroid.tasks.deployment import deploy_range_task
     import asyncio
 
     range_obj = db.query(Range).filter(Range.id == range_id).first()
@@ -457,73 +486,15 @@ def deploy_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
             }
         )
 
+    # Set status to DEPLOYING immediately
     range_obj.status = RangeStatus.DEPLOYING
     range_obj.error_message = None  # Clear any previous error
     db.commit()
 
-    # Initialize event service for progress logging
-    event_service = EventService(db)
-    networks = db.query(Network).filter(Network.range_id == range_id).all()
-    vms = db.query(VM).filter(VM.range_id == range_id).all()
-
-    # Log deployment start
-    event_service.log_event(
-        range_id=range_id,
-        event_type=EventType.DEPLOYMENT_STARTED,
-        message=f"Starting DinD deployment of range '{range_obj.name}'",
-        user_id=current_user.id,
-        extra_data=json.dumps({
-            "total_networks": len(networks),
-            "total_vms": len(vms),
-            "isolation": "dind"
-        })
-    )
-
-    try:
-        # Use the new DinD-based deployment service
-        deployment_service = get_range_deployment_service()
-
-        # Run async deployment synchronously
-        result = asyncio.run(deployment_service.deploy_range(db, range_id))
-        logger.info(f"DinD deployment completed for range {range_id}: {result}")
-
-        # Refresh range object to get updated status
-        db.refresh(range_obj)
-
-        # Log deployment completion
-        event_service.log_event(
-            range_id=range_id,
-            event_type=EventType.DEPLOYMENT_COMPLETED,
-            message=f"Range '{range_obj.name}' deployed successfully with DinD isolation",
-            user_id=current_user.id,
-            extra_data=json.dumps({
-                "networks_deployed": len(networks),
-                "vms_deployed": len(vms),
-                "dind_container_id": range_obj.dind_container_id
-            })
-        )
-
-    except Exception as e:
-        import traceback
-        logger.error(f"Failed to deploy range {range_id}: {type(e).__name__}: {e}")
-        logger.error(f"Full traceback:\n{traceback.format_exc()}")
-        range_obj.status = RangeStatus.ERROR
-        range_obj.error_message = str(e)[:1000]
-        db.commit()
-
-        # Log deployment failure
-        event_service.log_event(
-            range_id=range_id,
-            event_type=EventType.DEPLOYMENT_FAILED,
-            message=f"Deployment failed: {str(e)[:200]}",
-            user_id=current_user.id,
-            extra_data=json.dumps({"error": str(e)})
-        )
-
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to deploy range: {str(e)}",
-        )
+    # Dispatch deployment to background worker
+    # The worker will log DEPLOYMENT_STARTED and handle all progress events
+    logger.info(f"Dispatching deployment for range {range_id} to background worker")
+    deploy_range_task.send(str(range_id))
 
     return range_obj
 

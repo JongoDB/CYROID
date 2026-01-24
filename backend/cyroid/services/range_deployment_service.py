@@ -22,6 +22,8 @@ from cyroid.models.template import VMType
 from cyroid.models.base_image import BaseImage
 from cyroid.models.golden_image import GoldenImage
 from cyroid.models.snapshot import Snapshot
+from cyroid.models.event_log import EventType
+from cyroid.services.event_service import EventService
 from cyroid.services.dind_service import DinDService, get_dind_service
 from cyroid.services.docker_service import DockerService, get_docker_service
 from cyroid.services.traefik_route_service import get_traefik_route_service
@@ -123,19 +125,53 @@ class RangeDeploymentService:
     ) -> Dict[str, Any]:
         """Deploy range inside a DinD container."""
         range_id = str(range_obj.id)
+        range_uuid = range_obj.id
 
         logger.info(f"Deploying range {range_id} with DinD isolation")
+
+        # Initialize event service for progress logging
+        event_service = EventService(db)
 
         # Use default limits if not specified
         memory_limit = memory_limit or getattr(settings, "range_default_memory", "8g")
         cpu_limit = cpu_limit or getattr(settings, "range_default_cpu", 4.0)
 
-        # 1. Create DinD container
+        # Define deployment stages for progress tracking
+        total_stages = 4
+        current_stage = 1
+
+        # 1. Create DinD container with progress reporting
+        event_service.log_event(
+            range_id=range_uuid,
+            event_type=EventType.DEPLOYMENT_STEP,
+            message=f"[Stage {current_stage}/{total_stages}] Creating DinD container...",
+        )
+        event_service.log_event(
+            range_id=range_uuid,
+            event_type=EventType.ROUTER_CREATING,
+            message="Creating DinD container for range isolation...",
+        )
+
+        def dind_progress_callback(msg: str) -> None:
+            """Report DinD creation progress as deployment step events."""
+            event_service.log_event(
+                range_id=range_uuid,
+                event_type=EventType.DEPLOYMENT_STEP,
+                message=msg,
+            )
+
         dind_info = await self.dind_service.create_range_container(
             range_id=range_id,
             range_name=range_obj.name,
             memory_limit=memory_limit,
             cpu_limit=cpu_limit,
+            progress_callback=dind_progress_callback,
+        )
+
+        event_service.log_event(
+            range_id=range_uuid,
+            event_type=EventType.ROUTER_CREATED,
+            message=f"DinD container ready at {dind_info['mgmt_ip']}",
         )
 
         # Store DinD info in range
@@ -148,10 +184,25 @@ class RangeDeploymentService:
         docker_url = dind_info["docker_url"]
 
         # 2. Create networks inside DinD
+        current_stage = 2
         networks = db.query(Network).filter(Network.range_id == range_obj.id).all()
         network_ids = {}
 
+        if networks:
+            event_service.log_event(
+                range_id=range_uuid,
+                event_type=EventType.DEPLOYMENT_STEP,
+                message=f"[Stage {current_stage}/{total_stages}] Creating {len(networks)} network(s)...",
+            )
+
         for network in networks:
+            event_service.log_event(
+                range_id=range_uuid,
+                event_type=EventType.NETWORK_CREATING,
+                message=f"Creating network '{network.name}' ({network.subnet})...",
+                network_id=network.id,
+            )
+
             labels = {
                 "cyroid.range_id": range_id,
                 "cyroid.network_id": str(network.id),
@@ -170,6 +221,13 @@ class RangeDeploymentService:
             network.docker_network_id = network_docker_id
             network_ids[str(network.id)] = network_docker_id
 
+            event_service.log_event(
+                range_id=range_uuid,
+                event_type=EventType.NETWORK_CREATED,
+                message=f"Network '{network.name}' created",
+                network_id=network.id,
+            )
+
         db.commit()
 
         # 2b. Set up iptables network isolation inside DinD
@@ -187,6 +245,7 @@ class RangeDeploymentService:
         )
 
         # 3. Pull required images into DinD
+        current_stage = 3
         vms = db.query(VM).filter(VM.range_id == range_obj.id).all()
         unique_images = set()
         for vm in vms:
@@ -210,109 +269,271 @@ class RangeDeploymentService:
                     if image_tag:
                         unique_images.add(image_tag)
 
-        for image in unique_images:
+        if unique_images:
+            event_service.log_event(
+                range_id=range_uuid,
+                event_type=EventType.DEPLOYMENT_STEP,
+                message=f"[Stage {current_stage}/{total_stages}] Transferring {len(unique_images)} image(s) to DinD...",
+            )
+
+        for idx, image in enumerate(unique_images, 1):
+            # Create a progress callback that emits events for this image
+            last_status = [None]  # Use list to allow modification in closure
+            last_pct = [0]  # Track last reported percentage
+
+            def image_progress_callback(transferred: int, total: int, status: str) -> None:
+                # Handle percentage progress updates (format: 'transferring:XX')
+                if status.startswith('transferring:'):
+                    pct = int(status.split(':')[1])
+                    # Emit progress on every update (every 2 seconds) to keep GUI responsive
+                    if pct > last_pct[0]:
+                        last_pct[0] = pct
+                        size_mb = total / 1024 / 1024
+                        transferred_mb = transferred / 1024 / 1024
+                        event_service.log_event(
+                            range_id=range_uuid,
+                            event_type=EventType.DEPLOYMENT_STEP,
+                            message=f"Transferring {image}: {pct}% ({transferred_mb:.0f}/{size_mb:.0f} MB)",
+                        )
+                    return
+
+                # Only emit event if status changed (avoid spamming)
+                if status != last_status[0]:
+                    last_status[0] = status
+                    if status == 'found_on_host':
+                        size_mb = total / 1024 / 1024
+                        event_service.log_event(
+                            range_id=range_uuid,
+                            event_type=EventType.DEPLOYMENT_STEP,
+                            message=f"Image {idx}/{len(unique_images)}: {image} found on host ({size_mb:.1f} MB)",
+                        )
+                    elif status == 'transferring':
+                        event_service.log_event(
+                            range_id=range_uuid,
+                            event_type=EventType.DEPLOYMENT_STEP,
+                            message=f"Copying {image} into DinD container (0%)...",
+                        )
+                    elif status == 'already_exists':
+                        event_service.log_event(
+                            range_id=range_uuid,
+                            event_type=EventType.DEPLOYMENT_STEP,
+                            message=f"Image {image} already in DinD, skipping",
+                        )
+                    elif status == 'pulling_to_host':
+                        event_service.log_event(
+                            range_id=range_uuid,
+                            event_type=EventType.DEPLOYMENT_STEP,
+                            message=f"Pulling {image} from registry to host...",
+                        )
+
             try:
                 await self.docker_service.pull_image_to_dind(
                     range_id=range_id,
                     docker_url=docker_url,
                     image=image,
+                    progress_callback=image_progress_callback,
+                )
+                event_service.log_event(
+                    range_id=range_uuid,
+                    event_type=EventType.DEPLOYMENT_STEP,
+                    message=f"Image {idx}/{len(unique_images)} ready: {image}",
                 )
             except Exception as e:
-                logger.warning(f"Could not pull image {image} into DinD: {e}")
+                error_msg = f"Failed to transfer image {image}: {e}"
+                logger.error(error_msg)
+                event_service.log_event(
+                    range_id=range_uuid,
+                    event_type=EventType.DEPLOYMENT_STEP,
+                    message=f"ERROR: {error_msg}",
+                )
+                # Re-raise to fail the deployment with a clear message
+                raise RuntimeError(error_msg) from e
 
         # 4. Create VMs inside DinD
-        for vm in vms:
-            # Determine container image from Image Library or legacy template/snapshot
-            container_image = None
-            if vm.base_image_id and vm.base_image:
-                # New Image Library: Base Image
-                if vm.base_image.image_type == "container":
-                    container_image = vm.base_image.docker_image_tag or vm.base_image.docker_image_id
-                else:
-                    logger.warning(f"VM {vm.hostname} uses ISO-based base image, not supported in DinD yet")
+        current_stage = 4
+        total_vms = len(vms)
+
+        if total_vms > 0:
+            event_service.log_event(
+                range_id=range_uuid,
+                event_type=EventType.DEPLOYMENT_STEP,
+                message=f"[Stage {current_stage}/{total_stages}] Creating {total_vms} VM(s)...",
+            )
+
+        failed_vms = []
+        for vm_idx, vm in enumerate(vms, 1):
+            try:
+                event_service.log_event(
+                    range_id=range_uuid,
+                    event_type=EventType.VM_CREATING,
+                    message=f"Creating VM {vm_idx}/{total_vms}: '{vm.hostname}' ({vm.ip_address})...",
+                    vm_id=vm.id,
+                )
+
+                # Determine container image from Image Library or legacy template/snapshot
+                container_image = None
+                if vm.base_image_id and vm.base_image:
+                    # New Image Library: Base Image
+                    if vm.base_image.image_type == "container":
+                        container_image = vm.base_image.docker_image_tag or vm.base_image.docker_image_id
+                    else:
+                        error_msg = f"VM {vm.hostname} uses ISO-based base image, not supported in DinD yet"
+                        logger.warning(error_msg)
+                        vm.status = VMStatus.ERROR
+                        vm.error_message = error_msg
+                        event_service.log_event(
+                            range_id=range_uuid,
+                            event_type=EventType.VM_ERROR,
+                            message=error_msg,
+                            vm_id=vm.id,
+                        )
+                        failed_vms.append(vm.hostname)
+                        continue
+                elif vm.golden_image_id and vm.golden_image:
+                    # New Image Library: Golden Image
+                    container_image = vm.golden_image.docker_image_tag or vm.golden_image.docker_image_id
+                elif vm.snapshot_id and vm.snapshot:
+                    # Snapshot
+                    container_image = vm.snapshot.docker_image_tag or vm.snapshot.docker_image_id
+
+                if not container_image:
+                    error_msg = f"VM {vm.hostname} has no container image configured"
+                    logger.warning(error_msg)
+                    vm.status = VMStatus.ERROR
+                    vm.error_message = error_msg
+                    event_service.log_event(
+                        range_id=range_uuid,
+                        event_type=EventType.VM_ERROR,
+                        message=error_msg,
+                        vm_id=vm.id,
+                    )
+                    failed_vms.append(vm.hostname)
                     continue
-            elif vm.golden_image_id and vm.golden_image:
-                # New Image Library: Golden Image
-                container_image = vm.golden_image.docker_image_tag or vm.golden_image.docker_image_id
-            elif vm.snapshot_id and vm.snapshot:
-                # Snapshot
-                container_image = vm.snapshot.docker_image_tag or vm.snapshot.docker_image_id
 
-            if not container_image:
-                logger.warning(f"VM {vm.hostname} has no container image, skipping")
-                continue
+                network = db.query(Network).filter(Network.id == vm.network_id).first()
+                if not network:
+                    error_msg = f"VM {vm.hostname} has no network assigned"
+                    logger.warning(error_msg)
+                    vm.status = VMStatus.ERROR
+                    vm.error_message = error_msg
+                    event_service.log_event(
+                        range_id=range_uuid,
+                        event_type=EventType.VM_ERROR,
+                        message=error_msg,
+                        vm_id=vm.id,
+                    )
+                    failed_vms.append(vm.hostname)
+                    continue
 
-            network = db.query(Network).filter(Network.id == vm.network_id).first()
-            if not network:
-                logger.warning(f"VM {vm.hostname} has no network, skipping")
-                continue
-
-            labels = {
-                "cyroid.range_id": range_id,
-                "cyroid.vm_id": str(vm.id),
-            }
-
-            # Set up environment variables based on image type
-            environment = {}
-            privileged = False
-
-            # macOS VM (dockur/macos) - requires VERSION env and privileged mode for KVM
-            if "dockur/macos" in container_image.lower():
-                # Map version number to dockur version name
-                macos_version_map = {
-                    "15": "sequoia",
-                    "14": "sonoma",
-                    "13": "ventura",
-                    "12": "monterey",
-                    "11": "big-sur",
+                labels = {
+                    "cyroid.range_id": range_id,
+                    "cyroid.vm_id": str(vm.id),
                 }
-                version_name = macos_version_map.get(vm.macos_version, "sonoma")  # Default to Sonoma
-                environment["VERSION"] = version_name
-                privileged = True  # Required for KVM access
-                labels["cyroid.vm_type"] = "macos"
 
-            # Windows VM (dockur/windows) - set VERSION if specified
-            elif "dockur/windows" in container_image.lower():
-                if vm.windows_version:
-                    environment["VERSION"] = vm.windows_version
-                privileged = True  # Required for KVM access
-                labels["cyroid.vm_type"] = "windows"
+                # Set up environment variables based on image type
+                environment = {}
+                privileged = False
 
-            # Linux VM (qemux/qemu) - uses VERSION for distro
-            elif "qemux/qemu" in container_image.lower():
-                privileged = True  # Required for KVM access
-                labels["cyroid.vm_type"] = "linux"
+                # macOS VM (dockur/macos) - requires VERSION env and privileged mode for KVM
+                if "dockur/macos" in container_image.lower():
+                    # Map version number to dockur version name
+                    macos_version_map = {
+                        "15": "sequoia",
+                        "14": "sonoma",
+                        "13": "ventura",
+                        "12": "monterey",
+                        "11": "big-sur",
+                    }
+                    version_name = macos_version_map.get(vm.macos_version, "sonoma")  # Default to Sonoma
+                    environment["VERSION"] = version_name
+                    privileged = True  # Required for KVM access
+                    labels["cyroid.vm_type"] = "macos"
 
-            container_id = await self.docker_service.create_range_container_dind(
-                range_id=range_id,
-                docker_url=docker_url,
-                name=vm.hostname,
-                image=container_image,
-                network_name=network.name,
-                ip_address=vm.ip_address,
-                cpu_limit=vm.cpu or 2,
-                memory_limit_mb=vm.ram_mb or 2048,
-                hostname=vm.hostname,
-                labels=labels,
-                dns_servers=network.dns_servers,
-                dns_search=network.dns_search,
-                environment=environment if environment else None,
-                privileged=privileged,
-            )
+                # Windows VM (dockur/windows) - set VERSION if specified
+                elif "dockur/windows" in container_image.lower():
+                    if vm.windows_version:
+                        environment["VERSION"] = vm.windows_version
+                    privileged = True  # Required for KVM access
+                    labels["cyroid.vm_type"] = "windows"
 
-            vm.container_id = container_id
+                # Linux VM (qemux/qemu) - uses VERSION for distro
+                elif "qemux/qemu" in container_image.lower():
+                    privileged = True  # Required for KVM access
+                    labels["cyroid.vm_type"] = "linux"
 
-            # Start the container
-            await self.docker_service.start_range_container_dind(
-                range_id=range_id,
-                docker_url=docker_url,
-                container_id=container_id,
-            )
+                event_service.log_event(
+                    range_id=range_uuid,
+                    event_type=EventType.DEPLOYMENT_STEP,
+                    message=f"Creating container for '{vm.hostname}' using image {container_image}...",
+                    vm_id=vm.id,
+                )
 
-            # Mark VM as running after successful start (Issue #75)
-            vm.status = VMStatus.RUNNING
+                container_id = await self.docker_service.create_range_container_dind(
+                    range_id=range_id,
+                    docker_url=docker_url,
+                    name=vm.hostname,
+                    image=container_image,
+                    network_name=network.name,
+                    ip_address=vm.ip_address,
+                    cpu_limit=vm.cpu or 2,
+                    memory_limit_mb=vm.ram_mb or 2048,
+                    hostname=vm.hostname,
+                    labels=labels,
+                    dns_servers=network.dns_servers,
+                    dns_search=network.dns_search,
+                    environment=environment if environment else None,
+                    privileged=privileged,
+                )
+
+                vm.container_id = container_id
+
+                event_service.log_event(
+                    range_id=range_uuid,
+                    event_type=EventType.DEPLOYMENT_STEP,
+                    message=f"Container created for '{vm.hostname}', starting...",
+                    vm_id=vm.id,
+                )
+
+                # Start the container
+                await self.docker_service.start_range_container_dind(
+                    range_id=range_id,
+                    docker_url=docker_url,
+                    container_id=container_id,
+                )
+
+                # Mark VM as running after successful start (Issue #75)
+                vm.status = VMStatus.RUNNING
+
+                event_service.log_event(
+                    range_id=range_uuid,
+                    event_type=EventType.VM_STARTED,
+                    message=f"VM '{vm.hostname}' running on {network.name} ({vm.ip_address})",
+                    vm_id=vm.id,
+                )
+
+            except Exception as e:
+                # Log VM-specific error and continue with other VMs
+                error_msg = f"Failed to create VM '{vm.hostname}': {str(e)[:200]}"
+                logger.error(error_msg)
+                vm.status = VMStatus.ERROR
+                vm.error_message = str(e)[:500]
+                event_service.log_event(
+                    range_id=range_uuid,
+                    event_type=EventType.VM_ERROR,
+                    message=error_msg,
+                    vm_id=vm.id,
+                )
+                failed_vms.append(vm.hostname)
 
         db.commit()
+
+        # Log summary if some VMs failed
+        if failed_vms:
+            event_service.log_event(
+                range_id=range_uuid,
+                event_type=EventType.DEPLOYMENT_STEP,
+                message=f"Warning: {len(failed_vms)} VM(s) failed to create: {', '.join(failed_vms)}",
+            )
 
         # 5. Set up VNC port forwarding using iptables DNAT (replaces nginx proxy)
         vm_ports = []
@@ -351,6 +572,11 @@ class RangeDeploymentService:
                 })
 
         if vm_ports:
+            event_service.log_event(
+                range_id=range_uuid,
+                event_type=EventType.DEPLOYMENT_STEP,
+                message=f"Setting up VNC console access for {len(vm_ports)} VM(s)...",
+            )
             try:
                 port_mappings = await self.dind_service.setup_vnc_port_forwarding(
                     range_id=range_id,
