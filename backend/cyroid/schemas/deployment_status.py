@@ -32,6 +32,7 @@ class DeploymentStatusResponse(BaseModel):
     status: str
     elapsed_seconds: int
     started_at: Optional[str] = None
+    current_step: Optional[str] = None  # Latest deployment step message (e.g., image transfer progress)
     summary: DeploymentSummary
     router: Optional[ResourceStatus] = None
     networks: List[NetworkStatus]
