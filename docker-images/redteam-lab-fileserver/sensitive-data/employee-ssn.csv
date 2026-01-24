@@ -1,0 +1,5 @@
+employee_id,full_name,ssn,salary
+EMP001,John Smith,123-45-6789,$85000
+EMP002,Mary Williams,234-56-7890,$72000
+EMP003,Bob Johnson,345-67-8901,$95000
+EMP004,Alice Brown,456-78-9012,$68000
