@@ -214,6 +214,12 @@ def create_range_from_blueprint(
             if fallback_image:
                 base_image_id = fallback_image.id
 
+        # Fallback: lookup by template_name (for seed blueprints and backward compatibility)
+        if not base_image_id and hasattr(vm_config, 'template_name') and vm_config.template_name:
+            fallback_image = db.query(BaseImage).filter(BaseImage.name == vm_config.template_name).first()
+            if fallback_image:
+                base_image_id = fallback_image.id
+
         # Try golden_image_id (no fallback chain yet)
         if vm_config.golden_image_id:
             try:
