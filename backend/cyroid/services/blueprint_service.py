@@ -283,7 +283,7 @@ def create_range_from_blueprint(
                     content_type=ContentType.STUDENT_GUIDE,
                     body_markdown="",
                     walkthrough_data=config.msel.walkthrough,
-                    created_by=created_by,
+                    created_by_id=created_by,
                     tags=[f"walkthrough_hash:{content_hash}", "auto-generated"],
                     is_published=True,
                 )

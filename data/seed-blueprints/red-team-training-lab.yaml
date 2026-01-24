@@ -31,9 +31,9 @@ networks:
     is_isolated: true
 
 vms:
-  # Attack box
+  # Attack box - Uses Kali desktop image
   - hostname: kali
-    template_name: "Red Team - Kali Attack Box"
+    template_name: "kali-rolling-desktop"
     network_name: internet
     ip_address: "172.16.0.10"
     cpu: 4
@@ -42,9 +42,9 @@ vms:
     position_x: 100
     position_y: 200
 
-  # C2 Redirectors
+  # C2 Redirectors - Uses lightweight Alpine
   - hostname: redir1
-    template_name: "Red Team - Redirector"
+    template_name: "alpine"
     network_name: internet
     ip_address: "172.16.0.20"
     cpu: 1
@@ -54,7 +54,7 @@ vms:
     position_y: 100
 
   - hostname: redir2
-    template_name: "Red Team - Redirector"
+    template_name: "alpine"
     network_name: internet
     ip_address: "172.16.0.21"
     cpu: 1
@@ -63,9 +63,9 @@ vms:
     position_x: 100
     position_y: 300
 
-  # DMZ - Web server (primary in DMZ, also on internet for attacker access)
+  # DMZ - Web server with WordPress
   - hostname: webserver
-    template_name: "Red Team - WordPress Target"
+    template_name: "redteam-lab-wordpress"
     network_name: dmz
     ip_address: "172.16.1.10"
     cpu: 2
@@ -76,7 +76,7 @@ vms:
 
   # Internal network - Domain Controller
   - hostname: dc01
-    template_name: "Samba DC"
+    template_name: "samba-dc"
     network_name: internal
     ip_address: "172.16.2.10"
     cpu: 2
@@ -87,7 +87,7 @@ vms:
 
   # Internal network - File Server
   - hostname: fileserver
-    template_name: "Red Team - File Server"
+    template_name: "redteam-lab-fileserver"
     network_name: internal
     ip_address: "172.16.2.20"
     cpu: 1
@@ -98,7 +98,7 @@ vms:
 
   # Internal network - Victim Workstation
   - hostname: ws01
-    template_name: "Red Team - Victim Workstation"
+    template_name: "redteam-lab-workstation"
     network_name: internal
     ip_address: "172.16.2.30"
     cpu: 1
