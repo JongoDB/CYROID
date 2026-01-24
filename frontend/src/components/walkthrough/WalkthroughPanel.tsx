@@ -143,7 +143,7 @@ export function WalkthroughPanel({ rangeId, walkthrough, onOpenVM, onCollapse }:
   return (
     <div className="h-full flex flex-col bg-gray-800 border-r border-gray-700">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 bg-gray-800 border-b border-gray-700">
+      <div className="flex items-center justify-between px-4 py-3 bg-gray-800 border-b border-gray-700 relative z-10">
         <div className="flex items-center gap-2">
           <BookOpen className="w-5 h-5 text-blue-400" />
           <h1 className="font-semibold text-white">{walkthrough.title}</h1>
@@ -151,7 +151,7 @@ export function WalkthroughPanel({ rangeId, walkthrough, onOpenVM, onCollapse }:
         {onCollapse && (
           <button
             onClick={onCollapse}
-            className="p-1 text-gray-400 hover:text-white"
+            className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded transition-colors"
           >
             <X className="w-5 h-5" />
           </button>

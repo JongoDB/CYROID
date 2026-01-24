@@ -176,18 +176,18 @@ export default function StudentLab() {
 
             {/* Resize Handle */}
             <div
-              className={`w-2 flex-shrink-0 cursor-col-resize flex items-center justify-center transition-colors ${
+              className={`w-3 flex-shrink-0 cursor-col-resize flex items-center justify-center transition-colors relative z-20 ${
                 isDragging ? 'bg-blue-500' : 'bg-gray-700 hover:bg-blue-500'
               }`}
               onMouseDown={handleMouseDown}
             >
-              <GripVertical className={`w-4 h-4 ${isDragging ? 'text-white' : 'text-gray-500'}`} />
+              <GripVertical className={`w-4 h-4 pointer-events-none ${isDragging ? 'text-white' : 'text-gray-500'}`} />
             </div>
           </>
         )}
 
         {/* Console Panel - VNC on the right */}
-        <div className="flex-1 h-full flex flex-col relative bg-gray-900 min-w-0">
+        <div className="flex-1 h-full flex flex-col relative bg-gray-900 min-w-0 overflow-hidden">
           {/* Expand button when collapsed */}
           {isCollapsed && (
             <button
