@@ -174,14 +174,19 @@ export default function StudentLab() {
               />
             </div>
 
-            {/* Resize Handle */}
+            {/* Resize Handle - z-[9999] needed to be above VNC iframe stacking context */}
             <div
-              className={`w-2 flex-shrink-0 cursor-col-resize flex items-center justify-center transition-colors ${
+              className={`w-3 flex-shrink-0 cursor-col-resize flex items-center justify-center transition-colors relative z-[9999] ${
                 isDragging ? 'bg-blue-500' : 'bg-gray-700 hover:bg-blue-500'
               }`}
-              onMouseDown={handleMouseDown}
+              onMouseDown={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                setIsDragging(true)
+              }}
+              style={{ pointerEvents: 'auto' }}
             >
-              <GripVertical className={`w-4 h-4 ${isDragging ? 'text-white' : 'text-gray-500'}`} />
+              <GripVertical className={`w-4 h-4 pointer-events-none ${isDragging ? 'text-white' : 'text-gray-500'}`} />
             </div>
           </>
         )}
