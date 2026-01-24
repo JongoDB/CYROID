@@ -274,6 +274,7 @@ export interface DeploymentStatusResponse {
   status: string
   elapsedSeconds: number
   startedAt?: string
+  currentStep?: string  // Latest deployment step message (e.g., image transfer progress)
   summary: DeploymentSummary
   router?: ResourceStatus
   networks: NetworkStatus[]
