@@ -1,6 +1,5 @@
 // frontend/src/components/walkthrough/ProgressBar.tsx
-import { Save, Cloud } from 'lucide-react'
-import clsx from 'clsx'
+import { Cloud, Check } from 'lucide-react'
 
 interface ProgressBarProps {
   completed: number
@@ -10,7 +9,7 @@ interface ProgressBarProps {
   onSave: () => void
 }
 
-export function ProgressBar({ completed, total, isDirty, isSyncing, onSave }: ProgressBarProps) {
+export function ProgressBar({ completed, total, isDirty, isSyncing }: ProgressBarProps) {
   const percent = total > 0 ? Math.round((completed / total) * 100) : 0
 
   return (
@@ -28,33 +27,21 @@ export function ProgressBar({ completed, total, isDirty, isSyncing, onSave }: Pr
         </div>
       </div>
 
-      <button
-        onClick={onSave}
-        disabled={isSyncing || !isDirty}
-        className={clsx(
-          'flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium transition-colors',
-          isDirty
-            ? 'bg-blue-600 text-white hover:bg-blue-700'
-            : 'bg-gray-700 text-gray-400'
-        )}
-      >
+      {/* Subtle auto-save status indicator */}
+      <div className="flex items-center gap-1 text-xs text-gray-500">
         {isSyncing ? (
           <>
-            <Cloud className="w-4 h-4 animate-pulse" />
-            <span>Saving...</span>
+            <Cloud className="w-3.5 h-3.5 animate-pulse text-blue-400" />
+            <span className="text-blue-400">Saving...</span>
           </>
         ) : isDirty ? (
-          <>
-            <Save className="w-4 h-4" />
-            <span>Save Progress</span>
-          </>
+          <span className="text-gray-500">•</span>
         ) : (
           <>
-            <Cloud className="w-4 h-4" />
-            <span>Saved</span>
+            <Check className="w-3.5 h-3.5 text-green-500" />
           </>
         )}
-      </button>
+      </div>
     </div>
   )
 }

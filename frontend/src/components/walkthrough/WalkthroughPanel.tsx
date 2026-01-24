@@ -1,6 +1,6 @@
 // frontend/src/components/walkthrough/WalkthroughPanel.tsx
-import { useState, useEffect, useCallback, useMemo } from 'react'
-import { ChevronLeft, ChevronRight, BookOpen, X } from 'lucide-react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { ChevronLeft, ChevronRight, BookOpen, X, Check } from 'lucide-react'
 import { Walkthrough } from '../../types'
 import { walkthroughApi } from '../../services/api'
 import { PhaseNav } from './PhaseNav'
@@ -16,7 +16,7 @@ interface WalkthroughPanelProps {
 }
 
 const STORAGE_KEY_PREFIX = 'cyroid_walkthrough_'
-const SYNC_INTERVAL_MS = 5 * 60 * 1000 // 5 minutes
+const SYNC_DEBOUNCE_MS = 3000 // 3 seconds after last change
 
 export function WalkthroughPanel({ rangeId, walkthrough, onOpenVM, onCollapse }: WalkthroughPanelProps) {
   const [currentPhase, setCurrentPhase] = useState(walkthrough.phases[0]?.id || '')
@@ -24,6 +24,14 @@ export function WalkthroughPanel({ rangeId, walkthrough, onOpenVM, onCollapse }:
   const [completedSteps, setCompletedSteps] = useState<Set<string>>(new Set())
   const [isDirty, setIsDirty] = useState(false)
   const [isSyncing, setIsSyncing] = useState(false)
+  const contentRef = useRef<HTMLDivElement>(null)
+
+  // Scroll to top when step changes
+  useEffect(() => {
+    if (contentRef.current) {
+      contentRef.current.scrollTo({ top: 0, behavior: 'instant' })
+    }
+  }, [currentStep])
 
   // Load from localStorage on mount
   useEffect(() => {
@@ -76,13 +84,13 @@ export function WalkthroughPanel({ rangeId, walkthrough, onOpenVM, onCollapse }:
     }
   }, [rangeId, completedSteps, currentPhase, currentStep])
 
-  // Auto-sync to server
+  // Auto-sync to server with debounce (saves 3 seconds after last change)
   useEffect(() => {
     if (!isDirty) return
-    const timer = setInterval(() => {
-      if (isDirty) syncToServer()
-    }, SYNC_INTERVAL_MS)
-    return () => clearInterval(timer)
+    const timer = setTimeout(() => {
+      syncToServer()
+    }, SYNC_DEBOUNCE_MS)
+    return () => clearTimeout(timer)
   }, [isDirty, syncToServer])
 
   const currentPhaseData = walkthrough.phases.find(p => p.id === currentPhase)
@@ -120,11 +128,45 @@ export function WalkthroughPanel({ rangeId, walkthrough, onOpenVM, onCollapse }:
     setIsDirty(true)
   }
 
-  const navigateStep = (direction: 'prev' | 'next') => {
-    const allSteps = walkthrough.phases.flatMap(p => p.steps.map(s => ({ ...s, phaseId: p.id })))
-    const currentIndex = allSteps.findIndex(s => s.id === currentStep)
-    const newIndex = direction === 'next' ? currentIndex + 1 : currentIndex - 1
+  const allSteps = useMemo(() =>
+    walkthrough.phases.flatMap(p => p.steps.map(s => ({ ...s, phaseId: p.id }))),
+    [walkthrough]
+  )
 
+  // Set of valid step IDs in current walkthrough
+  const validStepIds = useMemo(() =>
+    new Set(allSteps.map(s => s.id)),
+    [allSteps]
+  )
+
+  // Only count completed steps that exist in the current walkthrough
+  const validCompletedCount = useMemo(() =>
+    Array.from(completedSteps).filter(id => validStepIds.has(id)).length,
+    [completedSteps, validStepIds]
+  )
+
+  const currentStepIndex = useMemo(() =>
+    allSteps.findIndex(s => s.id === currentStep),
+    [allSteps, currentStep]
+  )
+
+  const isLastStep = currentStepIndex === allSteps.length - 1
+  const isFirstStep = currentStepIndex === 0
+
+  const navigateStep = (direction: 'prev' | 'next') => {
+    const newIndex = direction === 'next' ? currentStepIndex + 1 : currentStepIndex - 1
+
+    // Mark current step as complete when moving forward (or finishing)
+    if (direction === 'next' && currentStep) {
+      setCompletedSteps(prev => {
+        const next = new Set(prev)
+        next.add(currentStep)
+        return next
+      })
+      setIsDirty(true)
+    }
+
+    // Navigate to new step if there is one
     if (newIndex >= 0 && newIndex < allSteps.length) {
       const newStep = allSteps[newIndex]
       if (newStep.phaseId !== currentPhase) {
@@ -160,7 +202,7 @@ export function WalkthroughPanel({ rangeId, walkthrough, onOpenVM, onCollapse }:
 
       {/* Progress */}
       <ProgressBar
-        completed={completedSteps.size}
+        completed={validCompletedCount}
         total={totalSteps}
         isDirty={isDirty}
         isSyncing={isSyncing}
@@ -189,7 +231,7 @@ export function WalkthroughPanel({ rangeId, walkthrough, onOpenVM, onCollapse }:
       )}
 
       {/* Step Content */}
-      <div className="flex-1 overflow-y-auto">
+      <div ref={contentRef} className="flex-1 overflow-y-auto">
         {currentStepData && (
           <StepContent step={currentStepData} onOpenVM={onOpenVM} />
         )}
@@ -199,17 +241,35 @@ export function WalkthroughPanel({ rangeId, walkthrough, onOpenVM, onCollapse }:
       <div className="flex items-center justify-between px-4 py-3 bg-gray-800 border-t border-gray-700">
         <button
           onClick={() => navigateStep('prev')}
-          className="flex items-center gap-1 px-3 py-1.5 text-sm bg-gray-700 text-gray-300 rounded hover:bg-gray-600"
+          disabled={isFirstStep}
+          className={`flex items-center gap-1 px-3 py-1.5 text-sm rounded ${
+            isFirstStep
+              ? 'bg-gray-800 text-gray-500 cursor-not-allowed'
+              : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+          }`}
         >
           <ChevronLeft className="w-4 h-4" />
           Prev
         </button>
         <button
           onClick={() => navigateStep('next')}
-          className="flex items-center gap-1 px-3 py-1.5 text-sm bg-gray-700 text-gray-300 rounded hover:bg-gray-600"
+          className={`flex items-center gap-1 px-3 py-1.5 text-sm rounded ${
+            isLastStep
+              ? 'bg-green-600 text-white hover:bg-green-700'
+              : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+          }`}
         >
-          Next
-          <ChevronRight className="w-4 h-4" />
+          {isLastStep ? (
+            <>
+              Finish
+              <Check className="w-4 h-4" />
+            </>
+          ) : (
+            <>
+              Next
+              <ChevronRight className="w-4 h-4" />
+            </>
+          )}
         </button>
       </div>
     </div>
