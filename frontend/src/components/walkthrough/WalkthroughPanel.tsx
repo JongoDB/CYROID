@@ -126,6 +126,11 @@ export function WalkthroughPanel({ rangeId, walkthrough, onOpenVM, onCollapse }:
     const newIndex = direction === 'next' ? currentIndex + 1 : currentIndex - 1
 
     if (newIndex >= 0 && newIndex < allSteps.length) {
+      // Mark current step as complete when moving forward
+      if (direction === 'next' && !completedSteps.has(currentStep)) {
+        setCompletedSteps(prev => new Set([...prev, currentStep]))
+      }
+
       const newStep = allSteps[newIndex]
       if (newStep.phaseId !== currentPhase) {
         setCurrentPhase(newStep.phaseId)
@@ -186,7 +191,7 @@ export function WalkthroughPanel({ rangeId, walkthrough, onOpenVM, onCollapse }:
       {/* Step Content */}
       <div className="flex-1 overflow-y-auto">
         {currentStepData && (
-          <StepContent step={currentStepData} onOpenVM={onOpenVM} />
+          <StepContent key={currentStep} step={currentStepData} onOpenVM={onOpenVM} />
         )}
       </div>
 

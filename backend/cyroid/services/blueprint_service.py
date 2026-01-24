@@ -257,5 +257,39 @@ def create_range_from_blueprint(
         )
         db.add(msel)
 
+    # Create Content Library entry for walkthrough if present (for StudentLab support)
+    if config.msel and config.msel.walkthrough:
+        from cyroid.models.content import Content, ContentType
+        import hashlib
+        import json
+
+        # Generate a hash for deduplication
+        walkthrough_json = json.dumps(config.msel.walkthrough, sort_keys=True)
+        content_hash = hashlib.sha256(walkthrough_json.encode()).hexdigest()[:16]
+
+        # Check if a matching Content entry already exists (by hash in tags)
+        existing_content = db.query(Content).filter(
+            Content.tags.contains([f"walkthrough_hash:{content_hash}"])
+        ).first()
+
+        if existing_content:
+            range_obj.student_guide_id = existing_content.id
+        else:
+            # Create new Content entry
+            walkthrough_title = config.msel.walkthrough.get('title', f"{range_obj.name} - Student Guide")
+            content = Content(
+                title=walkthrough_title,
+                description=f"Auto-generated from blueprint deployment",
+                content_type=ContentType.STUDENT_GUIDE,
+                body_markdown="",
+                walkthrough_data=config.msel.walkthrough,
+                created_by=created_by,
+                tags=[f"walkthrough_hash:{content_hash}", "auto-generated"],
+                is_published=True,
+            )
+            db.add(content)
+            db.flush()
+            range_obj.student_guide_id = content.id
+
     db.flush()
     return range_obj

@@ -354,13 +354,16 @@ class DinDService:
             logger.error(f"Error getting container info for {range_id}: {e}")
             return None
 
-    def get_range_client(self, range_id: str, docker_url: str) -> docker.DockerClient:
+    def get_range_client(
+        self, range_id: str, docker_url: str, timeout: int = 1800
+    ) -> docker.DockerClient:
         """
         Get or create a Docker client for a range's DinD container.
 
         Args:
             range_id: Range identifier
             docker_url: Docker daemon URL (tcp://ip:port)
+            timeout: Read timeout in seconds (default 30 min for large image transfers)
 
         Returns:
             DockerClient connected to the range's Docker daemon
@@ -368,7 +371,10 @@ class DinDService:
         range_id_str = str(range_id)
         if range_id_str not in self._range_clients:
             logger.debug(f"Creating Docker client for range {range_id} at {docker_url}")
-            self._range_clients[range_id_str] = docker.DockerClient(base_url=docker_url)
+            self._range_clients[range_id_str] = docker.DockerClient(
+                base_url=docker_url,
+                timeout=timeout,
+            )
 
         return self._range_clients[range_id_str]
 

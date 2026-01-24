@@ -315,6 +315,7 @@ async def import_blueprint(
 
 def _blueprint_to_response(blueprint: RangeBlueprint, db: Session) -> BlueprintResponse:
     config = blueprint.config
+    msel = config.get("msel") or {}
     return BlueprintResponse(
         id=blueprint.id,
         name=blueprint.name,
@@ -329,6 +330,8 @@ def _blueprint_to_response(blueprint: RangeBlueprint, db: Session) -> BlueprintR
         vm_count=len(config.get("vms", [])),
         instance_count=len(blueprint.instances),
         is_seed=blueprint.is_seed if hasattr(blueprint, 'is_seed') else False,
+        has_msel=bool(msel.get("content")),
+        has_walkthrough=bool(msel.get("walkthrough")),
     )
 
 
@@ -351,6 +354,8 @@ def _blueprint_to_detail_response(
         config=config,
         created_by_username=username if username else ("CYROID" if (hasattr(blueprint, 'is_seed') and blueprint.is_seed) else None),
         is_seed=blueprint.is_seed if hasattr(blueprint, 'is_seed') else False,
+        has_msel=bool(config.msel and config.msel.content),
+        has_walkthrough=bool(config.msel and config.msel.walkthrough),
     )
 
 

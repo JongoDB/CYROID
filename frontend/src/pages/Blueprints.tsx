@@ -11,6 +11,8 @@ import {
   Server,
   Users,
   Upload,
+  BookOpen,
+  FileText,
 } from 'lucide-react';
 import { ConfirmDialog } from '../components/common/ConfirmDialog';
 import { toast } from '../stores/toastStore';
@@ -154,6 +156,24 @@ export default function Blueprints() {
                     {blueprint.instance_count} instances
                   </span>
                 </div>
+
+                {/* Content indicators */}
+                {(blueprint.has_msel || blueprint.has_walkthrough) && (
+                  <div className="mt-2 flex items-center gap-2">
+                    {blueprint.has_msel && (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800">
+                        <FileText className="h-3 w-3 mr-1" />
+                        MSEL
+                      </span>
+                    )}
+                    {blueprint.has_walkthrough && (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
+                        <BookOpen className="h-3 w-3 mr-1" />
+                        Student Guide
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
 
               <div className="bg-gray-50 px-5 py-3 flex justify-between items-center">

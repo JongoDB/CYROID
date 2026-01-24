@@ -1039,6 +1039,8 @@ export interface Blueprint {
   network_count: number;
   vm_count: number;
   instance_count: number;
+  has_msel?: boolean;
+  has_walkthrough?: boolean;
 }
 
 export interface BlueprintDetail extends Blueprint {

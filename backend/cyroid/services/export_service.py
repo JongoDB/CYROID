@@ -1135,8 +1135,10 @@ class ExportService:
         """
         Load Docker images from an offline export archive.
 
+        Skips images that already exist locally to speed up imports.
+
         Returns:
-            List of loaded image names
+            List of loaded image names (includes both loaded and already-present)
         """
         temp_dir = tempfile.mkdtemp(prefix="cyroid-import-images-")
         try:
@@ -1159,18 +1161,34 @@ class ExportService:
 
             docker_client = docker.from_env()
             loaded_images: List[str] = []
+            skipped_images: List[str] = []
 
             for image_data in export_data.docker_images:
+                image_name = image_data.image_name
+
+                # Check if image already exists locally
+                try:
+                    docker_client.images.get(image_name)
+                    logger.info(f"Skipping Docker image (already exists): {image_name}")
+                    skipped_images.append(image_name)
+                    loaded_images.append(image_name)
+                    continue
+                except docker.errors.ImageNotFound:
+                    pass  # Image doesn't exist, need to load it
+
                 tar_path = os.path.join(temp_dir, image_data.tar_path)
                 if not os.path.exists(tar_path):
                     logger.warning(f"Image tar not found: {image_data.tar_path}")
                     continue
 
-                logger.info(f"Loading Docker image: {image_data.image_name}")
+                logger.info(f"Loading Docker image: {image_name}")
                 with open(tar_path, "rb") as f:
                     images = docker_client.images.load(f)
                     for img in images:
                         loaded_images.extend(img.tags)
+
+            if skipped_images:
+                logger.info(f"Skipped {len(skipped_images)} images that already exist locally")
 
             return loaded_images
 

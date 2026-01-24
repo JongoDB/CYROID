@@ -483,8 +483,32 @@ def deploy_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
         # Use the new DinD-based deployment service
         deployment_service = get_range_deployment_service()
 
-        # Run async deployment synchronously
-        result = asyncio.run(deployment_service.deploy_range(db, range_id))
+        # Create event callback for deployment progress
+        def deployment_event_callback(event_type: str, message: str, extra_data: dict = None):
+            """Log deployment progress events."""
+            # Map event type string to EventType enum
+            event_type_map = {
+                "router_creating": EventType.ROUTER_CREATING,
+                "router_created": EventType.ROUTER_CREATED,
+                "network_creating": EventType.NETWORK_CREATING,
+                "network_created": EventType.NETWORK_CREATED,
+                "vm_creating": EventType.VM_CREATING,
+                "vm_started": EventType.VM_STARTED,
+                "deployment_step": EventType.DEPLOYMENT_STEP,
+            }
+            evt_type = event_type_map.get(event_type, EventType.DEPLOYMENT_STEP)
+            event_service.log_event(
+                range_id=range_id,
+                event_type=evt_type,
+                message=message,
+                user_id=current_user.id,
+                extra_data=json.dumps(extra_data) if extra_data else None,
+            )
+
+        # Run async deployment synchronously with event callback
+        result = asyncio.run(deployment_service.deploy_range(
+            db, range_id, event_callback=deployment_event_callback
+        ))
         logger.info(f"DinD deployment completed for range {range_id}: {result}")
 
         # Refresh range object to get updated status
@@ -1647,6 +1671,34 @@ from cyroid.schemas.export import (
     RangeExportFull,
 )
 
+# Chunk size for streaming large file uploads (1MB)
+UPLOAD_CHUNK_SIZE = 1024 * 1024
+
+
+async def stream_upload_to_file(upload_file: UploadFile, dest_path: str) -> int:
+    """
+    Stream an uploaded file to disk in chunks to handle large files.
+
+    This avoids loading the entire file into memory, which is essential
+    for large exports with Docker images (can be 5GB+).
+
+    Args:
+        upload_file: FastAPI UploadFile object
+        dest_path: Destination file path
+
+    Returns:
+        Total bytes written
+    """
+    total_bytes = 0
+    with open(dest_path, 'wb') as dest:
+        while True:
+            chunk = await upload_file.read(UPLOAD_CHUNK_SIZE)
+            if not chunk:
+                break
+            dest.write(chunk)
+            total_bytes += len(chunk)
+    return total_bytes
+
 
 def get_redis_client():
     """Get Redis client for job status tracking."""
@@ -1882,15 +1934,16 @@ async def validate_import(
 
     Upload a .zip or .tar.gz export archive to validate before importing.
     Returns validation results including any conflicts with existing templates or networks.
+    Supports large files (5GB+) via streaming upload.
     """
     from cyroid.services.export_service import get_export_service
 
-    # Save uploaded file to temp location
+    # Stream uploaded file to temp location (handles large files)
     temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=file.filename)
+    temp_file.close()  # Close so we can write to it
     try:
-        content = await file.read()
-        temp_file.write(content)
-        temp_file.close()
+        bytes_written = await stream_upload_to_file(file, temp_file.name)
+        logger.info(f"Streamed {bytes_written / (1024*1024):.1f} MB for import validation")
 
         export_service = get_export_service()
         result = export_service.validate_import(Path(temp_file.name), db)
@@ -1916,6 +1969,8 @@ async def execute_import(
     Execute a range import from an archive.
 
     Upload a .zip or .tar.gz export archive to import.
+    Supports large files (5GB+) via streaming upload.
+    Docker images already present locally will be skipped.
 
     Options:
     - name_override: Override the range name (required if name conflicts)
@@ -1925,12 +1980,12 @@ async def execute_import(
     """
     from cyroid.services.export_service import get_export_service
 
-    # Save uploaded file to temp location
+    # Stream uploaded file to temp location (handles large files)
     temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=file.filename)
+    temp_file.close()  # Close so we can write to it
     try:
-        content = await file.read()
-        temp_file.write(content)
-        temp_file.close()
+        bytes_written = await stream_upload_to_file(file, temp_file.name)
+        logger.info(f"Streamed {bytes_written / (1024*1024):.1f} MB for import")
 
         options = ImportOptions(
             name_override=name_override,
@@ -1963,19 +2018,20 @@ async def load_docker_images(
     Load Docker images from an offline export archive.
 
     Use this endpoint to pre-load Docker images before importing a range
-    on an air-gapped system.
+    on an air-gapped system. Supports large files (5GB+) via streaming upload.
+    Images already present locally will be skipped for faster imports.
     """
     from cyroid.services.export_service import get_export_service
 
     if not current_user.is_admin:
         raise HTTPException(status_code=403, detail="Admin access required")
 
-    # Save uploaded file to temp location
+    # Stream uploaded file to temp location (handles large files)
     temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=file.filename)
+    temp_file.close()  # Close so we can write to it
     try:
-        content = await file.read()
-        temp_file.write(content)
-        temp_file.close()
+        bytes_written = await stream_upload_to_file(file, temp_file.name)
+        logger.info(f"Streamed {bytes_written / (1024*1024):.1f} MB for image loading")
 
         export_service = get_export_service()
         loaded_images = export_service.load_docker_images(Path(temp_file.name))

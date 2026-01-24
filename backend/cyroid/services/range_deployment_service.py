@@ -10,7 +10,7 @@ without conflicts.
 
 import logging
 from datetime import datetime
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Callable
 from uuid import UUID
 
 from sqlalchemy.orm import Session
@@ -27,6 +27,10 @@ from cyroid.services.docker_service import DockerService, get_docker_service
 from cyroid.services.traefik_route_service import get_traefik_route_service
 
 logger = logging.getLogger(__name__)
+
+# Event callback type for deployment progress reporting
+# Signature: (event_type: str, message: str, extra_data: dict) -> None
+EventCallback = Optional[Callable[[str, str, Optional[Dict[str, Any]]], None]]
 settings = get_settings()
 
 
@@ -66,6 +70,7 @@ class RangeDeploymentService:
         range_id: UUID,
         memory_limit: Optional[str] = None,
         cpu_limit: Optional[float] = None,
+        event_callback: EventCallback = None,
     ) -> Dict[str, Any]:
         """
         Deploy a range instance inside a DinD container.
@@ -81,6 +86,7 @@ class RangeDeploymentService:
             range_id: Range UUID
             memory_limit: Optional memory limit for DinD container
             cpu_limit: Optional CPU limit for DinD container
+            event_callback: Optional callback for deployment progress events
 
         Returns:
             Deployment result dict
@@ -95,7 +101,7 @@ class RangeDeploymentService:
 
         try:
             result = await self._deploy_with_dind(
-                db, range_obj, memory_limit, cpu_limit
+                db, range_obj, memory_limit, cpu_limit, event_callback
             )
 
             # Update range status
@@ -120,9 +126,18 @@ class RangeDeploymentService:
         range_obj: Range,
         memory_limit: Optional[str],
         cpu_limit: Optional[float],
+        event_callback: EventCallback = None,
     ) -> Dict[str, Any]:
         """Deploy range inside a DinD container."""
         range_id = str(range_obj.id)
+
+        # Helper to emit events
+        def emit_event(event_type: str, message: str, extra_data: Optional[Dict[str, Any]] = None):
+            if event_callback:
+                try:
+                    event_callback(event_type, message, extra_data)
+                except Exception as e:
+                    logger.warning(f"Event callback error: {e}")
 
         logger.info(f"Deploying range {range_id} with DinD isolation")
 
@@ -131,12 +146,19 @@ class RangeDeploymentService:
         cpu_limit = cpu_limit or getattr(settings, "range_default_cpu", 4.0)
 
         # 1. Create DinD container
+        emit_event("router_creating", f"Creating DinD container for range '{range_obj.name}'")
+
         dind_info = await self.dind_service.create_range_container(
             range_id=range_id,
             range_name=range_obj.name,
             memory_limit=memory_limit,
             cpu_limit=cpu_limit,
         )
+
+        emit_event("router_created", f"DinD container ready at {dind_info['mgmt_ip']}", {
+            "container_id": dind_info["container_id"][:12],
+            "mgmt_ip": dind_info["mgmt_ip"],
+        })
 
         # Store DinD info in range
         range_obj.dind_container_id = dind_info["container_id"]
@@ -151,7 +173,12 @@ class RangeDeploymentService:
         networks = db.query(Network).filter(Network.range_id == range_obj.id).all()
         network_ids = {}
 
-        for network in networks:
+        for i, network in enumerate(networks):
+            emit_event("network_creating", f"Creating network {network.name} ({i+1}/{len(networks)})", {
+                "network_name": network.name,
+                "subnet": network.subnet,
+            })
+
             labels = {
                 "cyroid.range_id": range_id,
                 "cyroid.network_id": str(network.id),
@@ -169,6 +196,11 @@ class RangeDeploymentService:
 
             network.docker_network_id = network_docker_id
             network_ids[str(network.id)] = network_docker_id
+
+            emit_event("network_created", f"Network {network.name} created ({network.subnet})", {
+                "network_name": network.name,
+                "network_id": str(network.id),
+            })
 
         db.commit()
 
@@ -210,18 +242,71 @@ class RangeDeploymentService:
                     if image_tag:
                         unique_images.add(image_tag)
 
-        for image in unique_images:
+        # Track last progress update time for throttling
+        import time
+        last_progress_time = [0.0]  # Use list for closure mutability
+
+        def image_progress_callback(transferred: int, total: int, status: str):
+            """Progress callback for image transfer - throttled to every 2 seconds."""
+            current_time = time.time()
+            # Only emit progress events every 2 seconds to avoid spam
+            if current_time - last_progress_time[0] >= 2.0 or status in ('complete', 'error', 'already_exists'):
+                last_progress_time[0] = current_time
+                if total > 0:
+                    progress_pct = int((transferred / total) * 100)
+                    size_mb = total / (1024 * 1024)
+                    emit_event("deployment_step", f"Transferring image: {progress_pct}% ({size_mb:.1f} MB)", {
+                        "transferred": transferred,
+                        "total": total,
+                        "status": status,
+                    })
+                else:
+                    emit_event("deployment_step", f"Image transfer: {status}")
+
+        failed_transfers = []
+        for i, image in enumerate(unique_images):
+            emit_event("deployment_step", f"Transferring image {i+1}/{len(unique_images)}: {image}")
+            last_progress_time[0] = 0.0  # Reset for each image
             try:
-                await self.docker_service.pull_image_to_dind(
+                # Use transfer_image_to_dind with progress callback instead of pull_image_to_dind
+                success = await self.docker_service.transfer_image_to_dind(
                     range_id=range_id,
                     docker_url=docker_url,
                     image=image,
+                    pull_if_missing=True,
+                    progress_callback=image_progress_callback,
                 )
+                if not success:
+                    failed_transfers.append(image)
+                    logger.warning(f"Image transfer returned False for {image}")
             except Exception as e:
-                logger.warning(f"Could not pull image {image} into DinD: {e}")
+                failed_transfers.append(image)
+                logger.warning(f"Could not transfer image {image} into DinD: {e}")
+
+        # Check for failed local image transfers - these will cause VM creation to fail
+        if failed_transfers:
+            # Check if any failed images are local (not from a registry)
+            local_failures = []
+            for img in failed_transfers:
+                image_parts = img.split("/")
+                first_part = image_parts[0].split(":")[0]
+                is_registry = "." in first_part or first_part in ("docker", "library")
+                if not is_registry:
+                    local_failures.append(img)
+
+            if local_failures:
+                raise RuntimeError(
+                    f"Failed to transfer required local images to DinD: {', '.join(local_failures)}. "
+                    f"This may be due to timeout (large images) or network issues. "
+                    f"Try deploying again or check the worker logs for details."
+                )
 
         # 4. Create VMs inside DinD
-        for vm in vms:
+        for i, vm in enumerate(vms):
+            emit_event("vm_creating", f"Creating VM {vm.hostname} ({i+1}/{len(vms)})", {
+                "vm_hostname": vm.hostname,
+                "vm_id": str(vm.id),
+            })
             # Determine container image from Image Library or legacy template/snapshot
             container_image = None
             if vm.base_image_id and vm.base_image:
@@ -308,6 +393,12 @@ class RangeDeploymentService:
                 docker_url=docker_url,
                 container_id=container_id,
             )
+
+            emit_event("vm_started", f"VM {vm.hostname} started ({vm.ip_address})", {
+                "vm_hostname": vm.hostname,
+                "vm_id": str(vm.id),
+                "ip_address": vm.ip_address,
+            })
 
             # Mark VM as running after successful start (Issue #75)
             vm.status = VMStatus.RUNNING

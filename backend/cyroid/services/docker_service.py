@@ -2824,12 +2824,25 @@ local-hostname: {name}
         """
         range_client = self.get_range_client_sync(range_id, docker_url)
 
-        # Pull image if not present in DinD
+        # Check if image exists in DinD - only pull from registry if it's a registry image
         try:
             range_client.images.get(image)
         except ImageNotFound:
-            logger.info(f"Pulling image {image} into DinD for range {range_id}")
-            range_client.images.pull(image)
+            # Check if this looks like a registry image (has dots in the first part or is docker.io)
+            # Local images like "myimage:latest" or "owner/myimage:latest" shouldn't try to pull
+            image_parts = image.split("/")
+            first_part = image_parts[0].split(":")[0]  # Get first segment without tag
+            is_registry_image = "." in first_part or first_part in ("docker", "library")
+
+            if is_registry_image:
+                logger.info(f"Pulling image {image} into DinD for range {range_id}")
+                range_client.images.pull(image)
+            else:
+                # Local image not found - it should have been transferred
+                raise ImageNotFound(
+                    f"Image '{image}' not found in DinD. Local images must be transferred "
+                    f"from host before creating containers. Transfer may have failed."
+                )
 
         # Get network
         try:

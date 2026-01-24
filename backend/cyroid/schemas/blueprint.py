@@ -80,6 +80,8 @@ class BlueprintResponse(BaseModel):
     vm_count: int = 0
     instance_count: int = 0
     is_seed: bool = False  # True for built-in blueprints
+    has_msel: bool = False  # Has MSEL scenario content
+    has_walkthrough: bool = False  # Has student walkthrough/guide
 
     class Config:
         from_attributes = True
