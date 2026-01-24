@@ -267,8 +267,8 @@ class RangeDeploymentService:
                 # Handle percentage progress updates (format: 'transferring:XX')
                 if status.startswith('transferring:'):
                     pct = int(status.split(':')[1])
-                    # Only emit progress at 25%, 50%, 75% to avoid spam
-                    if pct >= last_pct[0] + 25:
+                    # Emit progress on every update (every 2 seconds) to keep GUI responsive
+                    if pct > last_pct[0]:
                         last_pct[0] = pct
                         size_mb = total / 1024 / 1024
                         transferred_mb = transferred / 1024 / 1024
