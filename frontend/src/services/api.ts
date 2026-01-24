@@ -572,7 +572,7 @@ export const connectionsApi = {
 }
 
 // Cache API
-import type { CachedImage, ISOCacheStatus, GoldenImagesStatus, CacheStats, PruneResult, RecommendedImages, WindowsVersionsResponse, LinuxVersionsResponse, LinuxISODownloadResponse, LinuxISODownloadStatus, CustomISOList, CustomISODownloadResponse, CustomISOStatusResponse, ISOUploadResponse, WindowsISODownloadResponse, WindowsISODownloadStatus, AllSnapshotsStatus, SnapshotResponse, MacOSVersionsResponse, MacOSISODownloadResponse, MacOSISODownloadStatus } from '../types'
+import type { CachedImage, ISOCacheStatus, GoldenImagesStatus, CacheStats, PruneResult, RecommendedImages, WindowsVersionsResponse, LinuxVersionsResponse, LinuxISODownloadResponse, LinuxISODownloadStatus, CustomISOList, CustomISODownloadResponse, CustomISOStatusResponse, ISOUploadResponse, WindowsISODownloadResponse, WindowsISODownloadStatus, MacOSVersionsResponse, MacOSISODownloadResponse, MacOSISODownloadStatus } from '../types'
 
 export interface DockerPullStatus {
   status: 'pulling' | 'completed' | 'failed' | 'cancelled' | 'not_found' | 'already_cached' | 'already_pulling'
@@ -704,14 +704,7 @@ export const cacheApi = {
   cancelWindowsISODownload: (version: string, arch?: 'x86_64' | 'arm64') =>
     api.post(`/cache/isos/download/${encodeURIComponent(version)}/cancel${arch === 'arm64' ? '?arch=arm64' : ''}`),
 
-  // Snapshots (unified API for both Windows golden images and Docker snapshots)
-  getAllSnapshots: () => api.get<AllSnapshotsStatus>('/cache/snapshots'),
-  createSnapshot: (containerId: string, name: string, snapshotType: 'auto' | 'windows' | 'docker' = 'auto') =>
-    api.post<SnapshotResponse>('/cache/snapshots', { container_id: containerId, name, snapshot_type: snapshotType }),
-  deleteSnapshot: (snapshotType: 'windows' | 'docker', name: string) =>
-    api.delete(`/cache/snapshots/${snapshotType}/${encodeURIComponent(name)}`),
-
-  // Golden images (Windows-specific, kept for backwards compatibility)
+  // Golden images (Windows pre-installed templates)
   getGoldenImages: () => api.get<GoldenImagesStatus>('/cache/golden-images'),
   createGoldenImage: (containerId: string, name: string) =>
     api.post<{ name: string; path: string; size_bytes: number; size_gb: number }>('/cache/golden-images', { container_id: containerId, name }),

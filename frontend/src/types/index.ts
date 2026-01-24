@@ -395,42 +395,6 @@ export interface GoldenImagesStatus {
   golden_images: GoldenImage[]
 }
 
-// Docker container snapshots
-export interface DockerSnapshot {
-  id: string
-  short_id: string
-  tags: string[]
-  size_bytes: number
-  size_gb: number
-  created: string | null
-  type: 'docker'
-}
-
-// Combined snapshots response
-export interface AllSnapshotsStatus {
-  windows_golden_images: GoldenImage[]
-  docker_snapshots: DockerSnapshot[]
-  total_windows: number
-  total_docker: number
-  template_dir: string
-}
-
-export interface CreateSnapshotRequest {
-  container_id: string
-  name: string
-  snapshot_type?: 'auto' | 'windows' | 'docker'
-}
-
-export interface SnapshotResponse {
-  name: string
-  id?: string
-  short_id?: string
-  path?: string
-  size_bytes: number
-  size_gb: number
-  type: 'windows' | 'docker'
-}
-
 export interface CacheStats {
   docker_images: {
     count: number

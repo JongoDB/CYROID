@@ -81,7 +81,6 @@ export default function ImageCache() {
   // Upload modal state
   const [showUploadModal, setShowUploadModal] = useState<'windows' | 'linux' | 'macos' | 'custom' | 'docker' | null>(null)
   const [uploadFile, setUploadFile] = useState<File | null>(null)
-  const [uploadVersion, setUploadVersion] = useState('')
   const [uploadName, setUploadName] = useState('')
   const [uploadCategory, setUploadCategory] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -1072,8 +1071,7 @@ export default function ImageCache() {
       }
       setShowUploadModal(null)
       setUploadFile(null)
-      setUploadVersion('')
-      setUploadName('')
+            setUploadName('')
       setUploadCategory('')
       await loadData()
     } catch (err: any) {
@@ -2435,8 +2433,7 @@ export default function ImageCache() {
                   onClick={() => {
                     setShowUploadModal(null)
                     setUploadFile(null)
-                    setUploadVersion('')
-                    setUploadName('')
+                                        setUploadName('')
                     setUploadCategory('')
                   }}
                   className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"

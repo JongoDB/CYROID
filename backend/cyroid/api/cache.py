@@ -840,83 +840,13 @@ def get_iso_cache_status(current_user: CurrentUser):
     return docker.get_windows_iso_cache_status()
 
 
-# Snapshot endpoints - supports both Windows golden images and Docker container snapshots
-
-@router.get("/snapshots")
-def get_all_snapshots(current_user: CurrentUser):
-    """
-    Get all VM snapshots - both Windows golden images and Docker container snapshots.
-
-    Returns:
-    - windows_golden_images: Pre-installed Windows VMs (dockur/windows storage copies)
-    - docker_snapshots: Docker container commits (Linux VMs, custom containers)
-    """
-    docker = get_docker_service()
-    return docker.get_all_snapshots()
-
+# Golden image endpoints (Windows pre-installed templates)
 
 @router.get("/golden-images", response_model=GoldenImageResponse)
 def get_golden_images_status(current_user: CurrentUser):
     """Get status of Windows golden images (pre-installed templates)."""
     docker = get_docker_service()
     return docker.get_golden_images_status()
-
-
-class CreateSnapshotRequest(BaseModel):
-    container_id: str
-    name: str
-    snapshot_type: str = "auto"  # "auto", "windows", or "docker"
-
-
-@router.post("/snapshots", status_code=status.HTTP_201_CREATED)
-def create_snapshot(request: CreateSnapshotRequest, current_user: AdminUser):
-    """
-    Create a snapshot from a running container.
-
-    For Windows VMs (dockur/windows): Creates a golden image by copying /storage directory.
-    For other containers: Creates a Docker image using docker commit.
-
-    Args:
-        container_id: ID of the running container
-        name: Name for the snapshot
-        snapshot_type: "auto" (detect), "windows" (golden image), or "docker" (container commit)
-    """
-    docker = get_docker_service()
-
-    try:
-        # Get container to determine type
-        container = docker.client.containers.get(request.container_id)
-        image_name = container.image.tags[0] if container.image.tags else ""
-
-        # Determine snapshot type
-        is_windows = "dockur/windows" in image_name.lower() or "windows" in image_name.lower()
-
-        if request.snapshot_type == "auto":
-            use_windows_method = is_windows
-        elif request.snapshot_type == "windows":
-            use_windows_method = True
-        else:
-            use_windows_method = False
-
-        if use_windows_method:
-            result = docker.create_golden_image(request.container_id, request.name)
-        else:
-            # Use docker commit for Linux/custom containers
-            snapshot_name = f"cyroid/snapshot/{request.name}"
-            result = docker.create_container_snapshot(request.container_id, snapshot_name)
-
-        return result
-
-    except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create snapshot: {str(e)}"
-        )
 
 
 @router.post("/golden-images", status_code=status.HTTP_201_CREATED)
@@ -941,56 +871,6 @@ def create_golden_image(request: CreateGoldenImageRequest, current_user: AdminUs
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to create golden image: {str(e)}"
-        )
-
-
-@router.delete("/snapshots/{snapshot_type}/{name}")
-def delete_snapshot(snapshot_type: str, name: str, current_user: AdminUser):
-    """
-    Delete a snapshot.
-
-    Args:
-        snapshot_type: "windows" for golden images, "docker" for container snapshots
-        name: Name of the snapshot to delete
-    """
-    import os
-    import shutil
-    from cyroid.config import get_settings
-
-    if snapshot_type == "windows":
-        settings = get_settings()
-        golden_dir = os.path.join(settings.template_storage_dir, name)
-
-        if not os.path.exists(golden_dir):
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Windows golden image not found"
-            )
-
-        try:
-            shutil.rmtree(golden_dir)
-            return {"status": "deleted", "type": "windows", "name": name}
-        except Exception as e:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to delete golden image: {str(e)}"
-            )
-    elif snapshot_type == "docker":
-        docker = get_docker_service()
-        try:
-            # Look for the image
-            image_name = f"cyroid/snapshot/{name}"
-            docker.client.images.remove(image_name, force=True)
-            return {"status": "deleted", "type": "docker", "name": image_name}
-        except Exception as e:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to delete Docker snapshot: {str(e)}"
-            )
-    else:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid snapshot_type. Use 'windows' or 'docker'"
         )
 
 
