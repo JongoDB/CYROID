@@ -22,6 +22,8 @@ from cyroid.models.template import VMType
 from cyroid.models.base_image import BaseImage
 from cyroid.models.golden_image import GoldenImage
 from cyroid.models.snapshot import Snapshot
+from cyroid.models.event_log import EventType
+from cyroid.services.event_service import EventService
 from cyroid.services.dind_service import DinDService, get_dind_service
 from cyroid.services.docker_service import DockerService, get_docker_service
 from cyroid.services.traefik_route_service import get_traefik_route_service
@@ -123,19 +125,44 @@ class RangeDeploymentService:
     ) -> Dict[str, Any]:
         """Deploy range inside a DinD container."""
         range_id = str(range_obj.id)
+        range_uuid = range_obj.id
 
         logger.info(f"Deploying range {range_id} with DinD isolation")
+
+        # Initialize event service for progress logging
+        event_service = EventService(db)
 
         # Use default limits if not specified
         memory_limit = memory_limit or getattr(settings, "range_default_memory", "8g")
         cpu_limit = cpu_limit or getattr(settings, "range_default_cpu", 4.0)
 
-        # 1. Create DinD container
+        # 1. Create DinD container with progress reporting
+        event_service.log_event(
+            range_id=range_uuid,
+            event_type=EventType.ROUTER_CREATING,
+            message="Creating DinD container for range isolation...",
+        )
+
+        def dind_progress_callback(msg: str) -> None:
+            """Report DinD creation progress as deployment step events."""
+            event_service.log_event(
+                range_id=range_uuid,
+                event_type=EventType.DEPLOYMENT_STEP,
+                message=msg,
+            )
+
         dind_info = await self.dind_service.create_range_container(
             range_id=range_id,
             range_name=range_obj.name,
             memory_limit=memory_limit,
             cpu_limit=cpu_limit,
+            progress_callback=dind_progress_callback,
+        )
+
+        event_service.log_event(
+            range_id=range_uuid,
+            event_type=EventType.ROUTER_CREATED,
+            message=f"DinD container ready at {dind_info['mgmt_ip']}",
         )
 
         # Store DinD info in range
@@ -152,6 +179,13 @@ class RangeDeploymentService:
         network_ids = {}
 
         for network in networks:
+            event_service.log_event(
+                range_id=range_uuid,
+                event_type=EventType.NETWORK_CREATING,
+                message=f"Creating network '{network.name}' ({network.subnet})...",
+                network_id=network.id,
+            )
+
             labels = {
                 "cyroid.range_id": range_id,
                 "cyroid.network_id": str(network.id),
@@ -169,6 +203,13 @@ class RangeDeploymentService:
 
             network.docker_network_id = network_docker_id
             network_ids[str(network.id)] = network_docker_id
+
+            event_service.log_event(
+                range_id=range_uuid,
+                event_type=EventType.NETWORK_CREATED,
+                message=f"Network '{network.name}' created",
+                network_id=network.id,
+            )
 
         db.commit()
 
@@ -210,18 +251,96 @@ class RangeDeploymentService:
                     if image_tag:
                         unique_images.add(image_tag)
 
-        for image in unique_images:
+        if unique_images:
+            event_service.log_event(
+                range_id=range_uuid,
+                event_type=EventType.DEPLOYMENT_STEP,
+                message=f"Transferring {len(unique_images)} image(s) to DinD container...",
+            )
+
+        for idx, image in enumerate(unique_images, 1):
+            # Create a progress callback that emits events for this image
+            last_status = [None]  # Use list to allow modification in closure
+            last_pct = [0]  # Track last reported percentage
+
+            def image_progress_callback(transferred: int, total: int, status: str) -> None:
+                # Handle percentage progress updates (format: 'transferring:XX')
+                if status.startswith('transferring:'):
+                    pct = int(status.split(':')[1])
+                    # Only emit progress at 25%, 50%, 75% to avoid spam
+                    if pct >= last_pct[0] + 25:
+                        last_pct[0] = pct
+                        size_mb = total / 1024 / 1024
+                        transferred_mb = transferred / 1024 / 1024
+                        event_service.log_event(
+                            range_id=range_uuid,
+                            event_type=EventType.DEPLOYMENT_STEP,
+                            message=f"Transferring {image}: {pct}% ({transferred_mb:.0f}/{size_mb:.0f} MB)",
+                        )
+                    return
+
+                # Only emit event if status changed (avoid spamming)
+                if status != last_status[0]:
+                    last_status[0] = status
+                    if status == 'found_on_host':
+                        size_mb = total / 1024 / 1024
+                        event_service.log_event(
+                            range_id=range_uuid,
+                            event_type=EventType.DEPLOYMENT_STEP,
+                            message=f"Image {idx}/{len(unique_images)}: {image} found on host ({size_mb:.1f} MB)",
+                        )
+                    elif status == 'transferring':
+                        event_service.log_event(
+                            range_id=range_uuid,
+                            event_type=EventType.DEPLOYMENT_STEP,
+                            message=f"Copying {image} into DinD container (0%)...",
+                        )
+                    elif status == 'already_exists':
+                        event_service.log_event(
+                            range_id=range_uuid,
+                            event_type=EventType.DEPLOYMENT_STEP,
+                            message=f"Image {image} already in DinD, skipping",
+                        )
+                    elif status == 'pulling_to_host':
+                        event_service.log_event(
+                            range_id=range_uuid,
+                            event_type=EventType.DEPLOYMENT_STEP,
+                            message=f"Pulling {image} from registry to host...",
+                        )
+
             try:
                 await self.docker_service.pull_image_to_dind(
                     range_id=range_id,
                     docker_url=docker_url,
                     image=image,
+                    progress_callback=image_progress_callback,
+                )
+                event_service.log_event(
+                    range_id=range_uuid,
+                    event_type=EventType.DEPLOYMENT_STEP,
+                    message=f"Image {idx}/{len(unique_images)} ready: {image}",
                 )
             except Exception as e:
-                logger.warning(f"Could not pull image {image} into DinD: {e}")
+                error_msg = f"Failed to transfer image {image}: {e}"
+                logger.error(error_msg)
+                event_service.log_event(
+                    range_id=range_uuid,
+                    event_type=EventType.DEPLOYMENT_STEP,
+                    message=f"ERROR: {error_msg}",
+                )
+                # Re-raise to fail the deployment with a clear message
+                raise RuntimeError(error_msg) from e
 
         # 4. Create VMs inside DinD
-        for vm in vms:
+        total_vms = len(vms)
+        for vm_idx, vm in enumerate(vms, 1):
+            event_service.log_event(
+                range_id=range_uuid,
+                event_type=EventType.VM_CREATING,
+                message=f"Creating VM {vm_idx}/{total_vms}: '{vm.hostname}' ({vm.ip_address})...",
+                vm_id=vm.id,
+            )
+
             # Determine container image from Image Library or legacy template/snapshot
             container_image = None
             if vm.base_image_id and vm.base_image:
@@ -283,6 +402,13 @@ class RangeDeploymentService:
                 privileged = True  # Required for KVM access
                 labels["cyroid.vm_type"] = "linux"
 
+            event_service.log_event(
+                range_id=range_uuid,
+                event_type=EventType.DEPLOYMENT_STEP,
+                message=f"Creating container for '{vm.hostname}' using image {container_image}...",
+                vm_id=vm.id,
+            )
+
             container_id = await self.docker_service.create_range_container_dind(
                 range_id=range_id,
                 docker_url=docker_url,
@@ -302,6 +428,13 @@ class RangeDeploymentService:
 
             vm.container_id = container_id
 
+            event_service.log_event(
+                range_id=range_uuid,
+                event_type=EventType.DEPLOYMENT_STEP,
+                message=f"Container created for '{vm.hostname}', starting...",
+                vm_id=vm.id,
+            )
+
             # Start the container
             await self.docker_service.start_range_container_dind(
                 range_id=range_id,
@@ -311,6 +444,13 @@ class RangeDeploymentService:
 
             # Mark VM as running after successful start (Issue #75)
             vm.status = VMStatus.RUNNING
+
+            event_service.log_event(
+                range_id=range_uuid,
+                event_type=EventType.VM_STARTED,
+                message=f"VM '{vm.hostname}' running on {network.name} ({vm.ip_address})",
+                vm_id=vm.id,
+            )
 
         db.commit()
 
@@ -351,6 +491,11 @@ class RangeDeploymentService:
                 })
 
         if vm_ports:
+            event_service.log_event(
+                range_id=range_uuid,
+                event_type=EventType.DEPLOYMENT_STEP,
+                message=f"Setting up VNC console access for {len(vm_ports)} VM(s)...",
+            )
             try:
                 port_mappings = await self.dind_service.setup_vnc_port_forwarding(
                     range_id=range_id,

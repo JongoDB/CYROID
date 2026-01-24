@@ -398,11 +398,20 @@ export default function RangeDetail() {
   }, [consoleVm])
 
   const handleDeploy = async () => {
-    if (!id) return
+    if (!id || !range) return
+
+    const previousStatus = range.status
+    // Optimistic update - immediately show deploying status
+    setRange({ ...range, status: 'deploying' })
+    toast.success(`Deploying "${range.name}"...`)
+
     try {
       await rangesApi.deploy(id)
-      fetchData()
+      // Don't fetch immediately - let DeploymentProgress poll for status
+      // The component will call onDeploymentComplete when done
     } catch (err: any) {
+      // Revert optimistic update on error
+      setRange({ ...range, status: previousStatus })
       const detail = err.response?.data?.detail
       // Check if this is a validation error with structured detail
       if (detail && typeof detail === 'object' && detail.errors) {
@@ -873,13 +882,13 @@ export default function RangeDetail() {
             </div>
           </div>
           <div className="mt-4 sm:mt-0 flex items-center space-x-3">
-            {range.status === 'draft' && (
+            {(range.status === 'draft' || range.status === 'error') && (
               <button
                 onClick={handleDeploy}
                 className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary-600 hover:bg-primary-700"
               >
                 <Rocket className="h-4 w-4 mr-2" />
-                Deploy
+                {range.status === 'error' ? 'Retry Deploy' : 'Deploy'}
               </button>
             )}
             {(range.status === 'stopped' || range.status === 'draft') && (
