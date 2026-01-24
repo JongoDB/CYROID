@@ -25,6 +25,7 @@ class ExportComponents(BaseModel):
     artifacts: bool = False
     snapshots: bool = False
     docker_images: bool = False  # Only in offline mode
+    walkthrough: bool = False  # Content Library student guide
 
 
 class ExportManifest(BaseModel):
@@ -180,6 +181,22 @@ class MSELExportData(BaseModel):
 
 
 # =============================================================================
+# Walkthrough Export (Content Library Student Guide)
+# =============================================================================
+
+class WalkthroughExportData(BaseModel):
+    """Student guide/walkthrough for export."""
+    title: str
+    description: Optional[str] = None
+    content_type: str = "student_guide"
+    body_markdown: str = ""
+    walkthrough_data: Optional[dict] = None  # Structured phases/steps
+    version: str = "1.0"
+    tags: List[str] = Field(default_factory=list)
+    content_hash: str  # SHA256 of walkthrough_data JSON for deduplication
+
+
+# =============================================================================
 # Artifact Export
 # =============================================================================
 
@@ -240,6 +257,7 @@ class RangeExportFull(BaseModel):
     vms: List[VMExportData] = Field(default_factory=list)
     templates: List[TemplateExportData] = Field(default_factory=list)
     msel: Optional[MSELExportData] = None
+    walkthrough: Optional[WalkthroughExportData] = None  # Content Library student guide
     artifacts: List[ArtifactExportData] = Field(default_factory=list)
     artifact_placements: List[ArtifactPlacementExportData] = Field(default_factory=list)
     snapshots: List[SnapshotExportData] = Field(default_factory=list)
@@ -254,6 +272,7 @@ class ExportRequest(BaseModel):
     """Request parameters for range export."""
     include_templates: bool = True
     include_msel: bool = True
+    include_walkthrough: bool = True  # Content Library student guide
     include_artifacts: bool = True
     include_snapshots: bool = False
     include_docker_images: bool = False  # Enables offline mode
@@ -309,6 +328,7 @@ class ImportSummary(BaseModel):
     artifacts_count: int = 0
     artifact_placements_count: int = 0
     injects_count: int = 0
+    walkthrough_status: Optional[str] = None  # "reuse_existing", "create_new", "create_renamed", None
     estimated_size_mb: Optional[float] = None
 
 
@@ -327,6 +347,7 @@ class ImportOptions(BaseModel):
     template_conflict_action: Literal["use_existing", "create_new", "skip"] = "use_existing"
     skip_artifacts: bool = False
     skip_msel: bool = False
+    skip_walkthrough: bool = False  # Skip Content Library student guide
     dry_run: bool = False  # Validate only, don't execute
 
 
@@ -339,5 +360,7 @@ class ImportResult(BaseModel):
     vms_created: int = 0
     templates_created: int = 0
     artifacts_imported: int = 0
+    walkthrough_imported: bool = False
+    walkthrough_reused: bool = False
     errors: List[str] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)

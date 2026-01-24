@@ -27,6 +27,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from cyroid.config import get_settings
 from cyroid.models.artifact import Artifact, ArtifactPlacement
+from cyroid.models.content import Content, ContentType
 from cyroid.models.inject import Inject
 from cyroid.models.msel import MSEL
 from cyroid.models.network import Network
@@ -57,6 +58,7 @@ from cyroid.schemas.export import (
     TemplateConflict,
     TemplateExportData,
     VMExportData,
+    WalkthroughExportData,
 )
 from cyroid.services.storage_service import get_storage_service
 
@@ -424,6 +426,29 @@ class ExportService:
         if options.include_msel and range_obj.msel:
             msel_data = self._collect_msel_data(range_obj.msel, vm_id_to_hostname)
 
+        # Collect walkthrough (Content Library student guide)
+        walkthrough_data = None
+        if options.include_walkthrough and range_obj.student_guide_id:
+            content = db.query(Content).filter(Content.id == range_obj.student_guide_id).first()
+            if content:
+                # Compute hash for deduplication on import
+                content_hash = ""
+                if content.walkthrough_data:
+                    content_hash = hashlib.sha256(
+                        json.dumps(content.walkthrough_data, sort_keys=True).encode()
+                    ).hexdigest()
+
+                walkthrough_data = WalkthroughExportData(
+                    title=content.title,
+                    description=content.description,
+                    content_type=content.content_type.value,
+                    body_markdown=content.body_markdown or "",
+                    walkthrough_data=content.walkthrough_data,
+                    version=content.version or "1.0",
+                    tags=content.tags or [],
+                    content_hash=content_hash,
+                )
+
         # Collect artifacts
         artifacts: List[ArtifactExportData] = []
         placements: List[ArtifactPlacementExportData] = []
@@ -513,6 +538,7 @@ class ExportService:
                 vms=True,
                 templates=options.include_templates,
                 msel=options.include_msel and range_obj.msel is not None,
+                walkthrough=options.include_walkthrough and range_obj.student_guide_id is not None,
                 artifacts=options.include_artifacts,
                 snapshots=options.include_snapshots,
                 docker_images=include_images and options.include_docker_images,
@@ -529,6 +555,7 @@ class ExportService:
             vms=vms,
             templates=templates,
             msel=msel_data,
+            walkthrough=walkthrough_data,
             artifacts=artifacts,
             artifact_placements=placements,
             snapshots=snapshots,
@@ -650,6 +677,32 @@ class ExportService:
                     overlapping_network_name=existing.name,
                 ))
 
+        # Check walkthrough conflict
+        walkthrough_status = None
+        if export_data.walkthrough:
+            existing = db.query(Content).filter(
+                Content.title == export_data.walkthrough.title,
+                Content.content_type == ContentType.STUDENT_GUIDE,
+            ).first()
+
+            if existing:
+                # Compute hash of existing content
+                existing_hash = ""
+                if existing.walkthrough_data:
+                    existing_hash = hashlib.sha256(
+                        json.dumps(existing.walkthrough_data, sort_keys=True).encode()
+                    ).hexdigest()
+
+                if existing_hash == export_data.walkthrough.content_hash:
+                    walkthrough_status = "reuse_existing"
+                else:
+                    walkthrough_status = "create_renamed"
+                    warnings.append(
+                        f"Walkthrough '{export_data.walkthrough.title}' exists with different content - will create with new name"
+                    )
+            else:
+                walkthrough_status = "create_new"
+
         # Build summary
         summary = ImportSummary(
             range_name=export_data.range.name,
@@ -660,6 +713,7 @@ class ExportService:
             artifacts_count=len(export_data.artifacts),
             artifact_placements_count=len(export_data.artifact_placements),
             injects_count=len(export_data.msel.injects) if export_data.msel else 0,
+            walkthrough_status=walkthrough_status,
         )
 
         # Determine if valid
@@ -853,6 +907,49 @@ class ExportService:
                     db,
                 )
 
+            # Import walkthrough (Content Library student guide) if present and not skipped
+            walkthrough_imported = False
+            walkthrough_reused = False
+            if export_data.walkthrough and not options.skip_walkthrough:
+                walkthrough = export_data.walkthrough
+                content_id = None
+
+                # Try to find existing Content by title
+                existing = db.query(Content).filter(
+                    Content.title == walkthrough.title,
+                    Content.content_type == ContentType.STUDENT_GUIDE,
+                ).first()
+
+                if existing:
+                    # Compute hash of existing content
+                    existing_hash = ""
+                    if existing.walkthrough_data:
+                        existing_hash = hashlib.sha256(
+                            json.dumps(existing.walkthrough_data, sort_keys=True).encode()
+                        ).hexdigest()
+
+                    if existing_hash == walkthrough.content_hash:
+                        # Exact match - reuse existing
+                        content_id = existing.id
+                        walkthrough_reused = True
+                        logger.info(f"Reusing existing walkthrough: {walkthrough.title}")
+                    else:
+                        # Title exists but content differs - create with modified title
+                        timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M")
+                        new_title = f"{walkthrough.title} (imported {timestamp})"
+                        content_id = self._create_walkthrough_content(walkthrough, new_title, user, db)
+                        walkthrough_imported = True
+                        logger.info(f"Created walkthrough with new title: {new_title}")
+                else:
+                    # No match - create new
+                    content_id = self._create_walkthrough_content(walkthrough, walkthrough.title, user, db)
+                    walkthrough_imported = True
+                    logger.info(f"Created new walkthrough: {walkthrough.title}")
+
+                # Link to range
+                if content_id:
+                    new_range.student_guide_id = content_id
+
             db.commit()
 
             return ImportResult(
@@ -861,8 +958,10 @@ class ExportService:
                 range_name=new_range.name,
                 networks_created=len(network_name_to_id),
                 vms_created=len(vm_hostname_to_id),
-                templates_created=sum(1 for _ in template_name_to_id.values()),
+                templates_created=0,  # Templates deprecated
                 artifacts_imported=artifacts_imported,
+                walkthrough_imported=walkthrough_imported,
+                walkthrough_reused=walkthrough_reused,
                 warnings=warnings,
             )
 
@@ -904,6 +1003,34 @@ class ExportService:
 
     # NOTE: _resolve_templates and _create_template_from_data removed
     # Templates are deprecated - VMs now use Image Library (BaseImage, GoldenImage, Snapshot)
+
+    def _create_walkthrough_content(
+        self,
+        data: WalkthroughExportData,
+        title: str,
+        user: User,
+        db: Session,
+    ) -> UUID:
+        """
+        Create a Content Library entry from walkthrough export data.
+
+        Returns:
+            UUID of the created Content entry
+        """
+        content = Content(
+            title=title,
+            description=data.description,
+            content_type=ContentType.STUDENT_GUIDE,
+            body_markdown=data.body_markdown or "",
+            walkthrough_data=data.walkthrough_data,
+            version=data.version or "1.0",
+            tags=data.tags or [],
+            created_by_id=user.id,
+            is_published=True,  # Auto-publish so it's usable
+        )
+        db.add(content)
+        db.flush()
+        return content.id
 
     def _import_artifacts(
         self,
@@ -1008,8 +1135,10 @@ class ExportService:
         """
         Load Docker images from an offline export archive.
 
+        Skips images that already exist locally to speed up imports.
+
         Returns:
-            List of loaded image names
+            List of loaded image names (includes both loaded and already-present)
         """
         temp_dir = tempfile.mkdtemp(prefix="cyroid-import-images-")
         try:
@@ -1032,18 +1161,34 @@ class ExportService:
 
             docker_client = docker.from_env()
             loaded_images: List[str] = []
+            skipped_images: List[str] = []
 
             for image_data in export_data.docker_images:
+                image_name = image_data.image_name
+
+                # Check if image already exists locally
+                try:
+                    docker_client.images.get(image_name)
+                    logger.info(f"Skipping Docker image (already exists): {image_name}")
+                    skipped_images.append(image_name)
+                    loaded_images.append(image_name)
+                    continue
+                except docker.errors.ImageNotFound:
+                    pass  # Image doesn't exist, need to load it
+
                 tar_path = os.path.join(temp_dir, image_data.tar_path)
                 if not os.path.exists(tar_path):
                     logger.warning(f"Image tar not found: {image_data.tar_path}")
                     continue
 
-                logger.info(f"Loading Docker image: {image_data.image_name}")
+                logger.info(f"Loading Docker image: {image_name}")
                 with open(tar_path, "rb") as f:
                     images = docker_client.images.load(f)
                     for img in images:
                         loaded_images.extend(img.tags)
+
+            if skipped_images:
+                logger.info(f"Skipped {len(skipped_images)} images that already exist locally")
 
             return loaded_images
 
