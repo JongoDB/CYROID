@@ -142,18 +142,23 @@ export function WalkthroughPanel({ rangeId, walkthrough, onOpenVM, onCollapse }:
 
   return (
     <div className="h-full flex flex-col bg-gray-800 border-r border-gray-700">
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 bg-gray-800 border-b border-gray-700 relative z-10">
+      {/* Header - z-[9999] needed to be above VNC iframe stacking context */}
+      <div className="flex items-center justify-between px-4 py-3 bg-gray-800 border-b border-gray-700 relative z-[9999]">
         <div className="flex items-center gap-2">
           <BookOpen className="w-5 h-5 text-blue-400" />
           <h1 className="font-semibold text-white">{walkthrough.title}</h1>
         </div>
         {onCollapse && (
           <button
-            onClick={onCollapse}
-            className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded transition-colors"
+            onClick={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              onCollapse()
+            }}
+            className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded transition-colors relative z-[9999]"
+            style={{ pointerEvents: 'auto' }}
           >
-            <X className="w-5 h-5" />
+            <X className="w-5 h-5 pointer-events-none" />
           </button>
         )}
       </div>
