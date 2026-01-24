@@ -74,12 +74,15 @@ def compute_deployment_status(range_obj, events: list) -> DeploymentStatusRespon
     from datetime import timezone
     from cyroid.models.event_log import EventLog
 
-    # Find deployment start time
+    # Find deployment start time and track latest step message
     started_at = None
+    current_step = None
     for event in events:
         if event.event_type == EventType.DEPLOYMENT_STARTED:
             started_at = event.created_at
-            break
+        # Track deployment_step events for current progress message
+        elif event.event_type == EventType.DEPLOYMENT_STEP:
+            current_step = event.message
 
     # Track timestamps for duration calculation
     resource_start_times = {}
@@ -179,6 +182,7 @@ def compute_deployment_status(range_obj, events: list) -> DeploymentStatusRespon
         status=range_obj.status.value if hasattr(range_obj.status, 'value') else range_obj.status,
         elapsed_seconds=elapsed_seconds,
         started_at=started_at.isoformat() if started_at else None,
+        current_step=current_step,
         summary=summary,
         router=router_status,
         networks=list(network_statuses.values()),

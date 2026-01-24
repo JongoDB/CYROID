@@ -155,6 +155,12 @@ export function DeploymentProgress({
               style={{ width: `${(status.summary.completed / status.summary.total) * 100}%` }}
             />
           </div>
+          {/* Current step message */}
+          {status.current_step && (
+            <p className="mt-2 text-sm text-blue-300 truncate" title={status.current_step}>
+              {status.current_step}
+            </p>
+          )}
         </div>
       </div>
 
