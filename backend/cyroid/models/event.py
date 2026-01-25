@@ -80,6 +80,10 @@ class EventParticipant(Base, UUIDMixin, TimestampMixin):
         ForeignKey("ranges.id", ondelete="SET NULL"), nullable=True
     )
 
+    # VM Console visibility control - VMs hidden from this participant
+    # Empty list = all VMs visible (default)
+    hidden_vm_ids: Mapped[List[UUID]] = mapped_column(JSON, default=list)
+
     # Relationships
     event = relationship("TrainingEvent", back_populates="participants")
     user = relationship("User")

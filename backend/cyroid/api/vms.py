@@ -18,6 +18,8 @@ from cyroid.models.snapshot import Snapshot
 from cyroid.models.base_image import BaseImage
 from cyroid.models.golden_image import GoldenImage
 from cyroid.models.event_log import EventType
+from cyroid.models.event import EventParticipant
+from cyroid.models.user import User
 from cyroid.schemas.vm import VMCreate, VMUpdate, VMResponse
 from cyroid.services.event_service import EventService
 from cyroid.config import get_settings
@@ -30,6 +32,72 @@ router = APIRouter(prefix="/vms", tags=["VMs"])
 
 # Linux distros that have native ARM64 support
 ARM64_NATIVE_DISTROS = {'ubuntu', 'debian', 'fedora', 'alpine', 'rocky', 'alma', 'kali'}
+
+
+def filter_vms_by_visibility(
+    vms: List[VM],
+    range_obj: Range,
+    user: User,
+    db: Session
+) -> List[VM]:
+    """
+    Filter VMs based on participant visibility settings.
+
+    For students in a training event, only returns VMs that are not hidden.
+    Admins, engineers, and evaluators see all VMs.
+    """
+    # Admin/engineer/evaluator sees all VMs
+    if user.is_admin or user.has_any_role('engineer', 'evaluator'):
+        return vms
+
+    # Check if range is part of a training event
+    if not range_obj.training_event_id:
+        return vms  # Not an event range, show all
+
+    # Find participant record for this user
+    participant = db.query(EventParticipant).filter(
+        EventParticipant.event_id == range_obj.training_event_id,
+        EventParticipant.user_id == user.id
+    ).first()
+
+    if not participant:
+        return vms  # Not a participant, show all
+
+    # Filter out hidden VMs
+    hidden_ids = set(str(vm_id) for vm_id in (participant.hidden_vm_ids or []))
+    if not hidden_ids:
+        return vms  # No VMs hidden
+
+    return [vm for vm in vms if str(vm.id) not in hidden_ids]
+
+
+def can_access_vm_console(vm: VM, user: User, db: Session) -> bool:
+    """
+    Check if user can access VM console.
+
+    Returns False if the VM is hidden from the user in their training event.
+    """
+    # Admin/engineer/evaluator can access all consoles
+    if user.is_admin or user.has_any_role('engineer', 'evaluator'):
+        return True
+
+    # Get the range
+    range_obj = db.query(Range).filter(Range.id == vm.range_id).first()
+    if not range_obj or not range_obj.training_event_id:
+        return True  # Not part of an event, allow access
+
+    # Find participant record
+    participant = db.query(EventParticipant).filter(
+        EventParticipant.event_id == range_obj.training_event_id,
+        EventParticipant.user_id == user.id
+    ).first()
+
+    if not participant:
+        return True  # Not a participant, allow (though they may not have range access)
+
+    # Check if VM is hidden
+    hidden_ids = set(str(vm_id) for vm_id in (participant.hidden_vm_ids or []))
+    return str(vm.id) not in hidden_ids
 
 
 def get_next_available_ip(network: Network, db: Session, skip_gateway: bool = True) -> Optional[str]:
@@ -292,7 +360,7 @@ def load_vm_source(db: Session, vm: VM) -> Tuple[Optional[BaseImage], Optional[G
 
 @router.get("", response_model=List[VMResponse])
 def list_vms(range_id: UUID, db: DBSession, current_user: CurrentUser):
-    """List all VMs in a range"""
+    """List all VMs in a range, filtered by visibility for students."""
     # Verify range exists
     range_obj = db.query(Range).filter(Range.id == range_id).first()
     if not range_obj:
@@ -307,6 +375,9 @@ def list_vms(range_id: UUID, db: DBSession, current_user: CurrentUser):
         joinedload(VM.golden_image),
         joinedload(VM.source_snapshot)
     ).filter(VM.range_id == range_id).all()
+
+    # Filter VMs based on visibility settings (for students in training events)
+    vms = filter_vms_by_visibility(vms, range_obj, current_user, db)
 
     # Build responses with emulation status (relationships already loaded)
     responses = []
@@ -1575,6 +1646,13 @@ def get_vm_vnc_info(vm_id: UUID, db: DBSession, current_user: CurrentUser, reque
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="VM not found",
+        )
+
+    # Check visibility - students can't access hidden VMs
+    if not can_access_vm_console(vm, current_user, db):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Console access not available for this VM",
         )
 
     if vm.status != VMStatus.RUNNING:

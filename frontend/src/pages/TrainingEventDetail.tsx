@@ -37,6 +37,7 @@ import {
   User,
 } from '../services/api'
 import { useAuthStore } from '../stores/authStore'
+import { VMVisibilityControl } from '../components/events/VMVisibilityControl'
 import { format, parseISO } from 'date-fns'
 import DOMPurify from 'dompurify'
 
@@ -735,6 +736,15 @@ export default function TrainingEventDetail() {
             </div>
           )}
         </div>
+      )}
+
+      {/* VM Visibility Control - only show for running events with student participants */}
+      {!isNew && event && event.status === 'running' && canManage && (
+        <VMVisibilityControl
+          event={event}
+          canManage={canManage}
+          onUpdate={() => loadEvent(id!)}
+        />
       )}
 
       {/* Briefing Modal */}

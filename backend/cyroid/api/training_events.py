@@ -24,6 +24,10 @@ from cyroid.schemas.event import (
     EventParticipantResponse,
     EventBriefingResponse,
     EventContentItem,
+    VMVisibilityUpdate,
+    VMVisibilityResponse,
+    VMVisibilityVM,
+    BulkVMVisibilityUpdate,
 )
 
 logger = logging.getLogger(__name__)
@@ -848,3 +852,178 @@ def get_event_briefing(
         range_id=event.range_id,
         range_status=range_status,
     )
+
+
+# ============ VM Console Visibility Control ============
+
+@router.get("/{event_id}/participants/{user_id}/vm-visibility", response_model=VMVisibilityResponse)
+def get_participant_vm_visibility(
+    event_id: UUID,
+    user_id: UUID,
+    db: DBSession,
+    current_user: CurrentUser,
+):
+    """Get VM visibility settings for a participant."""
+    from cyroid.models.range import Range
+    from cyroid.models.vm import VM
+
+    # Validate event exists
+    event = db.query(TrainingEvent).filter(TrainingEvent.id == event_id).first()
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+
+    # Check authorization - must be able to manage event or be the participant
+    if not can_manage_event(event, current_user) and current_user.id != user_id:
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    # Find participant
+    participant = db.query(EventParticipant).filter(
+        EventParticipant.event_id == event_id,
+        EventParticipant.user_id == user_id,
+    ).first()
+    if not participant:
+        raise HTTPException(status_code=404, detail="Participant not found")
+
+    # Get user info
+    user = db.query(User).filter(User.id == user_id).first()
+    username = user.username if user else "Unknown"
+
+    # Get VMs from participant's range
+    vms_list = []
+    if participant.range_id:
+        vms = db.query(VM).filter(VM.range_id == participant.range_id).all()
+        hidden_ids = set(participant.hidden_vm_ids or [])
+        for vm in vms:
+            vms_list.append(VMVisibilityVM(
+                id=vm.id,
+                hostname=vm.hostname,
+                status=vm.status.value if hasattr(vm.status, 'value') else str(vm.status),
+                is_hidden=vm.id in hidden_ids,
+            ))
+
+    return VMVisibilityResponse(
+        participant_id=participant.id,
+        user_id=participant.user_id,
+        username=username,
+        range_id=participant.range_id,
+        hidden_vm_ids=participant.hidden_vm_ids or [],
+        vms=vms_list,
+    )
+
+
+@router.put("/{event_id}/participants/{user_id}/vm-visibility", response_model=VMVisibilityResponse)
+def update_participant_vm_visibility(
+    event_id: UUID,
+    user_id: UUID,
+    data: VMVisibilityUpdate,
+    db: DBSession,
+    current_user: CurrentUser,
+):
+    """Update which VMs are hidden from a participant."""
+    from cyroid.models.range import Range
+    from cyroid.models.vm import VM
+
+    # Validate event exists
+    event = db.query(TrainingEvent).filter(TrainingEvent.id == event_id).first()
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+
+    # Check authorization - must be able to manage event
+    if not can_manage_event(event, current_user):
+        raise HTTPException(status_code=403, detail="Not authorized to manage VM visibility")
+
+    # Find participant
+    participant = db.query(EventParticipant).filter(
+        EventParticipant.event_id == event_id,
+        EventParticipant.user_id == user_id,
+    ).first()
+    if not participant:
+        raise HTTPException(status_code=404, detail="Participant not found")
+
+    # Update hidden VM IDs
+    participant.hidden_vm_ids = [str(vm_id) for vm_id in data.hidden_vm_ids]
+    db.commit()
+    db.refresh(participant)
+
+    # Get user info
+    user = db.query(User).filter(User.id == user_id).first()
+    username = user.username if user else "Unknown"
+
+    # Get VMs from participant's range
+    vms_list = []
+    if participant.range_id:
+        vms = db.query(VM).filter(VM.range_id == participant.range_id).all()
+        hidden_ids = set(participant.hidden_vm_ids or [])
+        for vm in vms:
+            vms_list.append(VMVisibilityVM(
+                id=vm.id,
+                hostname=vm.hostname,
+                status=vm.status.value if hasattr(vm.status, 'value') else str(vm.status),
+                is_hidden=str(vm.id) in hidden_ids,
+            ))
+
+    logger.info(f"Updated VM visibility for participant {user_id} in event {event_id}: hidden={data.hidden_vm_ids}")
+
+    return VMVisibilityResponse(
+        participant_id=participant.id,
+        user_id=participant.user_id,
+        username=username,
+        range_id=participant.range_id,
+        hidden_vm_ids=[UUID(vm_id) for vm_id in participant.hidden_vm_ids] if participant.hidden_vm_ids else [],
+        vms=vms_list,
+    )
+
+
+@router.put("/{event_id}/vm-visibility/bulk")
+def bulk_update_vm_visibility(
+    event_id: UUID,
+    data: BulkVMVisibilityUpdate,
+    db: DBSession,
+    current_user: CurrentUser,
+):
+    """Apply visibility setting for a VM to all student participants."""
+    # Validate event exists
+    event = db.query(TrainingEvent).filter(TrainingEvent.id == event_id).first()
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+
+    # Check authorization
+    if not can_manage_event(event, current_user):
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    # Get all student participants
+    participants = db.query(EventParticipant).filter(
+        EventParticipant.event_id == event_id,
+        EventParticipant.role == "student",
+    ).all()
+
+    vm_id_str = str(data.vm_id)
+    updated_count = 0
+
+    for participant in participants:
+        hidden_ids = list(participant.hidden_vm_ids or [])
+
+        if data.is_hidden:
+            # Add to hidden list if not already there
+            if vm_id_str not in hidden_ids:
+                hidden_ids.append(vm_id_str)
+                participant.hidden_vm_ids = hidden_ids
+                updated_count += 1
+        else:
+            # Remove from hidden list if present
+            if vm_id_str in hidden_ids:
+                hidden_ids.remove(vm_id_str)
+                participant.hidden_vm_ids = hidden_ids
+                updated_count += 1
+
+    db.commit()
+
+    action = "hidden" if data.is_hidden else "shown"
+    logger.info(f"Bulk updated VM {data.vm_id} visibility to {action} for {updated_count} participants in event {event_id}")
+
+    return {
+        "message": f"VM {action} for {updated_count} participants",
+        "vm_id": data.vm_id,
+        "is_hidden": data.is_hidden,
+        "updated_count": updated_count,
+    }

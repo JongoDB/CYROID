@@ -14,8 +14,10 @@ export function VMSelector({ vms, selectedVmId, onSelectVM }: VMSelectorProps) {
 
   if (runningVms.length === 0) {
     return (
-      <div className="flex items-center justify-center px-4 py-3 bg-gray-800 border-t border-gray-700">
-        <span className="text-gray-400 text-sm">No running VMs</span>
+      <div className="flex flex-col items-center justify-center px-4 py-4 bg-gray-800 border-t border-gray-700">
+        <Monitor className="w-6 h-6 text-gray-500 mb-1" />
+        <span className="text-gray-400 text-sm">No VMs available yet</span>
+        <span className="text-gray-500 text-xs">Your instructor will enable access when ready</span>
       </div>
     )
   }

@@ -30,6 +30,8 @@ class EventParticipantResponse(EventParticipantBase):
     range_id: Optional[UUID] = None
     range_status: Optional[str] = None
     range_name: Optional[str] = None
+    # VM visibility control
+    hidden_vm_ids: List[UUID] = Field(default_factory=list)
 
     class Config:
         from_attributes = True
@@ -137,3 +139,34 @@ class EventBriefingResponse(BaseModel):
     content_items: List[EventContentItem]
     range_id: Optional[UUID] = None
     range_status: Optional[str] = None
+
+
+# ============ VM Visibility Control ============
+
+class VMVisibilityVM(BaseModel):
+    """VM info for visibility control."""
+    id: UUID
+    hostname: str
+    status: str
+    is_hidden: bool = False
+
+
+class VMVisibilityUpdate(BaseModel):
+    """Update VM visibility for a participant."""
+    hidden_vm_ids: List[UUID]
+
+
+class VMVisibilityResponse(BaseModel):
+    """VM visibility settings for a participant."""
+    participant_id: UUID
+    user_id: UUID
+    username: str
+    range_id: Optional[UUID] = None
+    hidden_vm_ids: List[UUID] = Field(default_factory=list)
+    vms: List[VMVisibilityVM] = Field(default_factory=list)
+
+
+class BulkVMVisibilityUpdate(BaseModel):
+    """Bulk update VM visibility for all participants."""
+    vm_id: UUID
+    is_hidden: bool

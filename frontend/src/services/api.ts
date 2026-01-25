@@ -1728,6 +1728,24 @@ export interface EventParticipant {
   range_id?: string
   range_status?: string
   range_name?: string
+  // VM visibility control
+  hidden_vm_ids?: string[]
+}
+
+export interface VMVisibilityVM {
+  id: string
+  hostname: string
+  status: string
+  is_hidden: boolean
+}
+
+export interface VMVisibilityResponse {
+  participant_id: string
+  user_id: string
+  username: string
+  range_id?: string
+  hidden_vm_ids: string[]
+  vms: VMVisibilityVM[]
 }
 
 export interface TrainingEvent {
@@ -1887,6 +1905,21 @@ export const trainingEventsApi = {
   // Briefing (role-based content)
   getBriefing: (eventId: string) =>
     api.get<EventBriefing>(`/training-events/${eventId}/briefing`),
+
+  // VM Visibility Control
+  getParticipantVMVisibility: (eventId: string, userId: string) =>
+    api.get<VMVisibilityResponse>(`/training-events/${eventId}/participants/${userId}/vm-visibility`),
+
+  updateParticipantVMVisibility: (eventId: string, userId: string, hiddenVmIds: string[]) =>
+    api.put<VMVisibilityResponse>(`/training-events/${eventId}/participants/${userId}/vm-visibility`, {
+      hidden_vm_ids: hiddenVmIds,
+    }),
+
+  bulkUpdateVMVisibility: (eventId: string, vmId: string, isHidden: boolean) =>
+    api.put(`/training-events/${eventId}/vm-visibility/bulk`, {
+      vm_id: vmId,
+      is_hidden: isHidden,
+    }),
 }
 
 export default api
