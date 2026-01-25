@@ -154,9 +154,12 @@ export default function ExportRangeDialog({
         {/* Modal */}
         <div className="relative bg-white rounded-lg shadow-xl max-w-lg w-full p-6">
           <div className="mb-6">
-            <h3 className="text-lg font-semibold text-gray-900">Export Range</h3>
+            <h3 className="text-lg font-semibold text-gray-900">Export Range Package</h3>
             <p className="mt-1 text-sm text-gray-500">
-              Export "{rangeName}" with all configuration for backup or transfer.
+              Create a portable ZIP package of "{rangeName}" for backup, transfer, or offline deployment.
+            </p>
+            <p className="mt-2 text-xs text-gray-400">
+              Tip: Use "Save as Blueprint" instead if you want to create reusable range templates within CYROID.
             </p>
           </div>
 

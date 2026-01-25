@@ -60,6 +60,11 @@ export default function SaveBlueprintModal({
           </div>
 
           <form onSubmit={handleSubmit} className="p-4 space-y-4">
+            <p className="text-sm text-gray-500 -mt-2 mb-4">
+              Blueprints allow you to quickly deploy multiple instances of this range configuration.
+              For sharing or backup, use "Export Range Package" instead.
+            </p>
+
             <div>
               <label className="block text-sm font-medium text-gray-700">
                 Blueprint Name
