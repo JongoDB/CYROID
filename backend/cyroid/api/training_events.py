@@ -251,6 +251,61 @@ def list_events(
     return results
 
 
+@router.get("/my-events", response_model=List[EventListResponse])
+def get_my_events(
+    db: DBSession,
+    current_user: CurrentUser,
+    status_filter: Optional[EventStatus] = Query(None, alias="status"),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+):
+    """Get events where the current user is a participant.
+
+    This is a convenience endpoint for students to see their assigned events.
+    Returns events where the user is registered as a participant.
+    """
+    # Get event IDs where user is a participant
+    participant_event_ids = db.query(EventParticipant.event_id).filter(
+        EventParticipant.user_id == current_user.id
+    ).subquery()
+
+    query = db.query(TrainingEvent).filter(
+        TrainingEvent.id.in_(participant_event_ids)
+    )
+
+    # Status filter
+    if status_filter:
+        query = query.filter(TrainingEvent.status == status_filter)
+
+    events = query.order_by(TrainingEvent.start_datetime.asc()).offset(offset).limit(limit).all()
+
+    results = []
+    for event in events:
+        participant_count = db.query(EventParticipant).filter(
+            EventParticipant.event_id == event.id
+        ).count()
+        results.append(EventListResponse(
+            id=event.id,
+            name=event.name,
+            description=event.description,
+            start_datetime=event.start_datetime,
+            end_datetime=event.end_datetime,
+            is_all_day=event.is_all_day,
+            timezone=event.timezone,
+            organization=event.organization,
+            location=event.location,
+            status=event.status,
+            tags=event.tags,
+            allowed_roles=event.allowed_roles,
+            participant_count=participant_count,
+            has_blueprint=event.blueprint_id is not None,
+            created_by_id=event.created_by_id,
+            created_at=event.created_at,
+        ))
+
+    return results
+
+
 @router.get("/{event_id}", response_model=EventDetailResponse)
 def get_event(
     event_id: UUID,

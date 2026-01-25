@@ -242,7 +242,12 @@
       "Bash(gh run view:*)",
       "Bash(gh api:*)",
       "Bash(gh run cancel:*)",
-      "Bash(gh workflow run:*)"
+      "Bash(gh workflow run:*)",
+      "Bash(git checkout:*)",
+      "Bash(gh pr create:*)",
+      "Bash(git log:*)",
+      "Bash(git branch:*)",
+      "Bash(git merge:*)"
     ]
   },
   "enableAllProjectMcpServers": true,

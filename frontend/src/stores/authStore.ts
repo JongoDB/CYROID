@@ -1,6 +1,7 @@
 // frontend/src/stores/authStore.ts
 import { create } from 'zustand'
 import { authApi, User, LoginRequest, RegisterRequest, PasswordChangeRequest } from '../services/api'
+import { getHighestRole, UserRole } from '../utils/roleUtils'
 
 interface AuthState {
   user: User | null
@@ -8,6 +9,7 @@ interface AuthState {
   isLoading: boolean
   error: string | null
   passwordResetRequired: boolean
+  activeRole: string | null  // Current perspective role (persisted to localStorage)
 
   // Actions
   login: (data: LoginRequest) => Promise<void>
@@ -17,14 +19,17 @@ interface AuthState {
   clearError: () => void
   changePassword: (data: PasswordChangeRequest) => Promise<void>
   clearPasswordResetRequired: () => void
+  setActiveRole: (role: string) => void
+  getEffectiveRole: () => UserRole | null
 }
 
-export const useAuthStore = create<AuthState>((set) => ({
+export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
   token: localStorage.getItem('token'),
   isLoading: false,
   error: null,
   passwordResetRequired: false,
+  activeRole: localStorage.getItem('activeRole'),
 
   login: async (data: LoginRequest) => {
     set({ isLoading: true, error: null })
@@ -36,7 +41,18 @@ export const useAuthStore = create<AuthState>((set) => ({
 
       // Fetch user info
       const userResponse = await authApi.me()
-      set({ user: userResponse.data, isLoading: false })
+      const user = userResponse.data
+      set({ user, isLoading: false })
+
+      // Initialize activeRole if not set or if stored role is not in user's roles
+      const storedRole = localStorage.getItem('activeRole')
+      if (!storedRole || !user.roles?.includes(storedRole)) {
+        const highestRole = getHighestRole(user.roles || [])
+        if (highestRole) {
+          localStorage.setItem('activeRole', highestRole)
+          set({ activeRole: highestRole })
+        }
+      }
     } catch (error: any) {
       const message = error.response?.data?.detail || 'Login failed'
       set({ error: message, isLoading: false })
@@ -58,7 +74,8 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   logout: () => {
     localStorage.removeItem('token')
-    set({ user: null, token: null })
+    localStorage.removeItem('activeRole')
+    set({ user: null, token: null, activeRole: null })
   },
 
   checkAuth: async () => {
@@ -71,15 +88,29 @@ export const useAuthStore = create<AuthState>((set) => ({
     set({ isLoading: true })
     try {
       const response = await authApi.me()
+      const user = response.data
+
+      // Initialize activeRole if not set or invalid
+      const storedRole = localStorage.getItem('activeRole')
+      let activeRole = storedRole
+      if (!storedRole || !user.roles?.includes(storedRole)) {
+        activeRole = getHighestRole(user.roles || [])
+        if (activeRole) {
+          localStorage.setItem('activeRole', activeRole)
+        }
+      }
+
       set({
-        user: response.data,
+        user,
         token,
         isLoading: false,
-        passwordResetRequired: response.data.password_reset_required
+        passwordResetRequired: user.password_reset_required,
+        activeRole,
       })
     } catch {
       localStorage.removeItem('token')
-      set({ user: null, token: null, isLoading: false })
+      localStorage.removeItem('activeRole')
+      set({ user: null, token: null, isLoading: false, activeRole: null })
     }
   },
 
@@ -102,4 +133,19 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   clearPasswordResetRequired: () => set({ passwordResetRequired: false }),
+
+  setActiveRole: (role: string) => {
+    localStorage.setItem('activeRole', role)
+    set({ activeRole: role })
+  },
+
+  getEffectiveRole: (): UserRole | null => {
+    const state = get()
+    // If activeRole is set and user has that role, use it
+    if (state.activeRole && state.user?.roles?.includes(state.activeRole)) {
+      return state.activeRole as UserRole
+    }
+    // Otherwise return highest role from user's roles
+    return getHighestRole(state.user?.roles || [])
+  },
 }))

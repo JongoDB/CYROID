@@ -1,8 +1,9 @@
 // frontend/src/components/layout/Layout.tsx
-import { ReactNode, useState, useEffect } from 'react'
+import { ReactNode, useState, useEffect, useMemo } from 'react'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from '../../stores/authStore'
 import { versionApi, VersionInfo } from '../../services/api'
+import { canAccessRoute } from '../../utils/roleUtils'
 import {
   LayoutDashboard,
   Server,
@@ -12,18 +13,19 @@ import {
   Menu,
   X,
   HardDrive,
-  Shield,
   Key,
   LayoutTemplate,
   Target,
   Settings,
   BookOpen,
-  CalendarDays
+  CalendarDays,
+  GraduationCap
 } from 'lucide-react'
 import clsx from 'clsx'
 import PasswordChangeModal from '../common/PasswordChangeModal'
 import { ToastContainer } from '../common/Toast'
 import { NotificationBell } from '../notifications'
+import PerspectiveSwitcher from '../common/PerspectiveSwitcher'
 
 interface LayoutProps {
   children: ReactNode
@@ -33,44 +35,25 @@ interface NavItem {
   name: string
   href: string
   icon: typeof LayoutDashboard
+  requiredRoles?: string[]  // If undefined, accessible by all roles
 }
 
-interface NavSection {
-  title: string
-  items: NavItem[]
-}
-
-// Dashboard is standalone, then organized sections
-const dashboardNav: NavItem = { name: 'Dashboard', href: '/', icon: LayoutDashboard }
-
-const navSections: NavSection[] = [
-  {
-    title: 'Content Development',
-    items: [
-      { name: 'Content Library', href: '/content', icon: BookOpen },
-      { name: 'VM Library', href: '/vm-library', icon: Server },
-      { name: 'Image Cache', href: '/cache', icon: HardDrive },
-      { name: 'Artifacts', href: '/artifacts', icon: FileBox },
-    ]
-  },
-  {
-    title: 'Range Development',
-    items: [
-      { name: 'Ranges', href: '/ranges', icon: Network },
-      { name: 'Range Blueprints', href: '/blueprints', icon: LayoutTemplate },
-      { name: 'Training Scenarios', href: '/scenarios', icon: Target },
-    ]
-  },
-  {
-    title: 'Event Management',
-    items: [
-      { name: 'Training Events', href: '/events', icon: CalendarDays },
-    ]
-  },
+// Navigation items with role-based access control
+const allNavigation: NavItem[] = [
+  { name: 'Dashboard', href: '/', icon: LayoutDashboard, requiredRoles: ['admin', 'engineer', 'evaluator'] },
+  { name: 'Student Portal', href: '/student-portal', icon: GraduationCap, requiredRoles: ['student'] },
+  { name: 'Image Cache', href: '/cache', icon: HardDrive, requiredRoles: ['admin', 'engineer'] },
+  { name: 'VM Library', href: '/vm-library', icon: Server, requiredRoles: ['admin', 'engineer'] },
+  { name: 'Range Blueprints', href: '/blueprints', icon: LayoutTemplate, requiredRoles: ['admin', 'engineer'] },
+  { name: 'Training Scenarios', href: '/scenarios', icon: Target, requiredRoles: ['admin', 'engineer'] },
+  { name: 'Content Library', href: '/content', icon: BookOpen, requiredRoles: ['admin', 'engineer', 'evaluator'] },
+  { name: 'Training Events', href: '/events', icon: CalendarDays },  // Accessible to all
+  { name: 'Ranges', href: '/ranges', icon: Network, requiredRoles: ['admin', 'engineer', 'evaluator'] },
+  { name: 'Artifacts', href: '/artifacts', icon: FileBox, requiredRoles: ['admin', 'engineer'] },
 ]
 
 export default function Layout({ children }: LayoutProps) {
-  const { user, logout, passwordResetRequired } = useAuthStore()
+  const { user, logout, passwordResetRequired, getEffectiveRole } = useAuthStore()
   const navigate = useNavigate()
   const location = useLocation()
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -82,6 +65,14 @@ export default function Layout({ children }: LayoutProps) {
       .then(res => setVersionInfo(res.data))
       .catch(() => {}) // Silently fail if version endpoint unavailable
   }, [])
+
+  // Get effective role for filtering navigation
+  const effectiveRole = getEffectiveRole()
+
+  // Filter navigation items based on active role
+  const navigation = useMemo(() => {
+    return allNavigation.filter(item => canAccessRoute(effectiveRole, item.requiredRoles))
+  }, [effectiveRole])
 
   // Check if user is admin (ABAC: check roles array)
   const isAdmin = user?.roles?.includes('admin') ?? false
@@ -116,52 +107,33 @@ export default function Layout({ children }: LayoutProps) {
           </button>
         </div>
         <nav className="mt-4 px-2 space-y-1">
-          {/* Dashboard - standalone */}
-          <Link
-            to={dashboardNav.href}
-            onClick={() => setSidebarOpen(false)}
-            className={clsx(
-              "flex items-center px-3 py-2 text-sm font-medium rounded-md",
-              location.pathname === dashboardNav.href
-                ? "bg-gray-800 text-white"
-                : "text-gray-300 hover:bg-gray-700 hover:text-white"
-            )}
-          >
-            <dashboardNav.icon className="mr-3 h-5 w-5" />
-            {dashboardNav.name}
-          </Link>
-
-          {/* Sectioned navigation */}
-          {navSections.map((section) => (
-            <div key={section.title} className="pt-4">
-              <h3 className="px-3 text-xs font-semibold text-gray-400 uppercase tracking-wider">
-                {section.title}
-              </h3>
-              <div className="mt-2 space-y-1">
-                {section.items.map((item) => (
-                  <Link
-                    key={item.name}
-                    to={item.href}
-                    onClick={() => setSidebarOpen(false)}
-                    className={clsx(
-                      "flex items-center px-3 py-2 text-sm font-medium rounded-md",
-                      location.pathname === item.href
-                        ? "bg-gray-800 text-white"
-                        : "text-gray-300 hover:bg-gray-700 hover:text-white"
-                    )}
-                  >
-                    <item.icon className="mr-3 h-5 w-5" />
-                    {item.name}
-                  </Link>
-                ))}
-              </div>
-            </div>
+          {navigation.map((item) => (
+            <Link
+              key={item.name}
+              to={item.href}
+              onClick={() => setSidebarOpen(false)}
+              className={clsx(
+                "flex items-center px-3 py-2 text-sm font-medium rounded-md",
+                location.pathname === item.href
+                  ? "bg-gray-800 text-white"
+                  : "text-gray-300 hover:bg-gray-700 hover:text-white"
+              )}
+            >
+              <item.icon className="mr-3 h-5 w-5" />
+              {item.name}
+            </Link>
           ))}
         </nav>
         {/* Mobile user section */}
         <div className="absolute bottom-0 left-0 right-0 px-2 pb-4 bg-gray-900">
           <div className="px-3 py-2 text-sm text-gray-400 border-t border-gray-700 pt-4">
             <div>Signed in as <span className="font-medium text-white">{user?.username}</span></div>
+            {/* Role Perspective Switcher (Mobile) */}
+            {user?.roles && user.roles.length > 0 && (
+              <div className="mt-2">
+                <PerspectiveSwitcher />
+              </div>
+            )}
           </div>
           {isAdmin && (
             <Link
@@ -204,59 +176,33 @@ export default function Layout({ children }: LayoutProps) {
         </div>
         <div className="flex flex-col flex-grow bg-gray-900 overflow-y-auto">
           <nav className="mt-4 flex-1 px-2 space-y-1">
-            {/* Dashboard - standalone */}
-            <Link
-              to={dashboardNav.href}
-              className={clsx(
-                "flex items-center px-3 py-2 text-sm font-medium rounded-md",
-                location.pathname === dashboardNav.href
-                  ? "bg-gray-800 text-white"
-                  : "text-gray-300 hover:bg-gray-700 hover:text-white"
-              )}
-            >
-              <dashboardNav.icon className="mr-3 h-5 w-5" />
-              {dashboardNav.name}
-            </Link>
-
-            {/* Sectioned navigation */}
-            {navSections.map((section) => (
-              <div key={section.title} className="pt-4">
-                <h3 className="px-3 text-xs font-semibold text-gray-400 uppercase tracking-wider">
-                  {section.title}
-                </h3>
-                <div className="mt-2 space-y-1">
-                  {section.items.map((item) => (
-                    <Link
-                      key={item.name}
-                      to={item.href}
-                      className={clsx(
-                        "flex items-center px-3 py-2 text-sm font-medium rounded-md",
-                        location.pathname === item.href
-                          ? "bg-gray-800 text-white"
-                          : "text-gray-300 hover:bg-gray-700 hover:text-white"
-                      )}
-                    >
-                      <item.icon className="mr-3 h-5 w-5" />
-                      {item.name}
-                    </Link>
-                  ))}
-                </div>
-              </div>
+            {navigation.map((item) => (
+              <Link
+                key={item.name}
+                to={item.href}
+                className={clsx(
+                  "flex items-center px-3 py-2 text-sm font-medium rounded-md",
+                  location.pathname === item.href
+                    ? "bg-gray-800 text-white"
+                    : "text-gray-300 hover:bg-gray-700 hover:text-white"
+                )}
+              >
+                <item.icon className="mr-3 h-5 w-5" />
+                {item.name}
+              </Link>
             ))}
           </nav>
           <div className="px-2 pb-4">
             <div className="px-3 py-2 text-sm text-gray-400">
               <div>Signed in as <span className="font-medium text-white">{user?.username}</span></div>
+              {/* Role Perspective Switcher */}
               {user?.roles && user.roles.length > 0 && (
-                <div className="mt-1 flex items-center flex-wrap gap-1">
-                  <Shield className="h-3 w-3 mr-1" />
-                  {user.roles.map((role) => (
-                    <span key={role} className="capitalize text-xs bg-gray-700 px-1.5 py-0.5 rounded">{role}</span>
-                  ))}
+                <div className="mt-2">
+                  <PerspectiveSwitcher />
                 </div>
               )}
               {user?.tags && user.tags.length > 0 && (
-                <div className="mt-1 flex items-center flex-wrap gap-1">
+                <div className="mt-2 flex items-center flex-wrap gap-1">
                   {user.tags.slice(0, 3).map((tag) => (
                     <span key={tag} className="text-xs bg-gray-700 px-1.5 py-0.5 rounded text-gray-300">{tag}</span>
                   ))}

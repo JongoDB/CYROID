@@ -17,6 +17,7 @@ import Blueprints from './pages/Blueprints'
 import BlueprintDetail from './pages/BlueprintDetail'
 import TrainingScenarios from './pages/TrainingScenarios'
 import StudentLab from './pages/StudentLab'
+import StudentPortal from './pages/StudentPortal'
 import ImageCache from './pages/ImageCache'
 import UserManagement from './pages/UserManagement'
 import Admin from './pages/Admin'
@@ -70,23 +71,101 @@ function App() {
           <ProtectedRoute>
             <Layout>
               <Routes>
-                <Route path="/" element={<Dashboard />} />
-                <Route path="/vm-library" element={<VMLibrary />} />
-                <Route path="/ranges" element={<Ranges />} />
-                <Route path="/ranges/new" element={<RangeWizardPage />} />
-                <Route path="/ranges/:id" element={<RangeDetail />} />
-                <Route path="/blueprints" element={<Blueprints />} />
-                <Route path="/blueprints/:id" element={<BlueprintDetail />} />
-                <Route path="/scenarios" element={<TrainingScenarios />} />
-                <Route path="/execution/:rangeId" element={<ExecutionConsole />} />
-                <Route path="/cache" element={<ImageCache />} />
-                <Route path="/users" element={<UserManagement />} />
-                <Route path="/admin" element={<Admin />} />
-                <Route path="/content" element={<ContentLibrary />} />
-                <Route path="/content/:id" element={<ContentEditor />} />
+                {/* Dashboard - accessible to admin, engineer, evaluator */}
+                <Route path="/" element={
+                  <ProtectedRoute requiredRoles={['admin', 'engineer', 'evaluator']}>
+                    <Dashboard />
+                  </ProtectedRoute>
+                } />
+
+                {/* Student Portal - accessible to students */}
+                <Route path="/student-portal" element={
+                  <ProtectedRoute requiredRoles={['student']}>
+                    <StudentPortal />
+                  </ProtectedRoute>
+                } />
+
+                {/* Range Engineering - admin and engineer only */}
+                <Route path="/vm-library" element={
+                  <ProtectedRoute requiredRoles={['admin', 'engineer']}>
+                    <VMLibrary />
+                  </ProtectedRoute>
+                } />
+                <Route path="/cache" element={
+                  <ProtectedRoute requiredRoles={['admin', 'engineer']}>
+                    <ImageCache />
+                  </ProtectedRoute>
+                } />
+                <Route path="/blueprints" element={
+                  <ProtectedRoute requiredRoles={['admin', 'engineer']}>
+                    <Blueprints />
+                  </ProtectedRoute>
+                } />
+                <Route path="/blueprints/:id" element={
+                  <ProtectedRoute requiredRoles={['admin', 'engineer']}>
+                    <BlueprintDetail />
+                  </ProtectedRoute>
+                } />
+                <Route path="/scenarios" element={
+                  <ProtectedRoute requiredRoles={['admin', 'engineer']}>
+                    <TrainingScenarios />
+                  </ProtectedRoute>
+                } />
+                <Route path="/ranges/new" element={
+                  <ProtectedRoute requiredRoles={['admin', 'engineer']}>
+                    <RangeWizardPage />
+                  </ProtectedRoute>
+                } />
+                <Route path="/artifacts" element={
+                  <ProtectedRoute requiredRoles={['admin', 'engineer']}>
+                    <div>Artifacts - Coming Soon</div>
+                  </ProtectedRoute>
+                } />
+
+                {/* Ranges - accessible to admin, engineer, evaluator */}
+                <Route path="/ranges" element={
+                  <ProtectedRoute requiredRoles={['admin', 'engineer', 'evaluator']}>
+                    <Ranges />
+                  </ProtectedRoute>
+                } />
+                <Route path="/ranges/:id" element={
+                  <ProtectedRoute requiredRoles={['admin', 'engineer', 'evaluator']}>
+                    <RangeDetail />
+                  </ProtectedRoute>
+                } />
+                <Route path="/execution/:rangeId" element={
+                  <ProtectedRoute requiredRoles={['admin', 'engineer', 'evaluator']}>
+                    <ExecutionConsole />
+                  </ProtectedRoute>
+                } />
+
+                {/* Content - accessible to admin, engineer, evaluator */}
+                <Route path="/content" element={
+                  <ProtectedRoute requiredRoles={['admin', 'engineer', 'evaluator']}>
+                    <ContentLibrary />
+                  </ProtectedRoute>
+                } />
+                <Route path="/content/:id" element={
+                  <ProtectedRoute requiredRoles={['admin', 'engineer', 'evaluator']}>
+                    <ContentEditor />
+                  </ProtectedRoute>
+                } />
+
+                {/* Training Events - accessible to all authenticated users */}
                 <Route path="/events" element={<TrainingEvents />} />
                 <Route path="/events/:id" element={<TrainingEventDetail />} />
-                <Route path="/artifacts" element={<div>Artifacts - Coming Soon</div>} />
+
+                {/* Admin only */}
+                <Route path="/users" element={
+                  <ProtectedRoute requiredRoles={['admin']}>
+                    <UserManagement />
+                  </ProtectedRoute>
+                } />
+                <Route path="/admin" element={
+                  <ProtectedRoute requiredRoles={['admin']}>
+                    <Admin />
+                  </ProtectedRoute>
+                } />
               </Routes>
             </Layout>
           </ProtectedRoute>

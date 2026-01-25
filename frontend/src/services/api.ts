@@ -1832,6 +1832,14 @@ export const trainingEventsApi = {
   }) =>
     api.get<TrainingEventListItem[]>('/training-events', { params }),
 
+  // Get events where current user is a participant (for Student Portal)
+  getMyEvents: (params?: {
+    status?: EventStatus
+    limit?: number
+    offset?: number
+  }) =>
+    api.get<TrainingEventListItem[]>('/training-events/my-events', { params }),
+
   get: (id: string) =>
     api.get<TrainingEventDetail>(`/training-events/${id}`),
 

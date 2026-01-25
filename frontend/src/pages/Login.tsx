@@ -2,6 +2,7 @@
 import { useState, FormEvent, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../stores/authStore'
+import { getLandingPage } from '../utils/roleUtils'
 import PasswordChangeModal from '../components/common/PasswordChangeModal'
 
 export default function Login() {
@@ -23,10 +24,12 @@ export default function Login() {
     try {
       await login({ username, password })
       // If password reset is required, the useEffect will show the modal
-      // Otherwise, navigate to home
+      // Otherwise, navigate to role-appropriate landing page
       const state = useAuthStore.getState()
       if (!state.passwordResetRequired) {
-        navigate('/')
+        const effectiveRole = state.getEffectiveRole()
+        const landingPage = getLandingPage(effectiveRole)
+        navigate(landingPage)
       }
     } catch {
       // Error is handled by store
@@ -35,7 +38,10 @@ export default function Login() {
 
   const handlePasswordChangeComplete = () => {
     setShowPasswordModal(false)
-    navigate('/')
+    const state = useAuthStore.getState()
+    const effectiveRole = state.getEffectiveRole()
+    const landingPage = getLandingPage(effectiveRole)
+    navigate(landingPage)
   }
 
   return (
