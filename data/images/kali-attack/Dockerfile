@@ -19,6 +19,12 @@ USER root
 ENV DEBIAN_FRONTEND=noninteractive
 ENV HOME=/home/kasm-default-profile
 
+# Fix Kali GPG key (required when base image has outdated keyring)
+# The key ED65462EC8D5E4C5 is the current Kali archive signing key
+RUN apt-get update --allow-insecure-repositories && \
+    apt-get install -y --allow-unauthenticated kali-archive-keyring && \
+    rm -rf /var/lib/apt/lists/*
+
 # Update repos and install core penetration testing tools
 # Note: Some packages may not exist on all architectures, using || true for optional ones
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -100,15 +106,16 @@ WORKDIR /opt/tools
 RUN mkdir -p /opt/tools/peas /opt/tools/binaries
 
 # ============ Install Additional Tools Not in Kali Repos ============
+# Note: Some tools may not have ARM64 binaries, so we use || true for optional ones
 
-# Kerbrute - AD username enumeration and password spraying
+# Kerbrute - AD username enumeration and password spraying (x86_64 only)
 RUN ARCH=$(uname -m) && \
     if [ "$ARCH" = "x86_64" ]; then \
-        wget -q https://github.com/ropnop/kerbrute/releases/latest/download/kerbrute_linux_amd64 -O /usr/local/bin/kerbrute; \
-    elif [ "$ARCH" = "aarch64" ]; then \
-        wget -q https://github.com/ropnop/kerbrute/releases/latest/download/kerbrute_linux_arm64 -O /usr/local/bin/kerbrute; \
-    fi && \
-    chmod +x /usr/local/bin/kerbrute
+        wget -q https://github.com/ropnop/kerbrute/releases/latest/download/kerbrute_linux_amd64 -O /usr/local/bin/kerbrute && \
+        chmod +x /usr/local/bin/kerbrute; \
+    else \
+        echo "Kerbrute not available for $ARCH, skipping"; \
+    fi
 
 # Chisel - TCP/UDP tunneling over HTTP
 RUN ARCH=$(uname -m) && \
@@ -118,9 +125,11 @@ RUN ARCH=$(uname -m) && \
     elif [ "$ARCH" = "aarch64" ]; then \
         wget -q "https://github.com/jpillora/chisel/releases/download/${CHISEL_VERSION}/chisel_${CHISEL_VERSION#v}_linux_arm64.gz" -O /tmp/chisel.gz; \
     fi && \
-    gunzip /tmp/chisel.gz && \
-    mv /tmp/chisel /usr/local/bin/chisel && \
-    chmod +x /usr/local/bin/chisel
+    if [ -f /tmp/chisel.gz ]; then \
+        gunzip /tmp/chisel.gz && \
+        mv /tmp/chisel /usr/local/bin/chisel && \
+        chmod +x /usr/local/bin/chisel; \
+    fi
 
 # Ligolo-ng agent - Advanced tunneling
 RUN ARCH=$(uname -m) && \
@@ -130,9 +139,11 @@ RUN ARCH=$(uname -m) && \
     elif [ "$ARCH" = "aarch64" ]; then \
         wget -q "https://github.com/nicocha30/ligolo-ng/releases/download/${LIGOLO_VERSION}/ligolo-ng_agent_${LIGOLO_VERSION#v}_linux_arm64.tar.gz" -O /tmp/ligolo.tar.gz; \
     fi && \
-    tar -xzf /tmp/ligolo.tar.gz -C /opt/tools/binaries/ && \
-    rm /tmp/ligolo.tar.gz && \
-    ln -s /opt/tools/binaries/agent /usr/local/bin/ligolo-agent
+    if [ -f /tmp/ligolo.tar.gz ]; then \
+        tar -xzf /tmp/ligolo.tar.gz -C /opt/tools/binaries/ && \
+        rm /tmp/ligolo.tar.gz && \
+        ln -sf /opt/tools/binaries/agent /usr/local/bin/ligolo-agent; \
+    fi
 
 # PEAS - Privilege Escalation Awesome Scripts
 RUN wget -q https://github.com/peass-ng/PEASS-ng/releases/latest/download/linpeas.sh -O /opt/tools/peas/linpeas.sh && \
