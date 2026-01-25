@@ -102,7 +102,7 @@ services:
       # Training scenarios (read from filesystem, writable for uploads)
       - ./data/scenarios:/data/scenarios
       # Buildable Docker images with Dockerfiles (version-controlled in repo)
-      - ./docker-images:/data/images
+      - ./data/images:/data/images
       # Shared directory for Traefik dynamic config (VNC routes)
       - ./traefik/dynamic:/app/traefik/dynamic
     expose:
