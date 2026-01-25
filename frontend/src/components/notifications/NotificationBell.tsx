@@ -83,9 +83,9 @@ export function NotificationBell() {
         )}
       </button>
 
-      {/* Dropdown */}
+      {/* Dropdown - position right on mobile (top bar), left on desktop (sidebar extends into content) */}
       {isOpen && (
-        <div className="absolute right-0 mt-2 w-80 bg-gray-800 border border-gray-700 rounded-lg shadow-xl z-50 overflow-hidden">
+        <div className="absolute right-0 lg:left-0 lg:right-auto mt-2 w-80 max-w-[calc(100vw-2rem)] bg-gray-800 border border-gray-700 rounded-lg shadow-xl z-[9999] overflow-hidden">
           {/* Header */}
           <div className="px-4 py-3 border-b border-gray-700">
             <h3 className="text-sm font-medium text-gray-200">Notifications</h3>

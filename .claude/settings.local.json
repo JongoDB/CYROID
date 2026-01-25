@@ -237,7 +237,12 @@
       "WebFetch(domain:mirror.mika.moe)",
       "WebFetch(domain:www.microsoft.com)",
       "WebFetch(domain:gist.github.com)",
-      "WebFetch(domain:archive.org)"
+      "WebFetch(domain:archive.org)",
+      "Bash(gh run list:*)",
+      "Bash(gh run view:*)",
+      "Bash(gh api:*)",
+      "Bash(gh run cancel:*)",
+      "Bash(gh workflow run:*)"
     ]
   },
   "enableAllProjectMcpServers": true,

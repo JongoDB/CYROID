@@ -148,13 +148,14 @@ export default function Layout({ children }: LayoutProps) {
         </div>
       </div>
 
-      {/* Desktop sidebar */}
-      <div className="hidden lg:fixed lg:inset-y-0 lg:flex lg:w-64 lg:flex-col">
+      {/* Desktop sidebar - z-30 ensures notification dropdown overlays main content */}
+      <div className="hidden lg:fixed lg:inset-y-0 lg:flex lg:w-64 lg:flex-col lg:z-30">
+        {/* Header outside scrollable area so dropdown isn't clipped */}
+        <div className="flex items-center justify-between h-16 px-4 bg-gray-800 relative z-20">
+          <span className="text-xl font-bold text-white">CYROID</span>
+          <NotificationBell />
+        </div>
         <div className="flex flex-col flex-grow bg-gray-900 overflow-y-auto">
-          <div className="flex items-center justify-between h-16 px-4 bg-gray-800">
-            <span className="text-xl font-bold text-white">CYROID</span>
-            <NotificationBell />
-          </div>
           <nav className="mt-4 flex-1 px-2 space-y-1">
             {navigation.map((item) => (
               <Link
