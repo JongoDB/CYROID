@@ -18,8 +18,11 @@ import {
   MoreVertical,
   Download,
   Upload,
+  X,
+  FileCode,
 } from 'lucide-react'
-import { contentApi, ContentListItem, ContentType } from '../services/api'
+import { contentApi, ContentListItem, ContentType, ContentImport } from '../services/api'
+import { toast } from '../stores/toastStore'
 import { formatDistanceToNow } from 'date-fns'
 
 const CONTENT_TYPE_INFO: Record<ContentType, { icon: typeof BookOpen; label: string; color: string }> = {
@@ -41,6 +44,10 @@ export default function ContentLibrary() {
   const [publishedFilter, setPublishedFilter] = useState<'all' | 'published' | 'draft'>('all')
   const [showFilters, setShowFilters] = useState(false)
   const [activeMenu, setActiveMenu] = useState<string | null>(null)
+  const [showImportModal, setShowImportModal] = useState(false)
+  const [importData, setImportData] = useState<string>('')
+  const [importLoading, setImportLoading] = useState(false)
+  const [importError, setImportError] = useState<string | null>(null)
 
   useEffect(() => {
     loadContent()
@@ -101,30 +108,70 @@ export default function ContentLibrary() {
     setActiveMenu(null)
   }
 
-  async function handleExport(id: string, format: 'json' | 'md' | 'html') {
+  async function handleExportHtml(id: string, title: string) {
     try {
-      const response = await contentApi.exportContent(id, format)
-      if (format === 'json') {
-        const blob = new Blob([JSON.stringify(response.data, null, 2)], { type: 'application/json' })
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        a.download = `content-${id}.json`
-        a.click()
-        URL.revokeObjectURL(url)
-      } else {
-        const blob = response.data as Blob
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        a.download = `content-${id}.${format}`
-        a.click()
-        URL.revokeObjectURL(url)
-      }
+      const response = await contentApi.exportContent(id, 'html')
+      const blob = response.data as Blob
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      // Use title for filename, sanitized
+      const safeTitle = title.replace(/[^a-z0-9]/gi, '_').substring(0, 50)
+      a.download = `${safeTitle}.html`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+      toast.success('Content exported as HTML')
     } catch (err) {
       console.error('Failed to export:', err)
+      toast.error('Failed to export content')
     }
     setActiveMenu(null)
+  }
+
+  async function handleImport() {
+    if (!importData.trim()) {
+      setImportError('Please paste JSON content to import')
+      return
+    }
+
+    setImportLoading(true)
+    setImportError(null)
+
+    try {
+      const parsed = JSON.parse(importData) as ContentImport
+      // Validate required fields
+      if (!parsed.title || !parsed.content_type || !parsed.body_markdown) {
+        throw new Error('Missing required fields: title, content_type, body_markdown')
+      }
+      await contentApi.importContent(parsed)
+      toast.success('Content imported successfully')
+      setShowImportModal(false)
+      setImportData('')
+      loadContent()
+    } catch (err: any) {
+      const message = err.response?.data?.detail || err.message || 'Failed to import content'
+      setImportError(message)
+    } finally {
+      setImportLoading(false)
+    }
+  }
+
+  function handleImportFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    const reader = new FileReader()
+    reader.onload = (event) => {
+      const text = event.target?.result as string
+      setImportData(text)
+      setImportError(null)
+    }
+    reader.onerror = () => {
+      setImportError('Failed to read file')
+    }
+    reader.readAsText(file)
   }
 
   return (
@@ -139,7 +186,7 @@ export default function ContentLibrary() {
         </div>
         <div className="flex items-center space-x-3">
           <button
-            onClick={() => {/* TODO: Import modal */}}
+            onClick={() => setShowImportModal(true)}
             className="inline-flex items-center px-3 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
           >
             <Upload className="h-4 w-4 mr-2" />
@@ -298,14 +345,7 @@ export default function ContentLibrary() {
                             </button>
                             <div className="border-t border-gray-100">
                               <button
-                                onClick={() => handleExport(item.id, 'md')}
-                                className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
-                              >
-                                <Download className="h-4 w-4 mr-3" />
-                                Export as Markdown
-                              </button>
-                              <button
-                                onClick={() => handleExport(item.id, 'html')}
+                                onClick={() => handleExportHtml(item.id, item.title)}
                                 className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
                               >
                                 <Download className="h-4 w-4 mr-3" />
@@ -357,6 +397,91 @@ export default function ContentLibrary() {
               </div>
             )
           })}
+        </div>
+      )}
+
+      {/* Import Modal */}
+      {showImportModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-hidden">
+            <div className="flex items-center justify-between p-4 border-b">
+              <h2 className="text-lg font-medium">Import Content</h2>
+              <button
+                onClick={() => {
+                  setShowImportModal(false)
+                  setImportData('')
+                  setImportError(null)
+                }}
+                className="p-1 hover:bg-gray-100 rounded"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="p-4 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Upload JSON file or paste content
+                </label>
+                <input
+                  type="file"
+                  accept=".json"
+                  onChange={handleImportFile}
+                  className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-medium file:bg-primary-50 file:text-primary-700 hover:file:bg-primary-100"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  JSON Content
+                </label>
+                <textarea
+                  value={importData}
+                  onChange={(e) => {
+                    setImportData(e.target.value)
+                    setImportError(null)
+                  }}
+                  placeholder='{"title": "My Content", "content_type": "student_guide", "body_markdown": "# Content here..."}'
+                  rows={12}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md font-mono text-sm focus:ring-primary-500 focus:border-primary-500"
+                />
+              </div>
+
+              {importError && (
+                <div className="p-3 bg-red-50 border border-red-200 rounded-md text-sm text-red-700">
+                  {importError}
+                </div>
+              )}
+
+              <div className="bg-gray-50 -mx-4 -mb-4 px-4 py-3 border-t">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center text-sm text-gray-500">
+                    <FileCode className="h-4 w-4 mr-1" />
+                    Required: title, content_type, body_markdown
+                  </div>
+                  <div className="flex space-x-3">
+                    <button
+                      onClick={() => {
+                        setShowImportModal(false)
+                        setImportData('')
+                        setImportError(null)
+                      }}
+                      className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handleImport}
+                      disabled={importLoading || !importData.trim()}
+                      className="px-4 py-2 bg-primary-600 text-white rounded-md text-sm font-medium hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {importLoading ? 'Importing...' : 'Import'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>
