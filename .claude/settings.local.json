@@ -247,7 +247,8 @@
       "Bash(gh pr create:*)",
       "Bash(git log:*)",
       "Bash(git branch:*)",
-      "Bash(git merge:*)"
+      "Bash(git merge:*)",
+      "Bash(git ls-tree:*)"
     ]
   },
   "enableAllProjectMcpServers": true,
