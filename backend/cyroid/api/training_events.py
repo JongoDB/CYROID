@@ -609,6 +609,34 @@ def cancel_event(
     return build_event_response(event, db)
 
 
+@router.post("/{event_id}/reactivate", response_model=EventResponse)
+def reactivate_event(
+    event_id: UUID,
+    db: DBSession,
+    current_user: CurrentUser,
+):
+    """Reactivate a cancelled event, returning it to draft status.
+
+    This allows cancelled events to be re-scheduled or started again.
+    """
+    event = db.query(TrainingEvent).filter(TrainingEvent.id == event_id).first()
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+
+    if not can_manage_event(event, current_user):
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    if event.status != EventStatus.CANCELLED:
+        raise HTTPException(status_code=400, detail="Only cancelled events can be reactivated")
+
+    event.status = EventStatus.DRAFT
+    db.commit()
+    db.refresh(event)
+
+    logger.info(f"Event reactivated: {event.name} by {current_user.username}")
+    return build_event_response(event, db)
+
+
 # ============ Participants ============
 
 @router.get("/{event_id}/participants", response_model=List[EventParticipantResponse])

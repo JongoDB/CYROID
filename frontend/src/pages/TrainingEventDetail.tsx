@@ -22,6 +22,7 @@ import {
   Rocket,
   Loader2,
   ExternalLink,
+  RotateCcw,
 } from 'lucide-react'
 import {
   trainingEventsApi,
@@ -272,7 +273,7 @@ export default function TrainingEventDetail() {
     }
   }
 
-  async function handleStatusChange(action: 'publish' | 'start' | 'complete' | 'cancel', autoDeploy = false) {
+  async function handleStatusChange(action: 'publish' | 'start' | 'complete' | 'cancel' | 'reactivate', autoDeploy = false) {
     if (!id) return
     try {
       switch (action) {
@@ -287,6 +288,9 @@ export default function TrainingEventDetail() {
           break
         case 'cancel':
           await trainingEventsApi.cancel(id)
+          break
+        case 'reactivate':
+          await trainingEventsApi.reactivate(id)
           break
       }
       await loadEvent(id)
@@ -402,6 +406,15 @@ export default function TrainingEventDetail() {
               >
                 <XCircle className="h-4 w-4 mr-1" />
                 Cancel
+              </button>
+            )}
+            {event.status === 'cancelled' && (
+              <button
+                onClick={() => handleStatusChange('reactivate')}
+                className="inline-flex items-center px-3 py-1.5 border border-amber-300 text-sm font-medium rounded text-amber-700 bg-amber-50 hover:bg-amber-100"
+              >
+                <RotateCcw className="h-4 w-4 mr-1" />
+                Reactivate
               </button>
             )}
           </div>
