@@ -20,10 +20,12 @@ import {
   Upload,
   X,
   FileCode,
+  FileDown,
 } from 'lucide-react'
 import { contentApi, ContentListItem, ContentType, ContentImport } from '../services/api'
 import { toast } from '../stores/toastStore'
 import { formatDistanceToNow } from 'date-fns'
+import html2pdf from 'html2pdf.js'
 
 const CONTENT_TYPE_INFO: Record<ContentType, { icon: typeof BookOpen; label: string; color: string }> = {
   student_guide: { icon: GraduationCap, label: 'Student Guide', color: 'bg-blue-100 text-blue-800' },
@@ -126,6 +128,51 @@ export default function ContentLibrary() {
     } catch (err) {
       console.error('Failed to export:', err)
       toast.error('Failed to export content')
+    }
+    setActiveMenu(null)
+  }
+
+  async function handleExportPdf(id: string, title: string) {
+    try {
+      // Fetch HTML content from backend (trusted source)
+      const response = await contentApi.exportContent(id, 'html')
+      const blob = response.data as Blob
+      const htmlContent = await blob.text()
+
+      // Create temporary container for PDF generation (never added to DOM)
+      const container = document.createElement('div')
+      // Safe: HTML is from our own backend API, not user input
+      container.innerHTML = htmlContent
+
+      // Extract just the body content if it's a full HTML document
+      const bodyMatch = htmlContent.match(/<body[^>]*>([\s\S]*)<\/body>/i)
+      if (bodyMatch) {
+        container.innerHTML = bodyMatch[1]
+      }
+
+      // Apply inline styles for PDF rendering
+      container.style.fontFamily = 'system-ui, sans-serif'
+      container.style.lineHeight = '1.6'
+      container.style.padding = '20px'
+
+      const safeTitle = title.replace(/[^a-z0-9]/gi, '_').substring(0, 50)
+
+      // Generate PDF using html2pdf
+      await html2pdf()
+        .set({
+          margin: [10, 10, 10, 10],
+          filename: `${safeTitle}.pdf`,
+          image: { type: 'jpeg', quality: 0.98 },
+          html2canvas: { scale: 2, useCORS: true, logging: false },
+          jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+        })
+        .from(container)
+        .save()
+
+      toast.success('Content exported as PDF')
+    } catch (err) {
+      console.error('Failed to export PDF:', err)
+      toast.error('Failed to export content as PDF')
     }
     setActiveMenu(null)
   }
@@ -350,6 +397,13 @@ export default function ContentLibrary() {
                               >
                                 <Download className="h-4 w-4 mr-3" />
                                 Export as HTML
+                              </button>
+                              <button
+                                onClick={() => handleExportPdf(item.id, item.title)}
+                                className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                              >
+                                <FileDown className="h-4 w-4 mr-3" />
+                                Export as PDF
                               </button>
                             </div>
                             <div className="border-t border-gray-100">
