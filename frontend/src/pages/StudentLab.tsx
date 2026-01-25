@@ -6,6 +6,7 @@ import { rangesApi, vmsApi, walkthroughApi } from '../services/api'
 import { Range, VM, Walkthrough } from '../types'
 import { WalkthroughPanel } from '../components/walkthrough'
 import { VMSelector, ConsoleEmbed } from '../components/lab'
+import { VmClipboardProvider } from '../contexts/VmClipboardContext'
 
 export default function StudentLab() {
   const { rangeId } = useParams<{ rangeId: string }>()
@@ -172,6 +173,7 @@ export default function StudentLab() {
   }
 
   return (
+    <VmClipboardProvider>
     <div className="h-screen w-screen bg-gray-900 flex flex-col">
       <div ref={containerRef} className="flex-1 flex overflow-hidden">
         {/* Walkthrough Panel - Guide on the left */}
@@ -243,5 +245,6 @@ export default function StudentLab() {
         <div className="fixed inset-0 z-50 cursor-col-resize" />
       )}
     </div>
+    </VmClipboardProvider>
   )
 }
