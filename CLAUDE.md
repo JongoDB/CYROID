@@ -9,7 +9,7 @@
 - **Name**: CYROID (Cyber Range Orchestrator In Docker)
 - **Type**: Web-based cyber range orchestration platform
 - **Domain**: Military/government cyber training, educational institutions
-- **Current Version**: 0.5.0-alpha
+- **Current Version**: 0.23.5
 - **Repository**: /Users/JonWFH/jondev/CYROID
 
 ---
@@ -17,13 +17,17 @@
 ## Quick Context
 
 CYROID automates Docker-based cyber training environments with:
-- Multi-OS VM support (Linux containers, Linux VMs via QEMU, Windows VMs via dockur)
+- Multi-OS VM support (Linux containers, Linux VMs via QEMU, Windows VMs via dockur, macOS)
 - DinD (Docker-in-Docker) isolation for range deployments (no IP conflicts between ranges)
 - VM Library with snapshot-based VM creation
 - Network isolation with custom Docker networks and iptables rules
 - VNC console access through Traefik (with DinD proxy routing)
 - MSEL (Master Scenario Events List) for scenario execution
 - Pre-deployment validation for ranges
+- Content Library with Student Lab walkthroughs
+- Blueprint export/import with Dockerfiles for reproducible environments
+- Global notifications system (toast + bell dropdown)
+- Training Events for scheduling exercises
 - Evidence collection and scoring (in development)
 
 ---
@@ -104,7 +108,7 @@ Current overall progress: **Phase 4 of 7 Complete (57%)**
 | JWT Authentication | ✅ | Fully working |
 | User Registration | ✅ | With approval workflow |
 | RBAC (4 roles) | ✅ | Admin, Range Engineer, White Cell, Evaluator |
-| ABAC (resource tags) | ✅ | Fine-grained visibility control |
+| ABAC (resource tags) | 🟡 | Fine-grained visibility control (in progress) |
 | VM Template CRUD | ✅ | 27+ OS templates |
 | Range CRUD | ✅ | Full lifecycle |
 | Network Management | ✅ | Custom subnets, multi-homed VMs |
@@ -127,6 +131,13 @@ Current overall progress: **Phase 4 of 7 Complete (57%)**
 | VM Library | ✅ | Snapshot-based VM creation, renamed from Templates |
 | Pre-deployment Validation | ✅ | Image, architecture, disk space checks |
 | Promote to Library | ✅ | Promote cached images to VM Library |
+| Content Library | ✅ | Student Lab walkthroughs with markdown support |
+| Blueprint Export/Import | ✅ | v3.0 format with Dockerfiles for reproducibility |
+| Global Notifications | ✅ | Toast notifications + bell dropdown history |
+| Training Events | ✅ | Event scheduling with range associations |
+| Deployment Progress | ✅ | Real-time progress tracking during range deployment |
+| Clipboard Sync | ✅ | Copy from walkthrough to VNC console |
+| macOS VM Support | ✅ | macOS ISOs and container creation |
 | Evidence Submission | 🟡 | In development |
 | Evidence Validation | 🟡 | In development |
 | Scoring Engine | 🟡 | In development |
@@ -247,15 +258,18 @@ At bottom of README, update:
 
 | Version | Date | Phase | Major Changes |
 |---------|------|-------|---------------|
-| 0.1.0 | 2026-01-XX | 1 | Initial auth, templates, basic ranges |
-| 0.2.0 | 2026-01-XX | 2 | Multi-network, visual builder, deployment |
-| 0.3.0 | 2026-01-XX | 3 | Range templates, artifacts, snapshots |
+| 0.1.0 | 2026-01-11 | 1 | Initial auth, templates, basic ranges |
+| 0.2.0 | 2026-01-12 | 2 | Multi-network, visual builder, deployment |
+| 0.3.0 | 2026-01-13 | 3 | Range templates, artifacts, snapshots |
 | 0.4.0 | 2026-01-15 | 4 | Execution console, MSEL, monitoring |
-| 0.4.1 | 2026-01-16 | 4 | Version display, console pop-out default |
-| 0.4.2 | 2026-01-16 | 4 | Multi-architecture support (x86_64 + ARM64) |
-| 0.5.0 | 2026-01-19 | 4 | DinD isolation, VM Library, pre-deployment validation |
-| 0.6.0 | TBD | 5 | Evidence submission, scoring |
-| 0.7.0 | TBD | 6 | Automation, CAC auth, offline mode |
+| 0.11.0 | 2026-01-19 | 4 | DinD isolation, VM Library, pre-deployment validation |
+| 0.20.0 | 2026-01-21 | 4 | Image Cache consolidation, GHCR publishing |
+| 0.21.x | 2026-01-22 | 4 | VNC fixes, DinD container config, ISO VM support |
+| 0.22.0 | 2026-01-23 | 5 | Content Library integration for Student Lab walkthroughs |
+| 0.23.0 | 2026-01-24 | 5 | Feature consolidation (notifications, clipboard, deployment progress) |
+| 0.23.1 | 2026-01-24 | 5 | Blueprint export/import v3.0 with Dockerfiles |
+| 0.23.3 | 2026-01-25 | 5 | Moved docker-images to data/images |
+| 0.23.5 | 2026-01-25 | 5 | Notification dropdown positioning fix |
 | 1.0.0 | TBD | 7 | Production release |
 
 ---
@@ -320,5 +334,5 @@ Phase 5: Evidence & Scoring system
 
 ---
 
-*Last Updated: 2026-01-19*
+*Last Updated: 2026-01-25*
 *Update this file whenever significant progress is made or context changes*

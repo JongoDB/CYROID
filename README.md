@@ -1,7 +1,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Status-Active%20Development-brightgreen" alt="Status">
   <img src="https://img.shields.io/badge/Phase-5%20of%207-blue" alt="Phase">
-  <img src="https://img.shields.io/badge/Version-0.20.3--alpha-orange" alt="Version">
+  <img src="https://img.shields.io/badge/Version-0.23.5-orange" alt="Version">
   <img src="https://img.shields.io/badge/License-Proprietary-red" alt="License">
   <img src="https://github.com/JongoDB/CYROID/actions/workflows/docker-publish.yml/badge.svg" alt="Docker Build">
 </p>
@@ -39,29 +39,33 @@
 
 ---
 
-## What's New in v0.20.x
+## What's New in v0.23.x
 
-### Container Registry & CI/CD (v0.20.2)
+### Content Library & Student Labs (v0.22.0 - v0.23.x)
 
-CYROID images are now published to **GitHub Container Registry (GHCR)**:
+- **Content Library**: Create and manage educational content with markdown walkthroughs
+- **Student Lab Mode**: Guided lab experiences with step-by-step instructions
+- **Walkthrough-Range Integration**: Link walkthroughs directly to range blueprints
+- **Clipboard Sync**: Copy commands from walkthrough directly to VNC console
 
-- **Pre-built images**: All 6 CYROID images available on GHCR for instant deployment
-- **GitHub Actions CI/CD**: Automated builds on every push to master
-- **Version tagging**: Images tagged with version numbers and `latest`
-- **Development mode**: Local builds with hot-reload for development
+### Blueprint Export/Import v3.0 (v0.23.1)
 
-### Docker Image Upload (v0.20.2)
+- **Dockerfile Export**: Blueprints now include Dockerfiles from `data/images/`
+- **Reproducible Environments**: Share complete range definitions with all dependencies
+- **Image Project Tracking**: BaseImages track their source Dockerfile project
 
-- **Upload Docker images**: Upload .tar/.tar.gz archives via the UI
-- **CYROID Services category**: Platform infrastructure images grouped together
-- **Image Cache improvements**: Better categorization of cached images
+### Global Notifications (v0.23.0)
+
+- **Toast Notifications**: Real-time feedback for actions and errors
+- **Notification Bell**: Dropdown history of all notifications with filtering
+- **Deployment Progress**: Visual progress tracking during range deployments
 
 ### Previous Highlights
 
-- **Cross-Platform Support**: Linux and macOS (Docker Desktop)
-- **Image Cache**: Linux/Windows ISO downloads, custom uploads, QEMU VM support
 - **DinD Isolation**: Each range runs in isolated Docker-in-Docker container
-- **Simplified Architecture**: VyOS optional, iptables-based routing
+- **Cross-Platform Support**: Linux and macOS (Docker Desktop)
+- **Container Registry**: Pre-built images on GHCR for instant deployment
+- **macOS VM Support**: macOS ISOs and container creation
 
 ---
 
@@ -95,14 +99,14 @@ Every range deploys inside its own isolated Docker-in-Docker container:
 
 ## Features
 
-### Implemented (Phases 1-4 + v0.11.0)
+### Implemented (Phases 1-5)
 
 | Category | Feature | Status |
 |----------|---------|--------|
 | **Authentication** | JWT-based auth with role management | ✅ Complete |
 | **User Management** | RBAC (Admin, Range Engineer, White Cell, Evaluator) | ✅ Complete |
-| **ABAC** | Attribute-based access control with resource tags | ✅ Complete |
-| **VM Templates** | CRUD operations, OS library (24+ Linux distros, Windows 7-11, Server 2003-2025) | ✅ Complete |
+| **ABAC** | Attribute-based access control with resource tags | 🟡 In Progress |
+| **VM Templates** | CRUD operations, OS library (24+ Linux distros, Windows 7-11, Server 2003-2025, macOS) | ✅ Complete |
 | **Range Builder** | Visual drag-drop network designer | ✅ Complete |
 | **DinD Isolation** | Each range runs in isolated Docker-in-Docker container | ✅ Complete |
 | **Network Management** | Multi-segment Docker networks with custom subnets | ✅ Complete |
@@ -111,7 +115,7 @@ Every range deploys inside its own isolated Docker-in-Docker container:
 | **Console Pop-out** | Default new window, Shift+click for inline | ✅ Complete |
 | **Dynamic Networking** | Add/remove network interfaces on running VMs | ✅ Complete |
 | **Range Templating** | Import/export/clone range configurations | ✅ Complete |
-| **Comprehensive Export** | Full config, artifacts, MSEL, offline Docker images | ✅ Complete |
+| **Blueprint Export v3** | Full config, artifacts, MSEL, Dockerfiles, offline Docker images | ✅ Complete |
 | **Resource Monitoring** | CPU, memory, network statistics per VM | ✅ Complete |
 | **Event Logging** | Timestamped activity feed with real-time streaming | ✅ Complete |
 | **Artifact Repository** | MinIO-backed storage with SHA256 hashing | ✅ Complete |
@@ -122,6 +126,12 @@ Every range deploys inside its own isolated Docker-in-Docker container:
 | **Connection Tracking** | Monitor student activity | ✅ Complete |
 | **Version Display** | API endpoint + UI footer | ✅ Complete |
 | **Multi-Architecture** | x86_64 + ARM64 native, emulation warnings | ✅ Complete |
+| **Content Library** | Student Lab walkthroughs with markdown support | ✅ Complete |
+| **Training Events** | Event scheduling with range associations | ✅ Complete |
+| **Global Notifications** | Toast notifications + bell dropdown history | ✅ Complete |
+| **Deployment Progress** | Real-time visual progress during range deployment | ✅ Complete |
+| **Clipboard Sync** | Copy from walkthrough to VNC console | ✅ Complete |
+| **macOS Support** | macOS ISOs and container creation | ✅ Complete |
 
 ### In Development (Phase 5)
 
@@ -488,7 +498,10 @@ CYROID/
 │   │   │   ├── ranges.py      # Range management
 │   │   │   ├── vms.py         # VM lifecycle
 │   │   │   ├── networks.py    # Network configuration
-│   │   │   ├── templates.py   # VM templates
+│   │   │   ├── blueprints.py  # Range blueprints
+│   │   │   ├── content.py     # Content Library
+│   │   │   ├── events.py      # Training Events
+│   │   │   ├── cache.py       # Image Cache
 │   │   │   ├── artifacts.py   # Artifact repository
 │   │   │   ├── msel.py        # MSEL operations
 │   │   │   └── websocket.py   # Real-time events
@@ -498,7 +511,7 @@ CYROID/
 │   │   │   ├── dind_service.py         # DinD container management
 │   │   │   ├── docker_service.py       # Docker orchestration
 │   │   │   ├── range_deployment_service.py  # Range lifecycle
-│   │   │   ├── vyos_service.py         # VyOS router management
+│   │   │   ├── blueprint_export_service.py  # Blueprint export/import
 │   │   │   ├── event_service.py        # Event broadcasting
 │   │   │   └── storage_service.py      # MinIO storage
 │   │   └── tasks/             # Async workers (Dramatiq)
@@ -513,23 +526,30 @@ CYROID/
 │   │   │   ├── Ranges.tsx
 │   │   │   ├── RangeDetail.tsx
 │   │   │   ├── ExecutionConsole.tsx
-│   │   │   └── Templates.tsx
+│   │   │   ├── VMLibrary.tsx        # VM Library (base images)
+│   │   │   ├── ImageCache.tsx       # Docker image cache
+│   │   │   ├── ContentLibrary.tsx   # Content management
+│   │   │   ├── StudentLab.tsx       # Student lab view
+│   │   │   └── TrainingEvents.tsx   # Event scheduling
 │   │   ├── components/        # Reusable components
 │   │   │   ├── range-builder/
 │   │   │   ├── console/
+│   │   │   ├── notifications/       # Toast + bell dropdown
 │   │   │   └── execution/
 │   │   ├── stores/            # Zustand stores
+│   │   ├── providers/         # React context providers
 │   │   ├── services/          # API client
 │   │   └── types/             # TypeScript types
 │   └── Dockerfile
 │
-├── docker/                     # Docker configurations
-│   ├── Dockerfile.dind-base   # Custom DinD image
-│   └── daemon.json            # DinD daemon config
+├── data/                       # Data directories
+│   ├── images/                # Dockerfile projects for building images
+│   ├── scenarios/             # Training scenarios
+│   ├── seed-templates/        # Built-in templates
+│   └── seed-blueprints/       # Built-in blueprints
 │
 ├── scripts/                    # Utility scripts
 │   ├── init-networks.sh       # Network initialization
-│   ├── retag-infrastructure.sh # Retag Docker Hub images with cyroid- prefix
 │   └── build-dind-image.sh    # Custom DinD build
 │
 ├── docs/                       # Documentation
@@ -540,7 +560,7 @@ CYROID/
 ├── certs/                      # SSL certificates
 ├── docker-compose.yml          # Production (GHCR images)
 ├── docker-compose.dev.yml      # Development (local builds)
-├── traefik-dynamic.yml         # Traefik configuration
+├── traefik.yml                 # Traefik static config
 ├── CLAUDE.md                   # AI assistant context
 └── README.md                   # This file
 ```
@@ -892,6 +912,63 @@ export DIND_IMAGE=cyroid-dind:latest
 docker-compose up -d
 ```
 
+### Developer Notes
+
+#### Running in Development Mode
+
+For local development with hot-reload and local builds:
+
+```bash
+# Start with development overrides (local builds + hot-reload)
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+
+# Or copy dev file to override for automatic loading
+cp docker-compose.dev.yml docker-compose.override.yml
+docker compose up -d
+```
+
+#### Applying Backend Changes
+
+After modifying backend Python files, restart the API container to apply changes:
+
+```bash
+# Restart API to apply backend code changes
+docker compose restart api
+
+# Or for a full rebuild
+docker compose up -d --build api
+```
+
+> **Note:** Frontend changes auto-reload via Vite hot module replacement (HMR). Backend changes require an API restart.
+
+#### Keeping Up with Latest Tags
+
+To pull the most recent images from GHCR:
+
+```bash
+# Pull latest images
+docker compose pull
+
+# Or pull and restart
+docker compose pull && docker compose up -d
+```
+
+#### Common Development Workflow
+
+```bash
+# 1. Pull latest code
+git pull origin master
+
+# 2. Start services with dev overrides
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+
+# 3. After backend changes, restart API
+docker compose restart api
+
+# 4. Check logs
+docker compose logs -f api
+```
+
 ---
 
 ## Contributing
@@ -914,19 +991,19 @@ Proprietary - All Rights Reserved
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| 0.23.5 | 2026-01-25 | Notification dropdown positioning fix |
+| 0.23.3 | 2026-01-25 | Moved docker-images to data/images |
+| 0.23.1 | 2026-01-24 | Blueprint export/import v3.0 with Dockerfiles |
+| 0.23.0 | 2026-01-24 | Feature consolidation (notifications, clipboard, deployment progress) |
+| 0.22.0 | 2026-01-23 | Content Library integration for Student Lab walkthroughs |
+| 0.21.x | 2026-01-22 | VNC fixes, DinD container config, ISO VM support in DinD |
 | 0.20.3 | 2026-01-21 | GHCR publishing, GitHub Actions CI/CD, pre-built container images |
-| 0.20.2 | 2026-01-21 | Docker image upload, CYROID Services category |
-| 0.20.1 | 2026-01-21 | Image Cache tab consolidation, macOS ISO support |
 | 0.20.0 | 2026-01-21 | Major refactor: consolidated Image Cache, improved UX |
-| 0.13.17 | 2026-01-20 | Cross-platform support (macOS Docker Desktop), auto-directory creation |
-| 0.12.0 | 2026-01-20 | Simplified architecture: VyOS optional, iptables VNC routing |
 | 0.11.0 | 2026-01-19 | DinD isolation for all ranges, simplified deployment |
 | 0.10.0 | 2026-01-16 | Multi-architecture support (x86_64 + ARM64) |
 | 0.9.0 | 2026-01-15 | Version display, console pop-out default |
 | 0.8.0 | 2026-01-15 | Comprehensive range export with Docker images |
 | 0.7.0 | 2026-01-14 | Execution console, MSEL, monitoring |
-| 0.6.0 | 2026-01-13 | Range templates, artifacts, snapshots |
-| 0.5.0 | 2026-01-12 | Multi-network, visual builder, deployment |
 | 0.4.0 | 2026-01-11 | Initial auth, templates, basic ranges |
 
 ---
@@ -935,10 +1012,10 @@ Proprietary - All Rights Reserved
 
 | Metric | Value |
 |--------|-------|
-| Backend LoC | ~8,000+ Python |
-| Frontend LoC | ~5,000+ TypeScript |
-| Database Models | 18+ |
-| API Endpoints | 60+ |
+| Backend LoC | ~40,000 Python |
+| Frontend LoC | ~33,000 TypeScript |
+| Database Models | 21+ |
+| API Endpoints | 250+ |
 | Supported OS Templates | 27+ |
 | Development Phase | 5 of 7 (71%) |
 
