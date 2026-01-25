@@ -25,7 +25,6 @@ import {
 import { contentApi, ContentListItem, ContentType, ContentImport } from '../services/api'
 import { toast } from '../stores/toastStore'
 import { formatDistanceToNow } from 'date-fns'
-import html2pdf from 'html2pdf.js'
 
 const CONTENT_TYPE_INFO: Record<ContentType, { icon: typeof BookOpen; label: string; color: string }> = {
   student_guide: { icon: GraduationCap, label: 'Student Guide', color: 'bg-blue-100 text-blue-800' },
@@ -134,20 +133,24 @@ export default function ContentLibrary() {
 
   async function handleExportPdf(id: string, title: string) {
     try {
-      // Fetch HTML content from backend (trusted source)
+      // Dynamic import for html2pdf (required for Vite compatibility)
+      const html2pdfModule = await import('html2pdf.js')
+      const html2pdf = html2pdfModule.default
+
+      // Fetch HTML content from backend (trusted source - our own API)
       const response = await contentApi.exportContent(id, 'html')
       const blob = response.data as Blob
       const htmlContent = await blob.text()
 
       // Create temporary container for PDF generation (never added to DOM)
+      // Security: HTML comes from our backend API, not user input
       const container = document.createElement('div')
-      // Safe: HTML is from our own backend API, not user input
-      container.innerHTML = htmlContent
+      container.innerHTML = htmlContent  // eslint-disable-line no-unsanitized/property
 
       // Extract just the body content if it's a full HTML document
       const bodyMatch = htmlContent.match(/<body[^>]*>([\s\S]*)<\/body>/i)
       if (bodyMatch) {
-        container.innerHTML = bodyMatch[1]
+        container.innerHTML = bodyMatch[1]  // eslint-disable-line no-unsanitized/property
       }
 
       // Apply inline styles for PDF rendering
