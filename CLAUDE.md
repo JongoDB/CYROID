@@ -65,6 +65,23 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 
 ---
 
+## CRITICAL: Git Workflow
+
+**NEVER push directly to master.** Always create a feature branch and open a PR:
+
+```bash
+git checkout -b feat/your-feature-name
+# ... make changes ...
+git add <specific-files>
+git commit -m "feat: description"
+git push -u origin feat/your-feature-name
+gh pr create --title "feat: description" --body "## Summary\n- Change 1\n- Change 2"
+```
+
+**Why:** PRs allow for code review and maintain a clean history. Direct pushes to master bypass review.
+
+---
+
 ## Development Roadmap Status
 
 ### UPDATE THIS SECTION AS DEVELOPMENT PROGRESSES
