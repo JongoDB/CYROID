@@ -1889,6 +1889,9 @@ export const trainingEventsApi = {
   cancel: (id: string) =>
     api.post<TrainingEvent>(`/training-events/${id}/cancel`),
 
+  reactivate: (id: string) =>
+    api.post<TrainingEvent>(`/training-events/${id}/reactivate`),
+
   // Participants
   listParticipants: (eventId: string) =>
     api.get<EventParticipant[]>(`/training-events/${eventId}/participants`),
