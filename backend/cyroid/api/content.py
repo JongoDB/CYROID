@@ -37,6 +37,8 @@ CurrentUser = Annotated[User, Depends(get_current_user)]
 
 def render_markdown_to_html(md_content: str) -> str:
     """Render markdown to HTML with extensions."""
+    if not md_content:
+        return ""
     extensions = [
         'markdown.extensions.fenced_code',
         'markdown.extensions.tables',
@@ -44,6 +46,60 @@ def render_markdown_to_html(md_content: str) -> str:
         'markdown.extensions.toc',
     ]
     return markdown.markdown(md_content, extensions=extensions)
+
+
+def render_walkthrough_to_html(walkthrough_data: dict) -> str:
+    """Render walkthrough data structure to HTML."""
+    if not walkthrough_data:
+        return ""
+
+    html_parts = []
+
+    # Walkthrough title (if different from content title)
+    if walkthrough_data.get('title'):
+        html_parts.append(f'<h2 class="walkthrough-title">{walkthrough_data["title"]}</h2>')
+
+    # Render each phase
+    phases = walkthrough_data.get('phases', [])
+    for phase_idx, phase in enumerate(phases, 1):
+        phase_name = phase.get('name', f'Phase {phase_idx}')
+        html_parts.append(f'<div class="phase">')
+        html_parts.append(f'<h3 class="phase-name">{phase_name}</h3>')
+
+        # Render each step in the phase
+        steps = phase.get('steps', [])
+        for step_idx, step in enumerate(steps, 1):
+            step_title = step.get('title', f'Step {step_idx}')
+            step_content = step.get('content', '')
+            step_vm = step.get('vm')
+            step_hints = step.get('hints', [])
+
+            html_parts.append(f'<div class="step">')
+            html_parts.append(f'<h4 class="step-title">{step_idx}. {step_title}</h4>')
+
+            if step_vm:
+                html_parts.append(f'<p class="step-vm"><strong>Target VM:</strong> {step_vm}</p>')
+
+            # Render step content as markdown
+            if step_content:
+                rendered_content = render_markdown_to_html(step_content)
+                html_parts.append(f'<div class="step-content">{rendered_content}</div>')
+
+            # Render hints if present
+            if step_hints:
+                html_parts.append('<div class="hints">')
+                html_parts.append('<p class="hints-label"><strong>Hints:</strong></p>')
+                html_parts.append('<ul class="hints-list">')
+                for hint in step_hints:
+                    html_parts.append(f'<li>{hint}</li>')
+                html_parts.append('</ul>')
+                html_parts.append('</div>')
+
+            html_parts.append('</div>')  # .step
+
+        html_parts.append('</div>')  # .phase
+
+    return '\n'.join(html_parts)
 
 
 # ============ Content CRUD ============
@@ -302,24 +358,59 @@ def export_content(
             headers={"Content-Disposition": f'attachment; filename="{content.title}.md"'},
         )
     elif format == "html":
-        # Return rendered HTML
-        html = content.body_html or render_markdown_to_html(content.body_markdown)
+        # Render content - check for walkthrough data first, then fall back to body_markdown
+        if content.walkthrough_data:
+            # Render walkthrough structure
+            html_body = render_walkthrough_to_html(content.walkthrough_data)
+            # Also include body_markdown if present (for additional notes)
+            if content.body_markdown:
+                html_body += '<hr><div class="additional-content">'
+                html_body += render_markdown_to_html(content.body_markdown)
+                html_body += '</div>'
+        else:
+            # Regular markdown content
+            html_body = content.body_html or render_markdown_to_html(content.body_markdown or "")
+
+        # Description as subtitle if present
+        description_html = ""
+        if content.description:
+            description_html = f'<p class="description">{content.description}</p>'
+
         full_html = f"""<!DOCTYPE html>
 <html>
 <head>
     <meta charset="utf-8">
     <title>{content.title}</title>
     <style>
-        body {{ font-family: system-ui, sans-serif; max-width: 800px; margin: 0 auto; padding: 2rem; }}
-        pre {{ background: #f4f4f4; padding: 1rem; overflow-x: auto; }}
-        code {{ background: #f4f4f4; padding: 0.2rem 0.4rem; }}
-        table {{ border-collapse: collapse; width: 100%; }}
-        th, td {{ border: 1px solid #ddd; padding: 0.5rem; text-align: left; }}
+        body {{ font-family: system-ui, sans-serif; max-width: 900px; margin: 0 auto; padding: 2rem; line-height: 1.6; }}
+        h1 {{ border-bottom: 2px solid #333; padding-bottom: 0.5rem; }}
+        .description {{ color: #666; font-style: italic; margin-bottom: 2rem; }}
+        .phase {{ margin: 2rem 0; padding: 1rem; background: #f9f9f9; border-radius: 8px; }}
+        .phase-name {{ color: #2563eb; margin-top: 0; }}
+        .step {{ margin: 1.5rem 0; padding: 1rem; background: white; border-left: 4px solid #2563eb; }}
+        .step-title {{ margin: 0 0 0.5rem 0; color: #1e40af; }}
+        .step-vm {{ color: #666; font-size: 0.9rem; margin: 0.5rem 0; }}
+        .step-content {{ margin: 1rem 0; }}
+        .hints {{ background: #fef3c7; padding: 0.75rem; border-radius: 4px; margin-top: 1rem; }}
+        .hints-label {{ margin: 0 0 0.5rem 0; }}
+        .hints-list {{ margin: 0; padding-left: 1.5rem; }}
+        pre {{ background: #1e293b; color: #e2e8f0; padding: 1rem; overflow-x: auto; border-radius: 4px; }}
+        code {{ background: #e2e8f0; padding: 0.2rem 0.4rem; border-radius: 3px; font-size: 0.9em; }}
+        pre code {{ background: none; padding: 0; }}
+        table {{ border-collapse: collapse; width: 100%; margin: 1rem 0; }}
+        th, td {{ border: 1px solid #ddd; padding: 0.75rem; text-align: left; }}
+        th {{ background: #f3f4f6; }}
+        hr {{ margin: 2rem 0; border: none; border-top: 1px solid #e5e7eb; }}
+        .meta {{ color: #666; font-size: 0.85rem; margin-top: 3rem; padding-top: 1rem; border-top: 1px solid #e5e7eb; }}
     </style>
 </head>
 <body>
 <h1>{content.title}</h1>
-{html}
+{description_html}
+{html_body}
+<div class="meta">
+    <p>Exported from CYROID &bull; Version {content.version} &bull; Type: {content.content_type.value}</p>
+</div>
 </body>
 </html>"""
         return Response(
