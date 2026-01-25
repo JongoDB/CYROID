@@ -137,8 +137,14 @@ export function VncStatus({ rangeId, onRefresh }: VncStatusProps) {
               </div>
               <div>
                 <span className="text-gray-400">Socat Proxies:</span>
-                <span className={`ml-2 ${vncStatus.socat_processes && vncStatus.socat_processes.length > 0 && !vncStatus.socat_processes[0].includes('No socat') ? 'text-green-400' : 'text-yellow-400'}`}>
-                  {vncStatus.socat_processes && vncStatus.socat_processes.length > 0 && !vncStatus.socat_processes[0].includes('No socat') ? `${vncStatus.socat_processes.filter(p => p.trim()).length} running` : 'None running'}
+                <span className={`ml-2 ${vncStatus.socat_proxies && vncStatus.socat_proxies.length > 0 ? 'text-green-400' : 'text-yellow-400'}`}>
+                  {vncStatus.socat_proxies && vncStatus.socat_proxies.length > 0 ? `${vncStatus.socat_proxies.length} running` : 'None running'}
+                </span>
+              </div>
+              <div>
+                <span className="text-gray-400">Network Isolation:</span>
+                <span className={`ml-2 ${vncStatus.network_isolation?.forward_policy === 'DROP' ? 'text-green-400' : 'text-yellow-400'}`}>
+                  {vncStatus.network_isolation ? `${vncStatus.network_isolation.forward_rules_count} rules (${vncStatus.network_isolation.forward_policy})` : 'Unknown'}
                 </span>
               </div>
             </div>
@@ -226,20 +232,64 @@ export function VncStatus({ rangeId, onRefresh }: VncStatusProps) {
                 )}
               </button>
               <p className="mt-2 text-xs text-gray-400">
-                This will recreate iptables DNAT rules, regenerate Traefik routes, and update the database.
+                This will recreate socat TCP proxies, regenerate Traefik routes, and update the database.
               </p>
             </div>
           )}
 
-          {/* Socat Processes (collapsible) */}
-          {isDind && vncStatus.socat_processes && vncStatus.socat_processes.length > 0 && (
+          {/* Socat Port Forwarding (collapsible) */}
+          {isDind && vncStatus.socat_proxies && vncStatus.socat_proxies.length > 0 && (
             <details className="pt-2">
               <summary className="text-sm text-gray-400 cursor-pointer hover:text-gray-300">
-                View Socat Proxy Processes ({vncStatus.socat_processes.filter(p => p.trim()).length} lines)
+                View Port Forwarding ({vncStatus.socat_proxies.length} proxies)
               </summary>
-              <pre className="mt-2 p-2 bg-gray-900 rounded text-xs font-mono text-gray-300 overflow-x-auto">
-                {vncStatus.socat_processes.join('\n')}
-              </pre>
+              <div className="mt-2 p-3 bg-gray-900 rounded text-xs space-y-2">
+                {vncStatus.socat_proxies.map((proxy, idx) => (
+                  <div key={idx} className="flex items-center gap-2 text-gray-300">
+                    <span className="text-green-400">●</span>
+                    <span className="font-medium text-white">{proxy.vm_hostname || 'unknown'}</span>
+                    <span className="text-gray-500">({proxy.vm_ip})</span>
+                    <span className="text-gray-500">→</span>
+                    <span className="font-mono">VNC :{proxy.vnc_port}</span>
+                    <span className="text-gray-500">→</span>
+                    <span className="font-mono text-cyan-400">External :{proxy.external_port}</span>
+                    <span className="text-gray-600">[PID {proxy.pid}]</span>
+                  </div>
+                ))}
+              </div>
+            </details>
+          )}
+
+          {/* Network Isolation (collapsible) */}
+          {isDind && vncStatus.network_isolation && (
+            <details className="pt-2">
+              <summary className="text-sm text-gray-400 cursor-pointer hover:text-gray-300">
+                View Network Isolation ({vncStatus.network_isolation.forward_rules_count} FORWARD rules)
+              </summary>
+              <div className="mt-2 p-3 bg-gray-900 rounded text-xs space-y-2">
+                <div className="flex items-center gap-2 text-gray-300">
+                  <span className={vncStatus.network_isolation.forward_policy === 'DROP' ? 'text-green-400' : 'text-yellow-400'}>●</span>
+                  <span>FORWARD Policy:</span>
+                  <span className="font-mono font-medium text-white">{vncStatus.network_isolation.forward_policy}</span>
+                </div>
+                <div className="flex items-center gap-2 text-gray-300">
+                  <span className="text-blue-400">●</span>
+                  <span>FORWARD Rules:</span>
+                  <span className="font-mono text-white">{vncStatus.network_isolation.forward_rules_count}</span>
+                </div>
+                <div className="flex items-center gap-2 text-gray-300">
+                  <span className={vncStatus.network_isolation.masquerade_enabled ? 'text-green-400' : 'text-gray-500'}>●</span>
+                  <span>NAT/MASQUERADE:</span>
+                  <span className={`font-mono ${vncStatus.network_isolation.masquerade_enabled ? 'text-green-400' : 'text-gray-500'}`}>
+                    {vncStatus.network_isolation.masquerade_enabled ? 'Enabled' : 'Disabled'}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 text-gray-300">
+                  <span className="text-blue-400">●</span>
+                  <span>NAT Rules:</span>
+                  <span className="font-mono text-white">{vncStatus.network_isolation.nat_rules_count}</span>
+                </div>
+              </div>
             </details>
           )}
 

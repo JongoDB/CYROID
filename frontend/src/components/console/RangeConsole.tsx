@@ -5,7 +5,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import {
   Maximize2, Minimize2, X, RefreshCw, Terminal as TerminalIcon,
-  AlertTriangle, Play, Network, HardDrive, Route, Shield
+  AlertTriangle, Play, Network, HardDrive, Route, Shield, ArrowRightLeft
 } from 'lucide-react'
 import clsx from 'clsx'
 import { rangesApi } from '../../services/api'
@@ -106,7 +106,7 @@ export function RangeConsole({ rangeId, rangeName, token, onClose }: RangeConsol
       setError(null)
       terminal.writeln('\x1b[32mConnected to DinD container\x1b[0m')
       terminal.writeln('\x1b[90mYou now have shell access to the range\'s Docker environment.\x1b[0m')
-      terminal.writeln('\x1b[90mTry: docker ps, docker network ls, iptables -t nat -L\x1b[0m')
+      terminal.writeln('\x1b[90mTry: docker ps, docker network ls, ps aux | grep socat\x1b[0m')
       terminal.writeln('')
     }
 
@@ -199,6 +199,11 @@ export function RangeConsole({ rangeId, rangeName, token, onClose }: RangeConsol
         case 'iptables':
           response = await rangesApi.getConsoleIptables(rangeId)
           terminal.writeln(response.data.iptables_nat)
+          break
+
+        case 'port-forwarding':
+          response = await rangesApi.getConsolePortForwarding(rangeId)
+          terminal.writeln(response.data.port_forwarding)
           break
 
         case 'routes':
@@ -319,12 +324,20 @@ export function RangeConsole({ rangeId, rangeName, token, onClose }: RangeConsol
           {quickActionLoading === 'docker-network' ? 'Loading...' : 'Networks'}
         </button>
         <button
-          onClick={() => runQuickAction('iptables', 'NAT Rules')}
+          onClick={() => runQuickAction('iptables', 'Network Isolation')}
           disabled={quickActionLoading !== null}
           className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 rounded disabled:opacity-50"
         >
           <Shield className="w-3 h-3" />
-          {quickActionLoading === 'iptables' ? 'Loading...' : 'iptables'}
+          {quickActionLoading === 'iptables' ? 'Loading...' : 'Net Isolation'}
+        </button>
+        <button
+          onClick={() => runQuickAction('port-forwarding', 'Port Forwarding')}
+          disabled={quickActionLoading !== null}
+          className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 rounded disabled:opacity-50"
+        >
+          <ArrowRightLeft className="w-3 h-3" />
+          {quickActionLoading === 'port-forwarding' ? 'Loading...' : 'Port Fwd'}
         </button>
         <button
           onClick={() => runQuickAction('routes', 'IP Routes')}
@@ -353,7 +366,8 @@ export function RangeConsole({ rangeId, rangeName, token, onClose }: RangeConsol
             <li>• Run <code className="bg-gray-700 px-1 rounded">docker ps</code> to see all VMs/containers in this range.</li>
             <li>• Run <code className="bg-gray-700 px-1 rounded">docker logs &lt;container&gt;</code> to view VM logs.</li>
             <li>• Run <code className="bg-gray-700 px-1 rounded">docker network ls</code> to see range networks.</li>
-            <li>• Run <code className="bg-gray-700 px-1 rounded">iptables -t nat -L</code> to see VNC port forwarding rules.</li>
+            <li>• Run <code className="bg-gray-700 px-1 rounded">ps aux | grep socat</code> to see VNC port forwarding proxies.</li>
+            <li>• Run <code className="bg-gray-700 px-1 rounded">iptables -L FORWARD</code> to see network isolation rules.</li>
             <li>• <strong>Quick Actions</strong> provide one-click access to common diagnostic commands.</li>
           </ul>
         </div>
