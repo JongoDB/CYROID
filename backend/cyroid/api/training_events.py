@@ -288,6 +288,14 @@ def get_my_events(
         participant_count = db.query(EventParticipant).filter(
             EventParticipant.event_id == event.id
         ).count()
+
+        # Get the current user's range_id for this event
+        participant = db.query(EventParticipant).filter(
+            EventParticipant.event_id == event.id,
+            EventParticipant.user_id == current_user.id
+        ).first()
+        my_range_id = participant.range_id if participant else None
+
         results.append(EventListResponse(
             id=event.id,
             name=event.name,
@@ -305,6 +313,7 @@ def get_my_events(
             has_blueprint=event.blueprint_id is not None,
             created_by_id=event.created_by_id,
             created_at=event.created_at,
+            my_range_id=my_range_id,
         ))
 
     return results

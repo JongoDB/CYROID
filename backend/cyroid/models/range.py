@@ -78,6 +78,10 @@ class Range(Base, UUIDMixin, TimestampMixin):
     )
     student_guide = relationship("Content", foreign_keys=[student_guide_id])
 
+    # VM Console visibility control - VMs hidden from assigned user
+    # Empty list = all VMs visible (default)
+    hidden_vm_ids: Mapped[List[UUID]] = mapped_column(JSON, default=list)
+
     # Relationships
     networks: Mapped[List["Network"]] = relationship(
         "Network", back_populates="range", cascade="all, delete-orphan"

@@ -4,14 +4,16 @@ import { Link } from 'react-router-dom'
 import { BookOpen, Plus, ExternalLink, Loader2, Check, AlertCircle } from 'lucide-react'
 import { contentApi, rangesApi, ContentListItem } from '../../services/api'
 import { toast } from '../../stores/toastStore'
+import { RangeVMVisibilityControl } from '../ranges/RangeVMVisibilityControl'
 
 interface TrainingTabProps {
   rangeId: string
   studentGuideId: string | null
+  canManage?: boolean
   onUpdate: () => void
 }
 
-export function TrainingTab({ rangeId, studentGuideId, onUpdate }: TrainingTabProps) {
+export function TrainingTab({ rangeId, studentGuideId, canManage = true, onUpdate }: TrainingTabProps) {
   const [guides, setGuides] = useState<ContentListItem[]>([])
   const [selectedGuideId, setSelectedGuideId] = useState<string | null>(studentGuideId)
   const [loading, setLoading] = useState(true)
@@ -199,6 +201,15 @@ export function TrainingTab({ rangeId, studentGuideId, onUpdate }: TrainingTabPr
           <li>Select the published guide here to link it to this range</li>
           <li>Students see the guide in the left panel when they "Open Lab"</li>
         </ul>
+      </div>
+
+      {/* VM Console Visibility */}
+      <div className="mt-6">
+        <RangeVMVisibilityControl
+          rangeId={rangeId}
+          canManage={canManage}
+          onUpdate={onUpdate}
+        />
       </div>
     </div>
   )

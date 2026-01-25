@@ -1335,6 +1335,7 @@ export default function RangeDetail() {
           <TrainingTab
             rangeId={range.id}
             studentGuideId={range.student_guide_id || null}
+            canManage={true}
             onUpdate={fetchData}
           />
         </div>
