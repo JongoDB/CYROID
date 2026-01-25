@@ -159,10 +159,14 @@ export default function RangeDetail() {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // Loading states for actions
+  const [stoppingRange, setStoppingRange] = useState(false)
+  const [vmActionLoading, setVmActionLoading] = useState<string | null>(null) // VM ID being actioned
+
   // Delete confirmation state
   const [deleteConfirm, setDeleteConfirm] = useState<{
-    type: 'network' | 'vm' | null
-    item: Network | VM | null
+    type: 'network' | 'vm' | 'range' | null
+    item: Network | VM | Range | null
     isLoading: boolean
   }>({ type: null, item: null, isLoading: false })
 
@@ -436,11 +440,33 @@ export default function RangeDetail() {
 
   const handleStop = async () => {
     if (!id) return
+    setStoppingRange(true)
     try {
       await rangesApi.stop(id)
+      toast.success('Range stopped successfully')
       fetchData()
     } catch (err: any) {
-      alert(err.response?.data?.detail || 'Failed to stop range')
+      toast.error(err.response?.data?.detail || 'Failed to stop range')
+    } finally {
+      setStoppingRange(false)
+    }
+  }
+
+  const handleDeleteRange = () => {
+    if (!range) return
+    setDeleteConfirm({ type: 'range', item: range, isLoading: false })
+  }
+
+  const confirmDeleteRange = async () => {
+    if (!deleteConfirm.item || deleteConfirm.type !== 'range') return
+    setDeleteConfirm(prev => ({ ...prev, isLoading: true }))
+    try {
+      await rangesApi.delete((deleteConfirm.item as Range).id)
+      toast.success('Range deleted successfully')
+      navigate('/ranges')
+    } catch (err: any) {
+      setDeleteConfirm({ type: null, item: null, isLoading: false })
+      toast.error(err.response?.data?.detail || 'Failed to delete range')
     }
   }
 
@@ -755,13 +781,18 @@ export default function RangeDetail() {
   }
 
   const handleVmAction = async (vm: VM, action: 'start' | 'stop' | 'restart') => {
+    setVmActionLoading(vm.id)
     try {
       if (action === 'start') await vmsApi.start(vm.id)
       else if (action === 'stop') await vmsApi.stop(vm.id)
       else if (action === 'restart') await vmsApi.restart(vm.id)
+      const actionLabel = action === 'start' ? 'started' : action === 'stop' ? 'stopped' : 'restarted'
+      toast.success(`VM ${vm.hostname} ${actionLabel}`)
       fetchData()
     } catch (err: any) {
       toast.error(err.response?.data?.detail || `Failed to ${action} VM`)
+    } finally {
+      setVmActionLoading(null)
     }
   }
 
@@ -927,10 +958,15 @@ export default function RangeDetail() {
                 </button>
                 <button
                   onClick={handleStop}
-                  className="inline-flex items-center px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+                  disabled={stoppingRange}
+                  className="inline-flex items-center px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  <Square className="h-4 w-4 mr-1" />
-                  Stop
+                  {stoppingRange ? (
+                    <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                  ) : (
+                    <Square className="h-4 w-4 mr-1" />
+                  )}
+                  {stoppingRange ? 'Stopping...' : 'Stop'}
                 </button>
                 {hasUnprovisionedResources && (
                   <button
@@ -960,6 +996,14 @@ export default function RangeDetail() {
             >
               <LayoutTemplate className="h-4 w-4 mr-2" />
               Save as Blueprint
+            </button>
+            {/* Delete Range button */}
+            <button
+              onClick={handleDeleteRange}
+              className="inline-flex items-center px-3 py-2 border border-red-300 rounded-md shadow-sm text-sm font-medium text-red-700 bg-white hover:bg-red-50"
+              title="Delete Range"
+            >
+              <Trash2 className="h-4 w-4" />
             </button>
           </div>
         </div>
@@ -1206,10 +1250,15 @@ export default function RangeDetail() {
                       {(vm.status === 'stopped' || vm.status === 'pending') && (
                         <button
                           onClick={() => handleVmAction(vm, 'start')}
-                          className="p-1.5 text-gray-400 hover:text-green-600"
+                          disabled={vmActionLoading === vm.id}
+                          className="p-1.5 text-gray-400 hover:text-green-600 disabled:opacity-50"
                           title="Start"
                         >
-                          <Play className="h-4 w-4" />
+                          {vmActionLoading === vm.id ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Play className="h-4 w-4" />
+                          )}
                         </button>
                       )}
                       {vm.status === 'running' && (
@@ -1230,17 +1279,27 @@ export default function RangeDetail() {
                           </button>
                           <button
                             onClick={() => handleVmAction(vm, 'stop')}
-                            className="p-1.5 text-gray-400 hover:text-yellow-600"
+                            disabled={vmActionLoading === vm.id}
+                            className="p-1.5 text-gray-400 hover:text-yellow-600 disabled:opacity-50"
                             title="Stop"
                           >
-                            <Square className="h-4 w-4" />
+                            {vmActionLoading === vm.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Square className="h-4 w-4" />
+                            )}
                           </button>
                           <button
                             onClick={() => handleVmAction(vm, 'restart')}
-                            className="p-1.5 text-gray-400 hover:text-blue-600"
+                            disabled={vmActionLoading === vm.id}
+                            className="p-1.5 text-gray-400 hover:text-blue-600 disabled:opacity-50"
                             title="Restart"
                           >
-                            <RotateCw className="h-4 w-4" />
+                            {vmActionLoading === vm.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <RotateCw className="h-4 w-4" />
+                            )}
                           </button>
                           <button
                             onClick={() => setSnapshotVm(vm)}
@@ -2611,15 +2670,25 @@ export default function RangeDetail() {
       {/* Delete Confirmation Dialog */}
       <ConfirmDialog
         isOpen={deleteConfirm.type !== null}
-        title={deleteConfirm.type === 'network' ? 'Delete Network' : 'Delete VM'}
+        title={
+          deleteConfirm.type === 'network' ? 'Delete Network' :
+          deleteConfirm.type === 'range' ? 'Delete Range' :
+          'Delete VM'
+        }
         message={
           deleteConfirm.type === 'network'
             ? `Are you sure you want to delete "${(deleteConfirm.item as Network)?.name}"? This action cannot be undone.`
+            : deleteConfirm.type === 'range'
+            ? `Are you sure you want to delete "${(deleteConfirm.item as Range)?.name}"? This will delete all networks, VMs, and associated data. This action cannot be undone.`
             : `Are you sure you want to delete "${(deleteConfirm.item as VM)?.hostname}"? This action cannot be undone.`
         }
         confirmLabel="Delete"
         variant="danger"
-        onConfirm={deleteConfirm.type === 'network' ? confirmDeleteNetwork : confirmDeleteVm}
+        onConfirm={
+          deleteConfirm.type === 'network' ? confirmDeleteNetwork :
+          deleteConfirm.type === 'range' ? confirmDeleteRange :
+          confirmDeleteVm
+        }
         onCancel={() => setDeleteConfirm({ type: null, item: null, isLoading: false })}
         isLoading={deleteConfirm.isLoading}
       />
