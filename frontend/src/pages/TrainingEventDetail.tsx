@@ -103,6 +103,9 @@ export default function TrainingEventDetail() {
   const [showBriefing, setShowBriefing] = useState(false)
   const [briefingContent, setBriefingContent] = useState<{ title: string; html: string }[]>([])
 
+  // Confirmation dialog for complete/cancel
+  const [confirmAction, setConfirmAction] = useState<'complete' | 'cancel' | null>(null)
+
   const canManage = event
     ? user?.id === event.created_by_id || user?.roles?.includes('admin')
     : user?.roles?.includes('admin') || user?.roles?.includes('engineer')
@@ -275,6 +278,13 @@ export default function TrainingEventDetail() {
 
   async function handleStatusChange(action: 'publish' | 'start' | 'complete' | 'cancel' | 'reactivate', autoDeploy = false) {
     if (!id) return
+
+    // For complete/cancel, show confirmation first
+    if ((action === 'complete' || action === 'cancel') && !confirmAction) {
+      setConfirmAction(action)
+      return
+    }
+
     try {
       switch (action) {
         case 'publish':
@@ -293,9 +303,17 @@ export default function TrainingEventDetail() {
           await trainingEventsApi.reactivate(id)
           break
       }
+      setConfirmAction(null)
       await loadEvent(id)
     } catch (err) {
       console.error(`Failed to ${action}:`, err)
+      setConfirmAction(null)
+    }
+  }
+
+  function handleConfirmAction() {
+    if (confirmAction) {
+      handleStatusChange(confirmAction)
     }
   }
 
@@ -307,8 +325,50 @@ export default function TrainingEventDetail() {
     )
   }
 
+  // Count ranges that will be deleted
+  const rangesCount = event?.participants?.filter(p => p.range_id).length || 0
+
   return (
     <div className="max-w-4xl mx-auto space-y-6">
+      {/* Confirmation Dialog */}
+      {confirmAction && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4 shadow-xl">
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">
+              {confirmAction === 'complete' ? 'Complete Event?' : 'Cancel Event?'}
+            </h3>
+            <p className="text-gray-600 mb-4">
+              {rangesCount > 0 ? (
+                <>
+                  This will <span className="font-semibold text-red-600">permanently delete {rangesCount} student lab{rangesCount > 1 ? 's' : ''}</span> and all associated VMs.
+                  This action cannot be undone.
+                </>
+              ) : (
+                `Are you sure you want to ${confirmAction} this event?`
+              )}
+            </p>
+            <div className="flex justify-end space-x-3">
+              <button
+                onClick={() => setConfirmAction(null)}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md"
+              >
+                Go Back
+              </button>
+              <button
+                onClick={handleConfirmAction}
+                className={`px-4 py-2 text-sm font-medium text-white rounded-md ${
+                  confirmAction === 'cancel'
+                    ? 'bg-red-600 hover:bg-red-700'
+                    : 'bg-purple-600 hover:bg-purple-700'
+                }`}
+              >
+                {confirmAction === 'complete' ? 'Complete & Delete Labs' : 'Cancel & Delete Labs'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center space-x-4">
@@ -532,7 +592,20 @@ export default function TrainingEventDetail() {
               </label>
               <select
                 value={blueprintId}
-                onChange={(e) => setBlueprintId(e.target.value)}
+                onChange={(e) => {
+                  const newBlueprintId = e.target.value
+                  setBlueprintId(newBlueprintId)
+                  // Auto-select linked content from blueprint
+                  if (newBlueprintId) {
+                    const selectedBlueprint = blueprints.find(bp => bp.id === newBlueprintId)
+                    if (selectedBlueprint?.content_ids?.length) {
+                      setSelectedContentIds(prev => {
+                        const merged = new Set([...prev, ...selectedBlueprint.content_ids])
+                        return Array.from(merged)
+                      })
+                    }
+                  }
+                }}
                 disabled={!canManage}
                 className="w-full border border-gray-300 rounded-md py-2 px-3 focus:ring-primary-500 focus:border-primary-500 disabled:bg-gray-100"
               >

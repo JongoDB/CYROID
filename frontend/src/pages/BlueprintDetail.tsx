@@ -4,9 +4,11 @@ import { useParams, Link } from 'react-router-dom';
 import {
   blueprintsApi,
   instancesApi,
+  contentApi,
   BlueprintDetail as BlueprintDetailType,
   Instance,
   InstanceDeploy,
+  ContentListItem,
 } from '../services/api';
 import {
   LayoutTemplate,
@@ -19,6 +21,7 @@ import {
   Trash2,
   ExternalLink,
   Download,
+  BookOpen,
 } from 'lucide-react';
 import clsx from 'clsx';
 import { toast } from '../stores/toastStore';
@@ -45,16 +48,22 @@ export default function BlueprintDetail() {
     isLoading: boolean;
   }>({ instance: null, isLoading: false });
   const [exporting, setExporting] = useState(false);
+  const [contentItems, setContentItems] = useState<ContentListItem[]>([]);
+  const [linkedContentIds, setLinkedContentIds] = useState<string[]>([]);
+  const [savingContent, setSavingContent] = useState(false);
 
   const fetchData = async () => {
     if (!id) return;
     try {
-      const [bpRes, instRes] = await Promise.all([
+      const [bpRes, instRes, contentRes] = await Promise.all([
         blueprintsApi.get(id),
         blueprintsApi.listInstances(id),
+        contentApi.list({ published_only: true }),
       ]);
       setBlueprint(bpRes.data);
       setInstances(instRes.data);
+      setContentItems(contentRes.data);
+      setLinkedContentIds(bpRes.data.content_ids || []);
     } catch (err) {
       console.error('Failed to fetch blueprint:', err);
       toast.error('Failed to load blueprint');
@@ -122,6 +131,26 @@ export default function BlueprintDetail() {
       toast.error(err.response?.data?.detail || 'Failed to export blueprint');
     } finally {
       setExporting(false);
+    }
+  };
+
+  const handleToggleContent = async (contentId: string) => {
+    if (!id) return;
+    const newIds = linkedContentIds.includes(contentId)
+      ? linkedContentIds.filter((cid) => cid !== contentId)
+      : [...linkedContentIds, contentId];
+
+    setLinkedContentIds(newIds);
+    setSavingContent(true);
+    try {
+      await blueprintsApi.update(id, { content_ids: newIds });
+      toast.success('Linked content updated');
+    } catch (err: any) {
+      // Revert on error
+      setLinkedContentIds(linkedContentIds);
+      toast.error(err.response?.data?.detail || 'Failed to update linked content');
+    } finally {
+      setSavingContent(false);
     }
   };
 
@@ -245,6 +274,42 @@ export default function BlueprintDetail() {
                   </li>
                 ))}
               </ul>
+            </div>
+          </div>
+
+          {/* Linked Content */}
+          <div className="mt-6 pt-6 border-t">
+            <h4 className="text-sm font-medium text-gray-700 mb-2 flex items-center">
+              <BookOpen className="h-4 w-4 mr-2" />
+              Linked Content
+              {savingContent && <Loader2 className="h-3 w-3 ml-2 animate-spin" />}
+            </h4>
+            <p className="text-xs text-gray-500 mb-3">
+              When this blueprint is selected for a training event, these content items will be auto-selected.
+            </p>
+            <div className="border border-gray-200 rounded-md max-h-48 overflow-y-auto">
+              {contentItems.length === 0 ? (
+                <p className="p-3 text-sm text-gray-500">No published content available</p>
+              ) : (
+                contentItems.map((item) => (
+                  <label
+                    key={item.id}
+                    className="flex items-center px-3 py-2 hover:bg-gray-50 cursor-pointer"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={linkedContentIds.includes(item.id)}
+                      onChange={() => handleToggleContent(item.id)}
+                      disabled={savingContent}
+                      className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
+                    />
+                    <span className="ml-3 text-sm text-gray-700">{item.title}</span>
+                    <span className="ml-2 text-xs text-gray-500 capitalize">
+                      ({item.content_type.replace('_', ' ')})
+                    </span>
+                  </label>
+                ))
+              )}
             </div>
           </div>
         </div>

@@ -77,7 +77,7 @@ export default function TrainingEvents() {
   })
 
   async function handleDelete(id: string) {
-    if (!confirm('Are you sure you want to delete this event?')) return
+    if (!confirm('Are you sure you want to delete this event? All associated student labs will be permanently deleted.')) return
     try {
       await trainingEventsApi.delete(id)
       setEvents(events.filter((e) => e.id !== id))
@@ -88,6 +88,15 @@ export default function TrainingEvents() {
   }
 
   async function handleStatusChange(id: string, action: 'publish' | 'start' | 'complete' | 'cancel') {
+    // Confirm destructive actions that delete ranges
+    if (action === 'complete' || action === 'cancel') {
+      const actionLabel = action === 'complete' ? 'complete' : 'cancel'
+      if (!confirm(`Are you sure you want to ${actionLabel} this event? All associated student labs will be permanently deleted.`)) {
+        setActiveMenu(null)
+        return
+      }
+    }
+
     try {
       switch (action) {
         case 'publish':

@@ -1083,6 +1083,7 @@ export interface Blueprint {
   version: number;
   base_subnet_prefix: string;
   next_offset: number;
+  content_ids: string[];
   created_by: string;
   created_at: string;
   updated_at: string;
@@ -1161,7 +1162,7 @@ export const blueprintsApi = {
   list: () => api.get<Blueprint[]>('/blueprints'),
   get: (id: string) => api.get<BlueprintDetail>(`/blueprints/${id}`),
   create: (data: BlueprintCreate) => api.post<BlueprintDetail>('/blueprints', data),
-  update: (id: string, data: { name?: string; description?: string }) =>
+  update: (id: string, data: { name?: string; description?: string; content_ids?: string[] }) =>
     api.put<BlueprintDetail>(`/blueprints/${id}`, data),
   delete: (id: string) => api.delete(`/blueprints/${id}`),
   deploy: (id: string, data: InstanceDeploy) =>
@@ -1908,11 +1909,11 @@ export const trainingEventsApi = {
   start: (id: string, autoDeploy = false) =>
     api.post<TrainingEvent>(`/training-events/${id}/start`, null, { params: { auto_deploy: autoDeploy } }),
 
-  complete: (id: string, teardownRanges = true) =>
-    api.post<TrainingEvent>(`/training-events/${id}/complete`, null, { params: { teardown_ranges: teardownRanges } }),
+  complete: (id: string, cleanupRanges = true) =>
+    api.post<TrainingEvent>(`/training-events/${id}/complete`, null, { params: { cleanup_ranges: cleanupRanges } }),
 
-  cancel: (id: string) =>
-    api.post<TrainingEvent>(`/training-events/${id}/cancel`),
+  cancel: (id: string, cleanupRanges = true) =>
+    api.post<TrainingEvent>(`/training-events/${id}/cancel`, null, { params: { cleanup_ranges: cleanupRanges } }),
 
   reactivate: (id: string) =>
     api.post<TrainingEvent>(`/training-events/${id}/reactivate`),

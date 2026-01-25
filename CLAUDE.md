@@ -9,7 +9,7 @@
 - **Name**: CYROID (Cyber Range Orchestrator In Docker)
 - **Type**: Web-based cyber range orchestration platform
 - **Domain**: Military/government cyber training, educational institutions
-- **Current Version**: 0.23.5
+- **Current Version**: 0.27.0
 - **Repository**: /Users/JonWFH/jondev/CYROID
 
 ---
@@ -48,6 +48,20 @@ Frontend (React/TypeScript) → Traefik → FastAPI Backend → Docker Engine
 - `minio`: Object storage (ports 9000/9001)
 - `worker`: Dramatiq task processor
 - `traefik`: Reverse proxy (ports 80/443/8080)
+
+---
+
+## CRITICAL: Local Development Commands
+
+**ALWAYS use this command to rebuild/restart services locally:**
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+```
+
+**Why:** The base `docker-compose.yml` pulls pre-built images from GHCR with old versions baked in. The `docker-compose.dev.yml` overlay builds from local source code and reads the VERSION file correctly.
+
+**NEVER use:** `docker compose up -d --build` alone - this will run stale code!
 
 ---
 

@@ -17,6 +17,9 @@ class RangeBlueprint(Base, UUIDMixin, TimestampMixin):
     base_subnet_prefix: Mapped[str] = mapped_column(String(20))  # e.g., "10.100"
     next_offset: Mapped[int] = mapped_column(Integer, default=0)
 
+    # Linked content for training events (auto-selected when blueprint chosen)
+    content_ids: Mapped[Optional[List[str]]] = mapped_column(JSON, default=list)
+
     # Built-in blueprint identification (like templates)
     is_seed: Mapped[bool] = mapped_column(default=False)  # True for blueprints shipped with CYROID
     seed_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, unique=True)  # e.g., "red-team-training-lab"

@@ -417,7 +417,7 @@ def delete_event(
     db: DBSession,
     current_user: CurrentUser,
 ):
-    """Delete an event."""
+    """Delete an event and all associated participant ranges."""
     event = db.query(TrainingEvent).filter(TrainingEvent.id == event_id).first()
     if not event:
         raise HTTPException(status_code=404, detail="Event not found")
@@ -426,7 +426,12 @@ def delete_event(
         raise HTTPException(status_code=403, detail="Not authorized to delete this event")
 
     if event.status == EventStatus.RUNNING:
-        raise HTTPException(status_code=400, detail="Cannot delete a running event")
+        raise HTTPException(status_code=400, detail="Cannot delete a running event. Complete or cancel it first.")
+
+    # Delete all participant ranges first
+    deleted_count = _delete_event_ranges(event_id, db)
+    if deleted_count > 0:
+        logger.info(f"Deleted {deleted_count} ranges for event {event.name}")
 
     db.delete(event)
     db.commit()
@@ -556,16 +561,75 @@ def start_event(
     return build_event_response(event, db)
 
 
+def _delete_event_ranges(event_id: UUID, db: Session) -> int:
+    """Delete all ranges associated with event participants.
+
+    Returns the number of ranges deleted.
+    """
+    import asyncio
+    from cyroid.models.range import Range
+    from cyroid.models.blueprint import RangeInstance
+    from cyroid.services.docker_service import get_docker_service
+    from cyroid.services.dind_service import get_dind_service
+
+    participants = db.query(EventParticipant).filter(
+        EventParticipant.event_id == event_id,
+        EventParticipant.range_id.isnot(None)
+    ).all()
+
+    deleted_count = 0
+    for participant in participants:
+        range_id = participant.range_id
+        range_obj = db.query(Range).filter(Range.id == range_id).first()
+
+        if range_obj:
+            # Clean up Docker resources
+            try:
+                docker = get_docker_service()
+                dind = get_dind_service()
+
+                # DinD container cleanup
+                logger.info(f"Deleting range {range_id} (event cleanup)")
+                try:
+                    asyncio.run(dind.delete_range_container(str(range_id)))
+                except Exception as dind_err:
+                    logger.debug(f"DinD cleanup skipped: {dind_err}")
+
+                # Clear Docker client cache
+                try:
+                    docker.dind_service.close_range_client(str(range_id))
+                except Exception:
+                    pass
+
+                # Legacy cleanup
+                docker.cleanup_range(str(range_id))
+
+            except Exception as e:
+                logger.warning(f"Failed to cleanup Docker for range {range_id}: {e}")
+
+            # Delete range instances (FK constraint)
+            db.query(RangeInstance).filter(RangeInstance.range_id == range_id).delete()
+
+            # Delete the range
+            db.delete(range_obj)
+            deleted_count += 1
+
+        # Clear participant's range reference
+        participant.range_id = None
+
+    return deleted_count
+
+
 @router.post("/{event_id}/complete", response_model=EventResponse)
 def complete_event(
     event_id: UUID,
     db: DBSession,
     current_user: CurrentUser,
-    teardown_ranges: bool = Query(True, description="Teardown participant ranges on completion"),
+    cleanup_ranges: bool = Query(True, description="Delete participant ranges on completion"),
 ):
     """Mark an event as completed.
 
-    If teardown_ranges=True (default), all participant ranges will be torn down.
+    If cleanup_ranges=True (default), all participant ranges will be deleted.
     """
     event = db.query(TrainingEvent).filter(TrainingEvent.id == event_id).first()
     if not event:
@@ -574,25 +638,17 @@ def complete_event(
     if not can_manage_event(event, current_user):
         raise HTTPException(status_code=403, detail="Not authorized")
 
-    # Teardown participant ranges if requested
-    if teardown_ranges:
-        from cyroid.tasks.deployment import teardown_range_task
-
-        participants = db.query(EventParticipant).filter(
-            EventParticipant.event_id == event_id,
-            EventParticipant.range_id.isnot(None)
-        ).all()
-
-        for participant in participants:
-            logger.info(f"Queueing teardown for range {participant.range_id}")
-            teardown_range_task.send(str(participant.range_id))
-            participant.range_id = None
+    # Delete participant ranges if requested
+    deleted_count = 0
+    if cleanup_ranges:
+        deleted_count = _delete_event_ranges(event_id, db)
+        logger.info(f"Deleted {deleted_count} ranges for event {event.name}")
 
     event.status = EventStatus.COMPLETED
     db.commit()
     db.refresh(event)
 
-    logger.info(f"Event completed: {event.name} (teardown_ranges={teardown_ranges})")
+    logger.info(f"Event completed: {event.name} (cleanup_ranges={cleanup_ranges}, deleted={deleted_count})")
     return build_event_response(event, db)
 
 
@@ -601,8 +657,12 @@ def cancel_event(
     event_id: UUID,
     db: DBSession,
     current_user: CurrentUser,
+    cleanup_ranges: bool = Query(True, description="Delete participant ranges on cancellation"),
 ):
-    """Cancel an event."""
+    """Cancel an event.
+
+    If cleanup_ranges=True (default), all participant ranges will be deleted.
+    """
     event = db.query(TrainingEvent).filter(TrainingEvent.id == event_id).first()
     if not event:
         raise HTTPException(status_code=404, detail="Event not found")
@@ -610,11 +670,17 @@ def cancel_event(
     if not can_manage_event(event, current_user):
         raise HTTPException(status_code=403, detail="Not authorized")
 
+    # Delete participant ranges if requested
+    deleted_count = 0
+    if cleanup_ranges:
+        deleted_count = _delete_event_ranges(event_id, db)
+        logger.info(f"Deleted {deleted_count} ranges for cancelled event {event.name}")
+
     event.status = EventStatus.CANCELLED
     db.commit()
     db.refresh(event)
 
-    logger.info(f"Event cancelled: {event.name}")
+    logger.info(f"Event cancelled: {event.name} (cleanup_ranges={cleanup_ranges}, deleted={deleted_count})")
     return build_event_response(event, db)
 
 

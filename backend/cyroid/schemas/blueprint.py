@@ -64,6 +64,7 @@ class BlueprintCreate(BaseModel):
 class BlueprintUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=100)
     description: Optional[str] = None
+    content_ids: Optional[List[str]] = None  # Linked content for training events
 
 
 class BlueprintResponse(BaseModel):
@@ -73,6 +74,7 @@ class BlueprintResponse(BaseModel):
     version: int
     base_subnet_prefix: str
     next_offset: int
+    content_ids: List[str] = []  # Linked content for training events
     created_by: Optional[UUID] = None  # Nullable for seed blueprints
     created_at: datetime
     updated_at: datetime
