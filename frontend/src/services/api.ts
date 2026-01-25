@@ -347,6 +347,7 @@ export const rangesApi = {
       template_conflict_action?: 'use_existing' | 'create_new' | 'skip'
       skip_artifacts?: boolean
       skip_msel?: boolean
+      skip_walkthrough?: boolean
     } = {}
   ) => {
     const formData = new FormData()
@@ -356,6 +357,7 @@ export const rangesApi = {
     if (options.template_conflict_action) params.append('template_conflict_action', options.template_conflict_action)
     if (options.skip_artifacts) params.append('skip_artifacts', 'true')
     if (options.skip_msel) params.append('skip_msel', 'true')
+    if (options.skip_walkthrough) params.append('skip_walkthrough', 'true')
     const queryString = params.toString()
     const url = queryString ? `/ranges/import/execute?${queryString}` : '/ranges/import/execute'
     return api.post<ImportResult>(url, formData, {
@@ -1098,15 +1100,22 @@ export interface InstanceDeploy {
 export interface BlueprintImportValidation {
   valid: boolean;
   blueprint_name: string;
+  manifest_version?: string;
   errors: string[];
   warnings: string[];
   conflicts: string[];
   missing_templates: string[];
   included_templates: string[];
+  included_dockerfiles: string[];
+  dockerfile_conflicts: string[];
+  missing_images: string[];
+  content_included: boolean;
+  content_conflict: string | null;  // Existing content with same title
 }
 
 export interface BlueprintImportOptions {
   template_conflict_strategy?: 'skip' | 'update' | 'error';
+  content_conflict_strategy?: 'skip' | 'rename' | 'use_existing';
   new_name?: string;
 }
 
@@ -1159,6 +1168,9 @@ export const blueprintsApi = {
     const params = new URLSearchParams();
     if (options.template_conflict_strategy) {
       params.append('template_conflict_strategy', options.template_conflict_strategy);
+    }
+    if (options.content_conflict_strategy) {
+      params.append('content_conflict_strategy', options.content_conflict_strategy);
     }
     if (options.new_name) {
       params.append('new_name', options.new_name);

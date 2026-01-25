@@ -726,6 +726,7 @@ export interface ImportSummary {
   artifacts_count: number
   artifact_placements_count: number
   injects_count: number
+  walkthrough_status?: 'reuse_existing' | 'create_new' | 'create_renamed' | null
   estimated_size_mb?: number
 }
 
@@ -742,6 +743,7 @@ export interface ImportOptions {
   template_conflict_action: 'use_existing' | 'create_new' | 'skip'
   skip_artifacts: boolean
   skip_msel: boolean
+  skip_walkthrough: boolean
   dry_run: boolean
 }
 
@@ -753,6 +755,8 @@ export interface ImportResult {
   vms_created: number
   templates_created: number
   artifacts_imported: number
+  walkthrough_imported?: boolean
+  walkthrough_reused?: boolean
   errors: string[]
   warnings: string[]
 }

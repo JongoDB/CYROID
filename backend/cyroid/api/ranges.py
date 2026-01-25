@@ -1925,6 +1925,7 @@ async def execute_import(
     template_conflict_action: str = "use_existing",
     skip_artifacts: bool = False,
     skip_msel: bool = False,
+    skip_walkthrough: bool = False,
     db: DBSession = None,
     current_user: CurrentUser = None,
 ):
@@ -1938,6 +1939,7 @@ async def execute_import(
     - template_conflict_action: "use_existing", "create_new", or "skip"
     - skip_artifacts: Don't import artifacts
     - skip_msel: Don't import MSEL/injects
+    - skip_walkthrough: Don't import Content Library student guide
     """
     from cyroid.services.export_service import get_export_service
 
@@ -1953,6 +1955,7 @@ async def execute_import(
             template_conflict_action=template_conflict_action,
             skip_artifacts=skip_artifacts,
             skip_msel=skip_msel,
+            skip_walkthrough=skip_walkthrough,
         )
 
         export_service = get_export_service()

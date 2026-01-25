@@ -28,6 +28,7 @@ export default function ImportBlueprintModal({ onClose, onSuccess }: Props) {
   const [validation, setValidation] = useState<BlueprintImportValidation | null>(null);
   const [newName, setNewName] = useState('');
   const [templateStrategy, setTemplateStrategy] = useState<'skip' | 'update' | 'error'>('skip');
+  const [contentStrategy, setContentStrategy] = useState<'skip' | 'rename' | 'use_existing'>('skip');
   const [error, setError] = useState<string | null>(null);
   const [importResult, setImportResult] = useState<{
     blueprintName?: string;
@@ -70,6 +71,7 @@ export default function ImportBlueprintModal({ onClose, onSuccess }: Props) {
     try {
       const options: BlueprintImportOptions = {
         template_conflict_strategy: templateStrategy,
+        content_conflict_strategy: contentStrategy,
       };
 
       // Only set new_name if it's different from the original
@@ -106,6 +108,8 @@ export default function ImportBlueprintModal({ onClose, onSuccess }: Props) {
     setFile(null);
     setValidation(null);
     setNewName('');
+    setTemplateStrategy('skip');
+    setContentStrategy('skip');
     setError(null);
     setImportResult(null);
     setStep('upload');
@@ -251,6 +255,42 @@ export default function ImportBlueprintModal({ onClose, onSuccess }: Props) {
                       <option value="update">Update existing templates</option>
                       <option value="error">Fail if templates exist</option>
                     </select>
+                  </div>
+                )}
+
+                {/* Content Library Info & Conflict */}
+                {validation.content_included && (
+                  <div className="bg-blue-50 rounded-md p-3">
+                    <h4 className="text-sm font-medium text-blue-800 mb-2">
+                      Content Library Item Included
+                    </h4>
+                    {validation.content_conflict ? (
+                      <div className="space-y-3">
+                        <p className="text-sm text-amber-700">
+                          ⚠️ Content with this title already exists: "{validation.content_conflict}"
+                        </p>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Content Conflict Strategy
+                          </label>
+                          <select
+                            value={contentStrategy}
+                            onChange={(e) =>
+                              setContentStrategy(e.target.value as 'skip' | 'rename' | 'use_existing')
+                            }
+                            className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                          >
+                            <option value="use_existing">Use existing content (don't import)</option>
+                            <option value="rename">Import with new name (add suffix)</option>
+                            <option value="skip">Skip content import entirely</option>
+                          </select>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-sm text-blue-700">
+                        ✓ Content will be imported as a new item
+                      </p>
+                    )}
                   </div>
                 )}
 
