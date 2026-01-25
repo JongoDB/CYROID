@@ -6,6 +6,7 @@ from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, HTTPException, status
+from starlette.websockets import WebSocketState
 from sqlalchemy.orm import Session
 import websockets
 
@@ -665,6 +666,11 @@ async def system_events(
 
         # Listen for client messages (subscription changes) and keep alive
         while True:
+            # Check if connection is still open
+            if websocket.client_state != WebSocketState.CONNECTED:
+                logger.debug(f"Events WebSocket {connection_id}: client disconnected")
+                break
+
             try:
                 # Wait for client message with timeout
                 data = await asyncio.wait_for(
@@ -704,15 +710,30 @@ async def system_events(
                     await websocket.send_json({"type": "pong"})
 
             except asyncio.TimeoutError:
-                # Send keepalive ping
-                await websocket.send_json({"type": "ping"})
+                # Send keepalive ping if still connected
+                if websocket.client_state == WebSocketState.CONNECTED:
+                    try:
+                        await websocket.send_json({"type": "ping"})
+                    except Exception:
+                        # Connection closed during send, exit loop
+                        break
 
     except WebSocketDisconnect:
-        logger.info(f"Events WebSocket disconnected: {connection_id}")
+        logger.debug(f"Events WebSocket disconnected: {connection_id}")
+    except RuntimeError as e:
+        # Handle "Cannot call receive while another coroutine is waiting"
+        # This happens during rapid reconnection
+        if "another coroutine" in str(e).lower():
+            logger.debug(f"Events WebSocket {connection_id}: concurrent receive, closing")
+        else:
+            logger.warning(f"Events WebSocket runtime error ({type(e).__name__}): {e}")
     except Exception as e:
-        logger.error(f"Events WebSocket error: {e}")
+        # Log with exception type for better debugging
+        error_msg = str(e) if str(e) else type(e).__name__
+        logger.warning(f"Events WebSocket error ({type(e).__name__}): {error_msg}")
         try:
-            await websocket.close(code=4000, reason=str(e))
+            if websocket.client_state == WebSocketState.CONNECTED:
+                await websocket.close(code=4000, reason=error_msg[:120])
         except Exception:
             pass
     finally:

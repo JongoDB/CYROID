@@ -35,6 +35,7 @@ export function useGlobalNotifications(
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const reconnectAttemptsRef = useRef(0)
+  const mountedRef = useRef(true)
 
   const [connectionState, setConnectionState] = useState<ConnectionState>('disconnected')
 
@@ -47,9 +48,16 @@ export function useGlobalNotifications(
   const connect = useCallback(() => {
     if (!token || !enabled) return
 
-    // Close existing connection
-    if (wsRef.current) {
-      wsRef.current.close()
+    // Prevent rapid reconnection - wait for previous close to complete
+    if (wsRef.current && wsRef.current.readyState === WebSocket.CONNECTING) {
+      console.log('[GlobalNotifications] Connection already in progress, skipping')
+      return
+    }
+
+    // Close existing connection cleanly
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.close(1000, 'Reconnecting')
+      wsRef.current = null
     }
 
     setConnectionState('connecting')
@@ -114,6 +122,9 @@ export function useGlobalNotifications(
       setConnectionState('disconnected')
       wsRef.current = null
 
+      // Don't reconnect if unmounted or clean close
+      if (!mountedRef.current) return
+
       // Attempt reconnection if not a clean close
       if (event.code !== 1000 && reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS && enabled) {
         const delay = Math.min(
@@ -123,8 +134,10 @@ export function useGlobalNotifications(
         console.log(`[GlobalNotifications] Reconnecting in ${delay}ms (attempt ${reconnectAttemptsRef.current + 1})`)
 
         reconnectTimeoutRef.current = setTimeout(() => {
-          reconnectAttemptsRef.current++
-          connect()
+          if (mountedRef.current) {
+            reconnectAttemptsRef.current++
+            connect()
+          }
         }, delay)
       }
     }
@@ -132,16 +145,20 @@ export function useGlobalNotifications(
 
   // Connect on mount and when dependencies change
   useEffect(() => {
+    mountedRef.current = true
+
     if (enabled && token) {
       connect()
     }
 
     return () => {
+      mountedRef.current = false
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current)
       }
       if (wsRef.current) {
         wsRef.current.close(1000, 'Hook cleanup')
+        wsRef.current = null
       }
     }
   }, [connect, enabled, token])
