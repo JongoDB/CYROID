@@ -478,10 +478,18 @@ def start_event(
     if auto_deploy and event.blueprint_id:
         from cyroid.services.blueprint_service import create_range_from_blueprint
         from cyroid.tasks.deployment import deploy_range_task
+        from cyroid.schemas.blueprint import BlueprintConfig
 
         blueprint = db.query(RangeBlueprint).filter(RangeBlueprint.id == event.blueprint_id).first()
         if not blueprint:
             raise HTTPException(status_code=404, detail="Blueprint not found")
+
+        # Convert stored config dict to BlueprintConfig model
+        try:
+            blueprint_config = BlueprintConfig.model_validate(blueprint.config)
+        except Exception as e:
+            logger.error(f"Failed to parse blueprint config: {e}")
+            raise HTTPException(status_code=400, detail=f"Invalid blueprint configuration: {str(e)}")
 
         # Get student participants only
         students = db.query(EventParticipant).filter(
@@ -503,7 +511,7 @@ def start_event(
                 range_name = f"{event.name} - {user.username}"
                 range_obj = create_range_from_blueprint(
                     db=db,
-                    config=blueprint.config,
+                    config=blueprint_config,
                     range_name=range_name,
                     base_prefix=blueprint.base_subnet_prefix or "10.0.0.0/8",
                     offset=blueprint.next_offset or 0,
