@@ -9,7 +9,7 @@
 - **Name**: CYROID (Cyber Range Orchestrator In Docker)
 - **Type**: Web-based cyber range orchestration platform
 - **Domain**: Military/government cyber training, educational institutions
-- **Current Version**: 0.27.0
+- **Current Version**: 0.27.6
 - **Repository**: /Users/JonWFH/jondev/CYROID
 
 ---
