@@ -792,7 +792,7 @@ def get_vnc_status(range_id: UUID, db: DBSession, current_user: CurrentUser):
 
             # Get running socat VNC proxies
             exec_result = dind_container.exec_run(
-                "ps aux | grep socat | grep -v grep",
+                "sh -c 'ps 2>/dev/null | grep socat | grep -v grep'",
                 user="root"
             )
             if exec_result.exit_code == 0:
@@ -2345,7 +2345,8 @@ def _format_network_isolation(forward_output: str, nat_output: str) -> str:
     if not has_masq:
         lines.append("  (no NAT rules)")
 
-    return '\n'.join(lines)
+    # Use \r\n for terminal compatibility
+    return '\r\n'.join(lines)
 
 
 @router.get("/{range_id}/console/port-forwarding")
@@ -2368,7 +2369,7 @@ def get_range_port_forwarding(range_id: UUID, db: DBSession, current_user: Curre
         dind_container = docker_service.client.containers.get(range_obj.dind_container_id)
 
         # Get socat processes
-        result = dind_container.exec_run("ps aux | grep socat | grep -v grep", privileged=True)
+        result = dind_container.exec_run("sh -c 'ps 2>/dev/null | grep socat | grep -v grep'", privileged=True)
         raw_output = result.output.decode("utf-8", errors="replace")
 
         # Parse socat processes into structured data
@@ -2391,19 +2392,31 @@ def get_range_port_forwarding(range_id: UUID, db: DBSession, current_user: Curre
 
 
 def _parse_socat_processes(raw_output: str) -> list:
-    """Parse ps aux output for socat processes into structured data."""
+    """Parse ps aux output for socat processes into structured data.
+
+    Handles both standard Linux ps aux (PID in column 2) and
+    BusyBox/Alpine ps aux (PID in column 1).
+    """
     import re
     proxies = []
 
     for line in raw_output.strip().split('\n'):
-        if not line.strip() or 'socat' not in line:
+        if not line.strip() or 'socat' not in line.lower():
+            continue
+        # Skip header line and grep itself
+        if line.startswith('PID') or 'grep' in line:
             continue
 
-        # Extract PID (second column in ps aux)
         parts = line.split()
         if len(parts) < 2:
             continue
-        pid = parts[1] if parts[1].isdigit() else None
+
+        # Try to find PID - check first few columns for a number
+        pid = None
+        for part in parts[:3]:
+            if part.isdigit():
+                pid = part
+                break
 
         # Extract TCP-LISTEN port
         listen_match = re.search(r'TCP-LISTEN:(\d+)', line)
@@ -2442,7 +2455,8 @@ def _format_port_forwarding(proxies: list, vm_map: dict) -> str:
         lines.append("")
         lines.append("VNC proxies are created when VMs start.")
         lines.append("Try repairing VNC if VMs are running but no proxies exist.")
-        return '\n'.join(lines)
+        # Use \r\n for terminal compatibility
+        return '\r\n'.join(lines)
 
     for proxy in proxies:
         vm_ip = proxy.get("vm_ip", "unknown")
@@ -2457,7 +2471,8 @@ def _format_port_forwarding(proxies: list, vm_map: dict) -> str:
 
     lines.append(f"Active Proxies: {len(proxies)}")
 
-    return '\n'.join(lines)
+    # Use \r\n for terminal compatibility
+    return '\r\n'.join(lines)
 
 
 @router.get("/{range_id}/console/routes")
