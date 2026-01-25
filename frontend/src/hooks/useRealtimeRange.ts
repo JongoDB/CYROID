@@ -50,6 +50,7 @@ export function useRealtimeRange(
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const reconnectAttemptsRef = useRef(0)
+  const mountedRef = useRef(true)
 
   const [connectionState, setConnectionState] = useState<WebSocketConnectionState>('disconnected')
   const [lastEvent, setLastEvent] = useState<RealtimeEvent | null>(null)
@@ -63,9 +64,16 @@ export function useRealtimeRange(
   const connect = useCallback(() => {
     if (!token || !rangeId || !enabled) return
 
-    // Close existing connection
-    if (wsRef.current) {
-      wsRef.current.close()
+    // Prevent rapid reconnection - wait for previous close to complete
+    if (wsRef.current && wsRef.current.readyState === WebSocket.CONNECTING) {
+      console.log('[WebSocket] Connection already in progress, skipping')
+      return
+    }
+
+    // Close existing connection cleanly
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.close(1000, 'Reconnecting')
+      wsRef.current = null
     }
 
     setConnectionState('connecting')
@@ -149,14 +157,19 @@ export function useRealtimeRange(
       setConnectionState('disconnected')
       wsRef.current = null
 
+      // Don't reconnect if unmounted or clean close
+      if (!mountedRef.current) return
+
       // Attempt reconnection if not a clean close and we haven't exceeded attempts
       if (event.code !== 1000 && reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS && enabled) {
         const delay = INITIAL_RECONNECT_DELAY * Math.pow(2, reconnectAttemptsRef.current)
         console.log(`[WebSocket] Reconnecting in ${delay}ms (attempt ${reconnectAttemptsRef.current + 1})`)
 
         reconnectTimeoutRef.current = setTimeout(() => {
-          reconnectAttemptsRef.current++
-          connect()
+          if (mountedRef.current) {
+            reconnectAttemptsRef.current++
+            connect()
+          }
         }, delay)
       }
     }
@@ -194,17 +207,30 @@ export function useRealtimeRange(
 
   // Connect on mount and when dependencies change
   useEffect(() => {
+    mountedRef.current = true
+    let connectTimeout: ReturnType<typeof setTimeout> | null = null
+
     if (enabled && rangeId && token) {
-      connect()
+      // Small delay to avoid React 18 Strict Mode double-render race condition
+      connectTimeout = setTimeout(() => {
+        if (mountedRef.current) {
+          connect()
+        }
+      }, 100)
     }
 
     return () => {
       // Cleanup on unmount
+      mountedRef.current = false
+      if (connectTimeout) {
+        clearTimeout(connectTimeout)
+      }
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current)
       }
       if (wsRef.current) {
         wsRef.current.close(1000, 'Component unmounted')
+        wsRef.current = null
       }
     }
   }, [connect, enabled, rangeId, token])
