@@ -1,0 +1,114 @@
+# docker-compose.prod.yml
+#
+# Production overrides for CYROID deployment
+#
+# Usage:
+#   docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# Or use the deploy script:
+#   ./scripts/deploy.sh
+#
+# Key differences from development:
+# - Uses environment variables from .env.prod for secrets
+# - Restart policies for reliability
+# - Production Traefik config with HTTPS redirect
+# - No debug mode
+# - Secure database credentials
+
+services:
+  db:
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    restart: always
+    # Bind to localhost only in production (not externally accessible)
+    ports:
+      - "127.0.0.1:5432:5432"
+
+  redis:
+    restart: always
+    # Bind to localhost only in production
+    ports:
+      - "127.0.0.1:6379:6379"
+
+  minio:
+    environment:
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY}
+    restart: always
+    # Only expose console internally, access via Traefik if needed
+    ports:
+      - "127.0.0.1:9001:9001"
+
+  api:
+    image: ghcr.io/jongodb/cyroid-api:${VERSION:-latest}
+    environment:
+      DATABASE_URL: postgresql://cyroid:${POSTGRES_PASSWORD}@172.30.0.11:5432/cyroid
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      DEBUG: "false"
+      # Use production data directory
+      ISO_CACHE_DIR: ${CYROID_DATA_DIR}/iso-cache
+      TEMPLATE_STORAGE_DIR: ${CYROID_DATA_DIR}/template-storage
+      VM_STORAGE_DIR: ${CYROID_DATA_DIR}/vm-storage
+      GLOBAL_SHARED_DIR: ${CYROID_DATA_DIR}/shared
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${CYROID_DATA_DIR}/iso-cache:${CYROID_DATA_DIR}/iso-cache
+      - ${CYROID_DATA_DIR}/template-storage:${CYROID_DATA_DIR}/template-storage
+      - ${CYROID_DATA_DIR}/vm-storage:${CYROID_DATA_DIR}/vm-storage
+      - ${CYROID_DATA_DIR}/shared:${CYROID_DATA_DIR}/shared
+      - ./data/seed-templates:/data/seed-templates:ro
+      - ./data/seed-blueprints:/data/seed-blueprints:ro
+      - ./data/scenarios:/data/scenarios
+      - ./data/images:/data/images
+      - ./traefik/dynamic:/app/traefik/dynamic
+    restart: always
+    labels:
+      # Add TLS configuration for Let's Encrypt (when SSL_MODE=letsencrypt)
+      - "traefik.http.routers.api-secure.tls.certresolver=${SSL_RESOLVER:-}"
+      - "traefik.http.routers.ws-secure.tls.certresolver=${SSL_RESOLVER:-}"
+
+  worker:
+    image: ghcr.io/jongodb/cyroid-worker:${VERSION:-latest}
+    environment:
+      DATABASE_URL: postgresql://cyroid:${POSTGRES_PASSWORD}@172.30.0.11:5432/cyroid
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      DEBUG: "false"
+      ISO_CACHE_DIR: ${CYROID_DATA_DIR}/iso-cache
+      TEMPLATE_STORAGE_DIR: ${CYROID_DATA_DIR}/template-storage
+      VM_STORAGE_DIR: ${CYROID_DATA_DIR}/vm-storage
+      GLOBAL_SHARED_DIR: ${CYROID_DATA_DIR}/shared
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${CYROID_DATA_DIR}/iso-cache:${CYROID_DATA_DIR}/iso-cache
+      - ${CYROID_DATA_DIR}/template-storage:${CYROID_DATA_DIR}/template-storage
+      - ${CYROID_DATA_DIR}/vm-storage:${CYROID_DATA_DIR}/vm-storage
+      - ${CYROID_DATA_DIR}/shared:${CYROID_DATA_DIR}/shared
+      - ./traefik/dynamic:/app/traefik/dynamic
+    restart: always
+
+  frontend:
+    image: ghcr.io/jongodb/cyroid-frontend:${VERSION:-latest}
+    restart: always
+    labels:
+      # Add TLS configuration for Let's Encrypt
+      - "traefik.http.routers.frontend-secure.tls.certresolver=${SSL_RESOLVER:-}"
+
+  traefik:
+    image: ghcr.io/jongodb/cyroid-proxy:latest
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./traefik-prod.yml:/etc/traefik/traefik.yml:ro
+      - ./traefik/dynamic:/etc/traefik/dynamic
+      - ./certs:/etc/traefik/certs:ro
+      # ACME certificate storage (persisted for Let's Encrypt)
+      - ./acme:/etc/traefik/acme
+      - traefik-logs:/var/log/traefik
+    restart: always
+    # Only expose HTTP/HTTPS in production (no dashboard)
+    ports:
+      - "80:80"
+      - "443:443"
+
+volumes:
+  traefik-logs:

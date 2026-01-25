@@ -1,0 +1,60 @@
+# Traefik Production Configuration
+#
+# This configuration adds:
+# - ACME (Let's Encrypt) automatic certificate management
+# - HTTP to HTTPS redirect
+# - Secure dashboard (disabled by default)
+#
+# See: https://doc.traefik.io/traefik/reference/static-configuration/file/
+
+api:
+  # Dashboard disabled in production (enable with basic auth if needed)
+  insecure: false
+  dashboard: false
+
+entryPoints:
+  web:
+    address: ":80"
+    http:
+      redirections:
+        entryPoint:
+          to: websecure
+          scheme: https
+          permanent: true
+  websecure:
+    address: ":443"
+
+providers:
+  # Docker provider for container labels
+  docker:
+    exposedByDefault: false
+
+  # File provider watching directory for dynamic config
+  # Contains: base.yml (TLS, serversTransport) + vnc-*.yml (VNC routes)
+  file:
+    directory: /etc/traefik/dynamic
+    watch: true
+
+# ACME (Let's Encrypt) Certificate Configuration
+# Note: This is a template. The deploy.sh script generates the actual
+# traefik-prod.yml with the correct email address.
+# This resolver is used when SSL_MODE=letsencrypt
+certificatesResolvers:
+  letsencrypt:
+    acme:
+      # Email for certificate notifications (set by deploy.sh)
+      email: "admin@localhost"
+      # Certificate storage file
+      storage: /etc/traefik/acme/acme.json
+      # HTTP-01 challenge (port 80)
+      httpChallenge:
+        entryPoint: web
+
+# Logging
+log:
+  level: WARN
+  format: common
+
+accessLog:
+  filePath: "/var/log/traefik/access.log"
+  bufferingSize: 100

@@ -1,0 +1,54 @@
+# Traefik Production Dynamic Configuration
+#
+# This file is only used in production mode and provides:
+# - HTTP to HTTPS redirect middleware
+# - Secure TLS configuration
+#
+# Note: This is loaded by Traefik's file provider watching /etc/traefik/dynamic/
+
+http:
+  # Middlewares
+  middlewares:
+    # HTTPS redirect (handled by entrypoint in traefik-prod.yml, this is backup)
+    https-redirect:
+      redirectScheme:
+        scheme: https
+        permanent: true
+
+    # Security headers
+    security-headers:
+      headers:
+        frameDeny: true
+        browserXssFilter: true
+        contentTypeNosniff: true
+        referrerPolicy: "strict-origin-when-cross-origin"
+
+  serversTransports:
+    # Transport for containers with self-signed certs (KasmVNC, etc.)
+    insecure-transport:
+      insecureSkipVerify: true
+
+tls:
+  # Default certificate store
+  stores:
+    default:
+      defaultCertificate:
+        certFile: /etc/traefik/certs/cert.pem
+        keyFile: /etc/traefik/certs/key.pem
+
+  # Certificate configuration (fallback for self-signed)
+  certificates:
+    - certFile: /etc/traefik/certs/cert.pem
+      keyFile: /etc/traefik/certs/key.pem
+      stores:
+        - default
+
+  # TLS options
+  options:
+    default:
+      minVersion: VersionTLS12
+      sniStrict: false
+      cipherSuites:
+        - TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+        - TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
+        - TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305

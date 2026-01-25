@@ -54,6 +54,12 @@ test-results/
 # Certificates
 certs/
 
+# Production environment (contains secrets)
+.env.prod
+
+# ACME/Let's Encrypt data
+acme/
+
 # Traefik dynamic VNC routes (generated at runtime)
 traefik/dynamic/range-*.yml
 
