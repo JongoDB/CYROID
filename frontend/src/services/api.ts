@@ -197,6 +197,22 @@ export interface VncVmStatus {
   issues: string[]
 }
 
+export interface SocatProxy {
+  pid: string | null
+  external_port: number
+  vm_ip: string
+  vnc_port: number
+  status: string
+  vm_hostname?: string
+}
+
+export interface NetworkIsolation {
+  forward_policy: string
+  forward_rules_count: number
+  nat_rules_count: number
+  masquerade_enabled: boolean
+}
+
 export interface VncStatusResponse {
   range_id: string
   range_name: string
@@ -208,7 +224,9 @@ export interface VncStatusResponse {
   traefik_routes_exist: boolean
   traefik_route_file: string
   socat_processes: string[]
+  socat_proxies: SocatProxy[]
   network_interfaces: string[]
+  network_isolation: NetworkIsolation
   vms: VncVmStatus[]
   summary: {
     total_vms: number
@@ -258,6 +276,15 @@ export interface RangeConsoleStats {
 
 export interface RangeConsoleIptables {
   iptables_nat: string
+  forward_rules_raw?: string
+  nat_rules_raw?: string
+}
+
+export interface RangeConsolePortForwarding {
+  port_forwarding: string
+  proxies: SocatProxy[]
+  proxy_count: number
+  raw_output: string
 }
 
 export interface RangeConsoleRoutes {
@@ -352,6 +379,8 @@ export const rangesApi = {
     api.get<RangeConsoleStats>(`/ranges/${rangeId}/console/stats`),
   getConsoleIptables: (rangeId: string) =>
     api.get<RangeConsoleIptables>(`/ranges/${rangeId}/console/iptables`),
+  getConsolePortForwarding: (rangeId: string) =>
+    api.get<RangeConsolePortForwarding>(`/ranges/${rangeId}/console/port-forwarding`),
   getConsoleRoutes: (rangeId: string) =>
     api.get<RangeConsoleRoutes>(`/ranges/${rangeId}/console/routes`),
 

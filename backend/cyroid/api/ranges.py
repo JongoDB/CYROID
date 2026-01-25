@@ -775,7 +775,15 @@ def get_vnc_status(range_id: UUID, db: DBSession, current_user: CurrentUser):
 
     # Check socat processes and network config for DinD ranges
     socat_processes = []
+    socat_proxies = []
     network_interfaces = []
+    network_isolation = {
+        "forward_policy": "unknown",
+        "forward_rules_count": 0,
+        "nat_rules_count": 0,
+        "masquerade_enabled": False
+    }
+
     if range_obj.dind_container_id and range_obj.dind_docker_url:
         try:
             docker = get_docker_service()
@@ -784,11 +792,18 @@ def get_vnc_status(range_id: UUID, db: DBSession, current_user: CurrentUser):
 
             # Get running socat VNC proxies
             exec_result = dind_container.exec_run(
-                "ps aux | grep socat | grep -v grep",
+                "sh -c 'ps 2>/dev/null | grep socat | grep -v grep'",
                 user="root"
             )
             if exec_result.exit_code == 0:
-                socat_processes = exec_result.output.decode("utf-8").split("\n")
+                raw_socat = exec_result.output.decode("utf-8")
+                socat_processes = raw_socat.split("\n")
+                # Parse into structured data
+                socat_proxies = _parse_socat_processes(raw_socat)
+                # Enrich with VM hostnames
+                vm_map = {vm.ip_address: vm.hostname for vm in range_obj.vms if vm.ip_address}
+                for proxy in socat_proxies:
+                    proxy["vm_hostname"] = vm_map.get(proxy.get("vm_ip"), "unknown")
             else:
                 socat_processes = ["No socat processes running"]
 
@@ -799,6 +814,34 @@ def get_vnc_status(range_id: UUID, db: DBSession, current_user: CurrentUser):
             )
             if exec_result.exit_code == 0:
                 network_interfaces = exec_result.output.decode("utf-8").split("\n")
+
+            # Get network isolation info (iptables FORWARD chain)
+            exec_result = dind_container.exec_run(
+                "iptables -L FORWARD -n",
+                user="root",
+                privileged=True
+            )
+            if exec_result.exit_code == 0:
+                forward_output = exec_result.output.decode("utf-8")
+                if "policy DROP" in forward_output:
+                    network_isolation["forward_policy"] = "DROP"
+                elif "policy ACCEPT" in forward_output:
+                    network_isolation["forward_policy"] = "ACCEPT"
+                # Count non-header lines as rules
+                forward_lines = [l for l in forward_output.split("\n") if l.strip() and not l.startswith("Chain") and not l.startswith("target")]
+                network_isolation["forward_rules_count"] = len(forward_lines)
+
+            # Check for MASQUERADE
+            exec_result = dind_container.exec_run(
+                "iptables -t nat -L POSTROUTING -n",
+                user="root",
+                privileged=True
+            )
+            if exec_result.exit_code == 0:
+                nat_output = exec_result.output.decode("utf-8")
+                network_isolation["masquerade_enabled"] = "MASQUERADE" in nat_output
+                nat_lines = [l for l in nat_output.split("\n") if l.strip() and not l.startswith("Chain") and not l.startswith("target")]
+                network_isolation["nat_rules_count"] = len(nat_lines)
 
         except Exception as e:
             socat_processes = [f"Error getting socat processes: {str(e)}"]
@@ -814,7 +857,9 @@ def get_vnc_status(range_id: UUID, db: DBSession, current_user: CurrentUser):
         "traefik_routes_exist": traefik_routes_exist,
         "traefik_route_file": str(traefik_route_file),
         "socat_processes": socat_processes,
+        "socat_proxies": socat_proxies,
         "network_interfaces": network_interfaces,
+        "network_isolation": network_isolation,
         "vms": vm_vnc_status,
         "summary": {
             "total_vms": len(range_obj.vms),
@@ -2214,8 +2259,8 @@ def get_range_stats(range_id: UUID, db: DBSession, current_user: CurrentUser):
 @router.get("/{range_id}/console/iptables")
 def get_range_iptables(range_id: UUID, db: DBSession, current_user: CurrentUser):
     """
-    Get iptables NAT rules from the DinD container.
-    Shows VNC port forwarding and network routing rules.
+    Get iptables rules from the DinD container.
+    Shows network isolation (FORWARD chain) and NAT rules.
     """
     range_obj = db.query(Range).filter(Range.id == range_id).first()
     if not range_obj:
@@ -2229,12 +2274,205 @@ def get_range_iptables(range_id: UUID, db: DBSession, current_user: CurrentUser)
 
     try:
         dind_container = docker_service.client.containers.get(range_obj.dind_container_id)
-        result = dind_container.exec_run("iptables -t nat -L -n -v", privileged=True)
-        output = result.output.decode("utf-8", errors="replace")
 
-        return {"iptables_nat": output}
+        # Get FORWARD chain (network isolation)
+        forward_result = dind_container.exec_run("iptables -L FORWARD -n -v", privileged=True)
+        forward_output = forward_result.output.decode("utf-8", errors="replace")
+
+        # Get NAT POSTROUTING chain (outbound NAT/masquerade)
+        nat_result = dind_container.exec_run("iptables -t nat -L POSTROUTING -n -v", privileged=True)
+        nat_output = nat_result.output.decode("utf-8", errors="replace")
+
+        # Parse and format the output
+        formatted_output = _format_network_isolation(forward_output, nat_output)
+
+        return {
+            "iptables_nat": formatted_output,
+            "forward_rules_raw": forward_output,
+            "nat_rules_raw": nat_output
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get iptables rules: {e}")
+
+
+def _format_network_isolation(forward_output: str, nat_output: str) -> str:
+    """Format iptables output into a readable network isolation summary."""
+    lines = []
+    lines.append("Network Isolation (iptables)")
+    lines.append("=" * 50)
+    lines.append("")
+
+    # Parse FORWARD chain
+    lines.append("FORWARD Chain:")
+    forward_lines = forward_output.strip().split('\n')
+    policy = "DROP"
+    for line in forward_lines:
+        if "policy" in line.lower():
+            if "ACCEPT" in line:
+                policy = "ACCEPT"
+            elif "DROP" in line:
+                policy = "DROP"
+            lines.append(f"  Policy: {policy}")
+        elif "ACCEPT" in line and ("ESTABLISHED" in line or "RELATED" in line):
+            lines.append("  ✓ ACCEPT established/related connections")
+        elif "ACCEPT" in line and "br-" in line:
+            # Extract bridge interfaces
+            parts = line.split()
+            in_iface = ""
+            out_iface = ""
+            for i, p in enumerate(parts):
+                if p.startswith("br-"):
+                    if not in_iface:
+                        in_iface = p
+                    else:
+                        out_iface = p
+            if in_iface and out_iface:
+                if in_iface == out_iface:
+                    lines.append(f"  ✓ {in_iface} ↔ {in_iface} (internal traffic)")
+                else:
+                    lines.append(f"  ✓ {in_iface} → {out_iface}")
+            elif in_iface:
+                lines.append(f"  ✓ {in_iface} → eth0 (internet access)")
+
+    lines.append("")
+    lines.append("NAT POSTROUTING:")
+    nat_lines = nat_output.strip().split('\n')
+    has_masq = False
+    for line in nat_lines:
+        if "MASQUERADE" in line:
+            has_masq = True
+            lines.append("  ✓ MASQUERADE on eth0 (outbound NAT)")
+    if not has_masq:
+        lines.append("  (no NAT rules)")
+
+    # Use \r\n for terminal compatibility
+    return '\r\n'.join(lines)
+
+
+@router.get("/{range_id}/console/port-forwarding")
+def get_range_port_forwarding(range_id: UUID, db: DBSession, current_user: CurrentUser):
+    """
+    Get socat port forwarding configuration from the DinD container.
+    Shows VNC proxy mappings for each VM.
+    """
+    range_obj = db.query(Range).filter(Range.id == range_id).first()
+    if not range_obj:
+        raise HTTPException(status_code=404, detail="Range not found")
+
+    if not range_obj.dind_container_id:
+        raise HTTPException(status_code=400, detail="Range is not a DinD deployment")
+
+    from cyroid.services.docker_service import get_docker_service
+    docker_service = get_docker_service()
+
+    try:
+        dind_container = docker_service.client.containers.get(range_obj.dind_container_id)
+
+        # Get socat processes
+        result = dind_container.exec_run("sh -c 'ps 2>/dev/null | grep socat | grep -v grep'", privileged=True)
+        raw_output = result.output.decode("utf-8", errors="replace")
+
+        # Parse socat processes into structured data
+        proxies = _parse_socat_processes(raw_output)
+
+        # Get VM info to enrich the output
+        vm_map = {vm.ip_address: vm.hostname for vm in range_obj.vms if vm.ip_address}
+
+        # Format output
+        formatted_output = _format_port_forwarding(proxies, vm_map)
+
+        return {
+            "port_forwarding": formatted_output,
+            "proxies": proxies,
+            "proxy_count": len(proxies),
+            "raw_output": raw_output
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get port forwarding: {e}")
+
+
+def _parse_socat_processes(raw_output: str) -> list:
+    """Parse ps aux output for socat processes into structured data.
+
+    Handles both standard Linux ps aux (PID in column 2) and
+    BusyBox/Alpine ps aux (PID in column 1).
+    """
+    import re
+    proxies = []
+
+    for line in raw_output.strip().split('\n'):
+        if not line.strip() or 'socat' not in line.lower():
+            continue
+        # Skip header line and grep itself
+        if line.startswith('PID') or 'grep' in line:
+            continue
+
+        parts = line.split()
+        if len(parts) < 2:
+            continue
+
+        # Try to find PID - check first few columns for a number
+        pid = None
+        for part in parts[:3]:
+            if part.isdigit():
+                pid = part
+                break
+
+        # Extract TCP-LISTEN port
+        listen_match = re.search(r'TCP-LISTEN:(\d+)', line)
+        external_port = int(listen_match.group(1)) if listen_match else None
+
+        # Extract target TCP address
+        target_match = re.search(r'TCP:([0-9.]+):(\d+)', line)
+        if target_match:
+            vm_ip = target_match.group(1)
+            vnc_port = int(target_match.group(2))
+        else:
+            vm_ip = None
+            vnc_port = None
+
+        if external_port and vm_ip:
+            proxies.append({
+                "pid": pid,
+                "external_port": external_port,
+                "vm_ip": vm_ip,
+                "vnc_port": vnc_port,
+                "status": "running"
+            })
+
+    return proxies
+
+
+def _format_port_forwarding(proxies: list, vm_map: dict) -> str:
+    """Format socat proxy list into readable output."""
+    lines = []
+    lines.append("Port Forwarding (Socat Proxies)")
+    lines.append("=" * 50)
+    lines.append("")
+
+    if not proxies:
+        lines.append("No active port forwarding proxies.")
+        lines.append("")
+        lines.append("VNC proxies are created when VMs start.")
+        lines.append("Try repairing VNC if VMs are running but no proxies exist.")
+        # Use \r\n for terminal compatibility
+        return '\r\n'.join(lines)
+
+    for proxy in proxies:
+        vm_ip = proxy.get("vm_ip", "unknown")
+        hostname = vm_map.get(vm_ip, "unknown")
+        external_port = proxy.get("external_port", "?")
+        vnc_port = proxy.get("vnc_port", "?")
+        pid = proxy.get("pid", "?")
+
+        lines.append(f"VM: {hostname} ({vm_ip})")
+        lines.append(f"  └─ VNC :{vnc_port} → External :{external_port} [PID {pid}]")
+        lines.append("")
+
+    lines.append(f"Active Proxies: {len(proxies)}")
+
+    # Use \r\n for terminal compatibility
+    return '\r\n'.join(lines)
 
 
 @router.get("/{range_id}/console/routes")
