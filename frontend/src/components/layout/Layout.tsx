@@ -35,16 +35,38 @@ interface NavItem {
   icon: typeof LayoutDashboard
 }
 
-const navigation: NavItem[] = [
-  { name: 'Dashboard', href: '/', icon: LayoutDashboard },
-  { name: 'Image Cache', href: '/cache', icon: HardDrive },
-  { name: 'VM Library', href: '/vm-library', icon: Server },
-  { name: 'Range Blueprints', href: '/blueprints', icon: LayoutTemplate },
-  { name: 'Training Scenarios', href: '/scenarios', icon: Target },
-  { name: 'Content Library', href: '/content', icon: BookOpen },
-  { name: 'Training Events', href: '/events', icon: CalendarDays },
-  { name: 'Ranges', href: '/ranges', icon: Network },
-  { name: 'Artifacts', href: '/artifacts', icon: FileBox },
+interface NavSection {
+  title: string
+  items: NavItem[]
+}
+
+// Dashboard is standalone, then organized sections
+const dashboardNav: NavItem = { name: 'Dashboard', href: '/', icon: LayoutDashboard }
+
+const navSections: NavSection[] = [
+  {
+    title: 'Content Development',
+    items: [
+      { name: 'Content Library', href: '/content', icon: BookOpen },
+      { name: 'VM Library', href: '/vm-library', icon: Server },
+      { name: 'Image Cache', href: '/cache', icon: HardDrive },
+      { name: 'Artifacts', href: '/artifacts', icon: FileBox },
+    ]
+  },
+  {
+    title: 'Range Development',
+    items: [
+      { name: 'Ranges', href: '/ranges', icon: Network },
+      { name: 'Range Blueprints', href: '/blueprints', icon: LayoutTemplate },
+      { name: 'Training Scenarios', href: '/scenarios', icon: Target },
+    ]
+  },
+  {
+    title: 'Event Management',
+    items: [
+      { name: 'Training Events', href: '/events', icon: CalendarDays },
+    ]
+  },
 ]
 
 export default function Layout({ children }: LayoutProps) {
@@ -94,21 +116,46 @@ export default function Layout({ children }: LayoutProps) {
           </button>
         </div>
         <nav className="mt-4 px-2 space-y-1">
-          {navigation.map((item) => (
-            <Link
-              key={item.name}
-              to={item.href}
-              onClick={() => setSidebarOpen(false)}
-              className={clsx(
-                "flex items-center px-3 py-2 text-sm font-medium rounded-md",
-                location.pathname === item.href
-                  ? "bg-gray-800 text-white"
-                  : "text-gray-300 hover:bg-gray-700 hover:text-white"
-              )}
-            >
-              <item.icon className="mr-3 h-5 w-5" />
-              {item.name}
-            </Link>
+          {/* Dashboard - standalone */}
+          <Link
+            to={dashboardNav.href}
+            onClick={() => setSidebarOpen(false)}
+            className={clsx(
+              "flex items-center px-3 py-2 text-sm font-medium rounded-md",
+              location.pathname === dashboardNav.href
+                ? "bg-gray-800 text-white"
+                : "text-gray-300 hover:bg-gray-700 hover:text-white"
+            )}
+          >
+            <dashboardNav.icon className="mr-3 h-5 w-5" />
+            {dashboardNav.name}
+          </Link>
+
+          {/* Sectioned navigation */}
+          {navSections.map((section) => (
+            <div key={section.title} className="pt-4">
+              <h3 className="px-3 text-xs font-semibold text-gray-400 uppercase tracking-wider">
+                {section.title}
+              </h3>
+              <div className="mt-2 space-y-1">
+                {section.items.map((item) => (
+                  <Link
+                    key={item.name}
+                    to={item.href}
+                    onClick={() => setSidebarOpen(false)}
+                    className={clsx(
+                      "flex items-center px-3 py-2 text-sm font-medium rounded-md",
+                      location.pathname === item.href
+                        ? "bg-gray-800 text-white"
+                        : "text-gray-300 hover:bg-gray-700 hover:text-white"
+                    )}
+                  >
+                    <item.icon className="mr-3 h-5 w-5" />
+                    {item.name}
+                  </Link>
+                ))}
+              </div>
+            </div>
           ))}
         </nav>
         {/* Mobile user section */}
@@ -157,20 +204,44 @@ export default function Layout({ children }: LayoutProps) {
         </div>
         <div className="flex flex-col flex-grow bg-gray-900 overflow-y-auto">
           <nav className="mt-4 flex-1 px-2 space-y-1">
-            {navigation.map((item) => (
-              <Link
-                key={item.name}
-                to={item.href}
-                className={clsx(
-                  "flex items-center px-3 py-2 text-sm font-medium rounded-md",
-                  location.pathname === item.href
-                    ? "bg-gray-800 text-white"
-                    : "text-gray-300 hover:bg-gray-700 hover:text-white"
-                )}
-              >
-                <item.icon className="mr-3 h-5 w-5" />
-                {item.name}
-              </Link>
+            {/* Dashboard - standalone */}
+            <Link
+              to={dashboardNav.href}
+              className={clsx(
+                "flex items-center px-3 py-2 text-sm font-medium rounded-md",
+                location.pathname === dashboardNav.href
+                  ? "bg-gray-800 text-white"
+                  : "text-gray-300 hover:bg-gray-700 hover:text-white"
+              )}
+            >
+              <dashboardNav.icon className="mr-3 h-5 w-5" />
+              {dashboardNav.name}
+            </Link>
+
+            {/* Sectioned navigation */}
+            {navSections.map((section) => (
+              <div key={section.title} className="pt-4">
+                <h3 className="px-3 text-xs font-semibold text-gray-400 uppercase tracking-wider">
+                  {section.title}
+                </h3>
+                <div className="mt-2 space-y-1">
+                  {section.items.map((item) => (
+                    <Link
+                      key={item.name}
+                      to={item.href}
+                      className={clsx(
+                        "flex items-center px-3 py-2 text-sm font-medium rounded-md",
+                        location.pathname === item.href
+                          ? "bg-gray-800 text-white"
+                          : "text-gray-300 hover:bg-gray-700 hover:text-white"
+                      )}
+                    >
+                      <item.icon className="mr-3 h-5 w-5" />
+                      {item.name}
+                    </Link>
+                  ))}
+                </div>
+              </div>
             ))}
           </nav>
           <div className="px-2 pb-4">
