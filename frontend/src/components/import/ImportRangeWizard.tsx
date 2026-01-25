@@ -31,6 +31,7 @@ export default function ImportRangeWizard({ isOpen, onClose }: ImportRangeWizard
   >('use_existing')
   const [skipArtifacts, setSkipArtifacts] = useState(false)
   const [skipMsel, setSkipMsel] = useState(false)
+  const [skipWalkthrough, setSkipWalkthrough] = useState(false)
 
   const handleDrag = useCallback((e: React.DragEvent) => {
     e.preventDefault()
@@ -116,6 +117,7 @@ export default function ImportRangeWizard({ isOpen, onClose }: ImportRangeWizard
         template_conflict_action: templateConflictAction,
         skip_artifacts: skipArtifacts,
         skip_msel: skipMsel,
+        skip_walkthrough: skipWalkthrough,
       })
 
       setImportResult(response.data)
@@ -126,7 +128,7 @@ export default function ImportRangeWizard({ isOpen, onClose }: ImportRangeWizard
     } finally {
       setIsLoading(false)
     }
-  }, [file, nameOverride, templateConflictAction, skipArtifacts, skipMsel])
+  }, [file, nameOverride, templateConflictAction, skipArtifacts, skipMsel, skipWalkthrough])
 
   const handleNavigateToRange = useCallback(() => {
     if (importResult?.range_id) {
@@ -145,6 +147,7 @@ export default function ImportRangeWizard({ isOpen, onClose }: ImportRangeWizard
     setTemplateConflictAction('use_existing')
     setSkipArtifacts(false)
     setSkipMsel(false)
+    setSkipWalkthrough(false)
   }, [])
 
   if (!isOpen) return null
@@ -301,6 +304,22 @@ export default function ImportRangeWizard({ isOpen, onClose }: ImportRangeWizard
                       </span>
                     </div>
                   )}
+                  {validationResult.summary.walkthrough_status && (
+                    <div className="col-span-2">
+                      <span className="text-gray-500">Student Walkthrough:</span>
+                      <span className={`ml-2 font-medium ${
+                        validationResult.summary.walkthrough_status === 'create_renamed'
+                          ? 'text-amber-600'
+                          : validationResult.summary.walkthrough_status === 'reuse_existing'
+                          ? 'text-blue-600'
+                          : 'text-green-600'
+                      }`}>
+                        {validationResult.summary.walkthrough_status === 'reuse_existing' && '✓ Will use existing (same content)'}
+                        {validationResult.summary.walkthrough_status === 'create_new' && '+ Will create new'}
+                        {validationResult.summary.walkthrough_status === 'create_renamed' && '⚠ Will create with new name (conflict)'}
+                      </span>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -377,6 +396,22 @@ export default function ImportRangeWizard({ isOpen, onClose }: ImportRangeWizard
                   />
                   <span className="ml-2 text-sm text-gray-600">Skip MSEL/injects import</span>
                 </label>
+                {validationResult?.summary.walkthrough_status && (
+                  <label className="flex items-center">
+                    <input
+                      type="checkbox"
+                      checked={skipWalkthrough}
+                      onChange={(e) => setSkipWalkthrough(e.target.checked)}
+                      className="h-4 w-4 text-primary-600 border-gray-300 rounded focus:ring-primary-500"
+                    />
+                    <span className="ml-2 text-sm text-gray-600">
+                      Skip student walkthrough import
+                      {validationResult.summary.walkthrough_status === 'create_renamed' && (
+                        <span className="text-amber-600 ml-1">(will create duplicate otherwise)</span>
+                      )}
+                    </span>
+                  </label>
+                )}
               </div>
             </div>
           )}
