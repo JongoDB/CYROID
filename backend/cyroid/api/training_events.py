@@ -417,7 +417,11 @@ def delete_event(
     db: DBSession,
     current_user: CurrentUser,
 ):
-    """Delete an event and all associated participant ranges."""
+    """Delete an event and all associated participant ranges.
+
+    Works for any event status - running events will have their ranges
+    torn down automatically before deletion.
+    """
     event = db.query(TrainingEvent).filter(TrainingEvent.id == event_id).first()
     if not event:
         raise HTTPException(status_code=404, detail="Event not found")
@@ -425,10 +429,7 @@ def delete_event(
     if not can_manage_event(event, current_user):
         raise HTTPException(status_code=403, detail="Not authorized to delete this event")
 
-    if event.status == EventStatus.RUNNING:
-        raise HTTPException(status_code=400, detail="Cannot delete a running event. Complete or cancel it first.")
-
-    # Delete all participant ranges first
+    # Delete all participant ranges first (handles running VMs)
     deleted_count = _delete_event_ranges(event_id, db)
     if deleted_count > 0:
         logger.info(f"Deleted {deleted_count} ranges for event {event.name}")
@@ -436,7 +437,7 @@ def delete_event(
     db.delete(event)
     db.commit()
 
-    logger.info(f"Event deleted: {event.name} by {current_user.username}")
+    logger.info(f"Event deleted: {event.name} (status was: {event.status.value}) by {current_user.username}")
 
 
 # ============ Event Status Management ============

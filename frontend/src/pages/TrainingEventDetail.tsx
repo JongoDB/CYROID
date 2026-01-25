@@ -110,6 +110,9 @@ export default function TrainingEventDetail() {
     ? user?.id === event.created_by_id || user?.roles?.includes('admin')
     : user?.roles?.includes('admin') || user?.roles?.includes('engineer')
 
+  // Count ranges that will be deleted (used in delete confirmation)
+  const rangesCount = event?.participants?.filter(p => p.range_id).length || 0
+
   useEffect(() => {
     loadDropdownData()
     if (!isNew && id) {
@@ -207,9 +210,10 @@ export default function TrainingEventDetail() {
         await trainingEventsApi.update(id, data)
         await loadEvent(id)
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to save:', err)
-      alert('Failed to save event')
+      const message = err.response?.data?.detail || 'Failed to save event'
+      alert(message)
     } finally {
       setSaving(false)
     }
@@ -317,6 +321,23 @@ export default function TrainingEventDetail() {
     }
   }
 
+  async function handleDelete() {
+    if (!id) return
+    const rangesMsg = rangesCount > 0
+      ? `\n\nThis will permanently delete ${rangesCount} student lab${rangesCount > 1 ? 's' : ''} and all associated VMs.`
+      : ''
+    if (!confirm(`Are you sure you want to delete this event?${rangesMsg}\n\nThis action cannot be undone.`)) {
+      return
+    }
+    try {
+      await trainingEventsApi.delete(id)
+      navigate('/events')
+    } catch (err) {
+      console.error('Failed to delete:', err)
+      alert('Failed to delete event')
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex justify-center py-12">
@@ -324,9 +345,6 @@ export default function TrainingEventDetail() {
       </div>
     )
   }
-
-  // Count ranges that will be deleted
-  const rangesCount = event?.participants?.filter(p => p.range_id).length || 0
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
@@ -403,7 +421,7 @@ export default function TrainingEventDetail() {
               View Briefing
             </button>
           )}
-          {canManage && (
+          {canManage && (!event || !['running', 'completed'].includes(event.status)) && (
             <button
               onClick={handleSave}
               disabled={saving}
@@ -477,6 +495,15 @@ export default function TrainingEventDetail() {
                 Reactivate
               </button>
             )}
+            {/* Separator and Delete button */}
+            <div className="w-px h-6 bg-gray-300 mx-2" />
+            <button
+              onClick={handleDelete}
+              className="inline-flex items-center px-3 py-1.5 border border-red-300 text-sm font-medium rounded text-red-700 bg-red-50 hover:bg-red-100"
+            >
+              <Trash2 className="h-4 w-4 mr-1" />
+              Delete Event
+            </button>
           </div>
         </div>
       )}
