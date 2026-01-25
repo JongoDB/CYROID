@@ -38,18 +38,40 @@ interface NavItem {
   requiredRoles?: string[]  // If undefined, accessible by all roles
 }
 
-// Navigation items with role-based access control
-const allNavigation: NavItem[] = [
-  { name: 'Dashboard', href: '/', icon: LayoutDashboard, requiredRoles: ['admin', 'engineer', 'evaluator'] },
-  { name: 'Student Portal', href: '/student-portal', icon: GraduationCap, requiredRoles: ['student'] },
-  { name: 'Image Cache', href: '/cache', icon: HardDrive, requiredRoles: ['admin', 'engineer'] },
-  { name: 'VM Library', href: '/vm-library', icon: Server, requiredRoles: ['admin', 'engineer'] },
-  { name: 'Range Blueprints', href: '/blueprints', icon: LayoutTemplate, requiredRoles: ['admin', 'engineer'] },
-  { name: 'Training Scenarios', href: '/scenarios', icon: Target, requiredRoles: ['admin', 'engineer'] },
-  { name: 'Content Library', href: '/content', icon: BookOpen, requiredRoles: ['admin', 'engineer', 'evaluator'] },
-  { name: 'Training Events', href: '/events', icon: CalendarDays },  // Accessible to all
-  { name: 'Ranges', href: '/ranges', icon: Network, requiredRoles: ['admin', 'engineer', 'evaluator'] },
-  { name: 'Artifacts', href: '/artifacts', icon: FileBox, requiredRoles: ['admin', 'engineer'] },
+interface NavSection {
+  title: string
+  items: NavItem[]
+}
+
+// Standalone nav items (role-filtered)
+const dashboardNav: NavItem = { name: 'Dashboard', href: '/', icon: LayoutDashboard, requiredRoles: ['admin', 'engineer', 'evaluator'] }
+const studentPortalNav: NavItem = { name: 'Student Portal', href: '/student-portal', icon: GraduationCap, requiredRoles: ['student'] }
+
+// Navigation sections with role-based access control
+const navSections: NavSection[] = [
+  {
+    title: 'Content Development',
+    items: [
+      { name: 'Content Library', href: '/content', icon: BookOpen, requiredRoles: ['admin', 'engineer', 'evaluator'] },
+      { name: 'VM Library', href: '/vm-library', icon: Server, requiredRoles: ['admin', 'engineer'] },
+      { name: 'Image Cache', href: '/cache', icon: HardDrive, requiredRoles: ['admin', 'engineer'] },
+      { name: 'Artifacts', href: '/artifacts', icon: FileBox, requiredRoles: ['admin', 'engineer'] },
+    ]
+  },
+  {
+    title: 'Range Development',
+    items: [
+      { name: 'Ranges', href: '/ranges', icon: Network, requiredRoles: ['admin', 'engineer', 'evaluator'] },
+      { name: 'Range Blueprints', href: '/blueprints', icon: LayoutTemplate, requiredRoles: ['admin', 'engineer'] },
+      { name: 'Training Scenarios', href: '/scenarios', icon: Target, requiredRoles: ['admin', 'engineer'] },
+    ]
+  },
+  {
+    title: 'Event Management',
+    items: [
+      { name: 'Training Events', href: '/events', icon: CalendarDays },  // Accessible to all
+    ]
+  },
 ]
 
 export default function Layout({ children }: LayoutProps) {
@@ -69,10 +91,17 @@ export default function Layout({ children }: LayoutProps) {
   // Get effective role for filtering navigation
   const effectiveRole = getEffectiveRole()
 
-  // Filter navigation items based on active role
-  const navigation = useMemo(() => {
-    return allNavigation.filter(item => canAccessRoute(effectiveRole, item.requiredRoles))
+  // Filter sections - only show sections that have at least one visible item
+  const filteredSections = useMemo(() => {
+    return navSections.map(section => ({
+      ...section,
+      items: section.items.filter(item => canAccessRoute(effectiveRole, item.requiredRoles))
+    })).filter(section => section.items.length > 0)
   }, [effectiveRole])
+
+  // Check if standalone nav items are visible
+  const showDashboard = canAccessRoute(effectiveRole, dashboardNav.requiredRoles)
+  const showStudentPortal = canAccessRoute(effectiveRole, studentPortalNav.requiredRoles)
 
   // Check if user is admin (ABAC: check roles array)
   const isAdmin = user?.roles?.includes('admin') ?? false
@@ -107,21 +136,63 @@ export default function Layout({ children }: LayoutProps) {
           </button>
         </div>
         <nav className="mt-4 px-2 space-y-1">
-          {navigation.map((item) => (
+          {/* Dashboard or Student Portal - standalone */}
+          {showDashboard && (
             <Link
-              key={item.name}
-              to={item.href}
+              to={dashboardNav.href}
               onClick={() => setSidebarOpen(false)}
               className={clsx(
                 "flex items-center px-3 py-2 text-sm font-medium rounded-md",
-                location.pathname === item.href
+                location.pathname === dashboardNav.href
                   ? "bg-gray-800 text-white"
                   : "text-gray-300 hover:bg-gray-700 hover:text-white"
               )}
             >
-              <item.icon className="mr-3 h-5 w-5" />
-              {item.name}
+              <dashboardNav.icon className="mr-3 h-5 w-5" />
+              {dashboardNav.name}
             </Link>
+          )}
+          {showStudentPortal && (
+            <Link
+              to={studentPortalNav.href}
+              onClick={() => setSidebarOpen(false)}
+              className={clsx(
+                "flex items-center px-3 py-2 text-sm font-medium rounded-md",
+                location.pathname === studentPortalNav.href
+                  ? "bg-gray-800 text-white"
+                  : "text-gray-300 hover:bg-gray-700 hover:text-white"
+              )}
+            >
+              <studentPortalNav.icon className="mr-3 h-5 w-5" />
+              {studentPortalNav.name}
+            </Link>
+          )}
+
+          {/* Sectioned navigation */}
+          {filteredSections.map((section) => (
+            <div key={section.title} className="pt-4">
+              <h3 className="px-3 text-xs font-semibold text-gray-400 uppercase tracking-wider">
+                {section.title}
+              </h3>
+              <div className="mt-2 space-y-1">
+                {section.items.map((item) => (
+                  <Link
+                    key={item.name}
+                    to={item.href}
+                    onClick={() => setSidebarOpen(false)}
+                    className={clsx(
+                      "flex items-center px-3 py-2 text-sm font-medium rounded-md",
+                      location.pathname === item.href
+                        ? "bg-gray-800 text-white"
+                        : "text-gray-300 hover:bg-gray-700 hover:text-white"
+                    )}
+                  >
+                    <item.icon className="mr-3 h-5 w-5" />
+                    {item.name}
+                  </Link>
+                ))}
+              </div>
+            </div>
           ))}
         </nav>
         {/* Mobile user section */}
@@ -176,20 +247,60 @@ export default function Layout({ children }: LayoutProps) {
         </div>
         <div className="flex flex-col flex-grow bg-gray-900 overflow-y-auto">
           <nav className="mt-4 flex-1 px-2 space-y-1">
-            {navigation.map((item) => (
+            {/* Dashboard or Student Portal - standalone */}
+            {showDashboard && (
               <Link
-                key={item.name}
-                to={item.href}
+                to={dashboardNav.href}
                 className={clsx(
                   "flex items-center px-3 py-2 text-sm font-medium rounded-md",
-                  location.pathname === item.href
+                  location.pathname === dashboardNav.href
                     ? "bg-gray-800 text-white"
                     : "text-gray-300 hover:bg-gray-700 hover:text-white"
                 )}
               >
-                <item.icon className="mr-3 h-5 w-5" />
-                {item.name}
+                <dashboardNav.icon className="mr-3 h-5 w-5" />
+                {dashboardNav.name}
               </Link>
+            )}
+            {showStudentPortal && (
+              <Link
+                to={studentPortalNav.href}
+                className={clsx(
+                  "flex items-center px-3 py-2 text-sm font-medium rounded-md",
+                  location.pathname === studentPortalNav.href
+                    ? "bg-gray-800 text-white"
+                    : "text-gray-300 hover:bg-gray-700 hover:text-white"
+                )}
+              >
+                <studentPortalNav.icon className="mr-3 h-5 w-5" />
+                {studentPortalNav.name}
+              </Link>
+            )}
+
+            {/* Sectioned navigation */}
+            {filteredSections.map((section) => (
+              <div key={section.title} className="pt-4">
+                <h3 className="px-3 text-xs font-semibold text-gray-400 uppercase tracking-wider">
+                  {section.title}
+                </h3>
+                <div className="mt-2 space-y-1">
+                  {section.items.map((item) => (
+                    <Link
+                      key={item.name}
+                      to={item.href}
+                      className={clsx(
+                        "flex items-center px-3 py-2 text-sm font-medium rounded-md",
+                        location.pathname === item.href
+                          ? "bg-gray-800 text-white"
+                          : "text-gray-300 hover:bg-gray-700 hover:text-white"
+                      )}
+                    >
+                      <item.icon className="mr-3 h-5 w-5" />
+                      {item.name}
+                    </Link>
+                  ))}
+                </div>
+              </div>
             ))}
           </nav>
           <div className="px-2 pb-4">
