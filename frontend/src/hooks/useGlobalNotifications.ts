@@ -146,13 +146,23 @@ export function useGlobalNotifications(
   // Connect on mount and when dependencies change
   useEffect(() => {
     mountedRef.current = true
+    let connectTimeout: ReturnType<typeof setTimeout> | null = null
 
     if (enabled && token) {
-      connect()
+      // Small delay to avoid React 18 Strict Mode double-render race condition
+      // This ensures the first mount/unmount cycle completes before we connect
+      connectTimeout = setTimeout(() => {
+        if (mountedRef.current) {
+          connect()
+        }
+      }, 100)
     }
 
     return () => {
       mountedRef.current = false
+      if (connectTimeout) {
+        clearTimeout(connectTimeout)
+      }
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current)
       }
