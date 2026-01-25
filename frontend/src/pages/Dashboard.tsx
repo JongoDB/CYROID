@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom'
 import { useAuthStore } from '../stores/authStore'
 import { rangesApi } from '../services/api'
 import type { Range } from '../types'
-import { Network, Plus, Loader2, GraduationCap } from 'lucide-react'
+import { Network, Plus, Loader2 } from 'lucide-react'
 
 export default function Dashboard() {
   const { user } = useAuthStore()
@@ -104,28 +104,6 @@ export default function Dashboard() {
               <p className="text-sm text-gray-500">Set up a new cyber training environment</p>
             </div>
           </Link>
-
-          {/* Student Portal - Coming Soon */}
-          <div
-            className="relative rounded-lg border border-gray-200 bg-gray-50 px-6 py-5 shadow-sm flex items-center space-x-3 cursor-not-allowed opacity-60"
-            title="Student Portal will be available in a future release"
-          >
-            <div className="flex-shrink-0">
-              <div className="rounded-md bg-purple-100 p-3">
-                <GraduationCap className="h-6 w-6 text-purple-600" />
-              </div>
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2">
-                <p className="text-sm font-medium text-gray-900">Student Portal</p>
-                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800">
-                  Coming Soon
-                </span>
-              </div>
-              <p className="text-sm text-gray-500">Access your assigned labs, submit evidence, and view progress</p>
-            </div>
-          </div>
-
         </div>
       </div>
 
