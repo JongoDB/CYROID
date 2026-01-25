@@ -41,9 +41,14 @@ def filter_vms_by_visibility(
     db: Session
 ) -> List[VM]:
     """
-    Filter VMs based on participant visibility settings.
+    Filter VMs based on visibility settings.
 
-    For students in a training event, only returns VMs that are not hidden.
+    For students in a training event, only returns VMs that are not hidden
+    per their EventParticipant.hidden_vm_ids.
+
+    For ranges with assigned users (not in an event), only returns VMs that
+    are not hidden per Range.hidden_vm_ids.
+
     Admins, engineers, and evaluators see all VMs.
     """
     # Admin/engineer/evaluator sees all VMs
@@ -51,31 +56,42 @@ def filter_vms_by_visibility(
         return vms
 
     # Check if range is part of a training event
-    if not range_obj.training_event_id:
-        return vms  # Not an event range, show all
+    if range_obj.training_event_id:
+        # Find participant record for this user
+        participant = db.query(EventParticipant).filter(
+            EventParticipant.event_id == range_obj.training_event_id,
+            EventParticipant.user_id == user.id
+        ).first()
 
-    # Find participant record for this user
-    participant = db.query(EventParticipant).filter(
-        EventParticipant.event_id == range_obj.training_event_id,
-        EventParticipant.user_id == user.id
-    ).first()
+        if not participant:
+            return vms  # Not a participant, show all
 
-    if not participant:
-        return vms  # Not a participant, show all
+        # Filter out hidden VMs based on participant settings
+        hidden_ids = set(str(vm_id) for vm_id in (participant.hidden_vm_ids or []))
+        if not hidden_ids:
+            return vms  # No VMs hidden
 
-    # Filter out hidden VMs
-    hidden_ids = set(str(vm_id) for vm_id in (participant.hidden_vm_ids or []))
-    if not hidden_ids:
-        return vms  # No VMs hidden
+        return [vm for vm in vms if str(vm.id) not in hidden_ids]
 
-    return [vm for vm in vms if str(vm.id) not in hidden_ids]
+    # Check if range has assigned user and visibility settings
+    if range_obj.assigned_to_user_id == user.id:
+        # Filter based on Range.hidden_vm_ids
+        hidden_ids = set(str(vm_id) for vm_id in (range_obj.hidden_vm_ids or []))
+        if not hidden_ids:
+            return vms  # No VMs hidden
+
+        return [vm for vm in vms if str(vm.id) not in hidden_ids]
+
+    # No visibility restrictions apply
+    return vms
 
 
 def can_access_vm_console(vm: VM, user: User, db: Session) -> bool:
     """
     Check if user can access VM console.
 
-    Returns False if the VM is hidden from the user in their training event.
+    Returns False if the VM is hidden from the user in their training event
+    or in the range's visibility settings.
     """
     # Admin/engineer/evaluator can access all consoles
     if user.is_admin or user.has_any_role('engineer', 'evaluator'):
@@ -83,21 +99,30 @@ def can_access_vm_console(vm: VM, user: User, db: Session) -> bool:
 
     # Get the range
     range_obj = db.query(Range).filter(Range.id == vm.range_id).first()
-    if not range_obj or not range_obj.training_event_id:
-        return True  # Not part of an event, allow access
+    if not range_obj:
+        return True
 
-    # Find participant record
-    participant = db.query(EventParticipant).filter(
-        EventParticipant.event_id == range_obj.training_event_id,
-        EventParticipant.user_id == user.id
-    ).first()
+    # Check training event visibility first
+    if range_obj.training_event_id:
+        # Find participant record
+        participant = db.query(EventParticipant).filter(
+            EventParticipant.event_id == range_obj.training_event_id,
+            EventParticipant.user_id == user.id
+        ).first()
 
-    if not participant:
-        return True  # Not a participant, allow (though they may not have range access)
+        if participant:
+            # Check if VM is hidden for this participant
+            hidden_ids = set(str(vm_id) for vm_id in (participant.hidden_vm_ids or []))
+            if str(vm.id) in hidden_ids:
+                return False
 
-    # Check if VM is hidden
-    hidden_ids = set(str(vm_id) for vm_id in (participant.hidden_vm_ids or []))
-    return str(vm.id) not in hidden_ids
+    # Check range-level visibility for assigned users
+    if range_obj.assigned_to_user_id == user.id:
+        hidden_ids = set(str(vm_id) for vm_id in (range_obj.hidden_vm_ids or []))
+        if str(vm.id) in hidden_ids:
+            return False
+
+    return True
 
 
 def get_next_available_ip(network: Network, db: Session, skip_gateway: bool = True) -> Optional[str]:

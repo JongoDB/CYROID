@@ -395,6 +395,29 @@ export const rangesApi = {
 
   // Student-assigned ranges
   getMyRanges: () => api.get<Range[]>('/ranges/my-ranges'),
+
+  // VM Console Visibility
+  getVMVisibility: (rangeId: string) =>
+    api.get<RangeVMVisibilityResponse>(`/ranges/${rangeId}/vm-visibility`),
+  updateVMVisibility: (rangeId: string, hiddenVmIds: string[]) =>
+    api.put<RangeVMVisibilityResponse>(`/ranges/${rangeId}/vm-visibility`, {
+      hidden_vm_ids: hiddenVmIds,
+    }),
+}
+
+// Range VM Visibility types
+export interface RangeVMVisibilityVM {
+  id: string
+  hostname: string
+  status: string
+  is_hidden: boolean
+}
+
+export interface RangeVMVisibilityResponse {
+  range_id: string
+  range_name: string
+  hidden_vm_ids: string[]
+  vms: RangeVMVisibilityVM[]
 }
 
 // Networks API

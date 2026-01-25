@@ -2663,3 +2663,138 @@ def set_student_guide(
     )
 
 
+# ============ VM Console Visibility Control ============
+
+class RangeVMVisibilityVM(BaseModel):
+    """VM info for visibility control."""
+    id: UUID
+    hostname: str
+    status: str
+    is_hidden: bool = False
+
+
+class RangeVMVisibilityResponse(BaseModel):
+    """VM visibility settings for a range."""
+    range_id: UUID
+    range_name: str
+    hidden_vm_ids: List[UUID] = []
+    vms: List[RangeVMVisibilityVM] = []
+
+
+class RangeVMVisibilityUpdate(BaseModel):
+    """Update VM visibility for a range."""
+    hidden_vm_ids: List[UUID]
+
+
+@router.get("/{range_id}/vm-visibility", response_model=RangeVMVisibilityResponse)
+def get_range_vm_visibility(
+    range_id: UUID,
+    db: DBSession,
+    current_user: CurrentUser,
+):
+    """Get VM visibility settings for a range.
+
+    This controls which VMs the assigned user can see and access via console.
+    """
+    range_obj = db.query(Range).options(
+        joinedload(Range.vms)
+    ).filter(Range.id == range_id).first()
+
+    if not range_obj:
+        raise HTTPException(status_code=404, detail="Range not found")
+
+    # Check permission (owner, admin, or assigned user viewing their own)
+    is_owner = range_obj.created_by == current_user.id
+    is_admin = current_user.role == "admin"
+    is_assigned = range_obj.assigned_to_user_id == current_user.id
+    has_role = current_user.has_any_role("engineer", "evaluator")
+
+    if not (is_owner or is_admin or has_role):
+        # Assigned user can view but not modify
+        if not is_assigned:
+            raise HTTPException(status_code=403, detail="Not authorized")
+
+    hidden_ids = set(str(vm_id) for vm_id in (range_obj.hidden_vm_ids or []))
+
+    vms = [
+        RangeVMVisibilityVM(
+            id=vm.id,
+            hostname=vm.hostname,
+            status=vm.status.value if hasattr(vm.status, 'value') else str(vm.status),
+            is_hidden=str(vm.id) in hidden_ids,
+        )
+        for vm in range_obj.vms
+    ]
+
+    return RangeVMVisibilityResponse(
+        range_id=range_obj.id,
+        range_name=range_obj.name,
+        hidden_vm_ids=range_obj.hidden_vm_ids or [],
+        vms=vms,
+    )
+
+
+@router.put("/{range_id}/vm-visibility", response_model=RangeVMVisibilityResponse)
+def update_range_vm_visibility(
+    range_id: UUID,
+    data: RangeVMVisibilityUpdate,
+    db: DBSession,
+    current_user: CurrentUser,
+):
+    """Update which VMs are hidden from the assigned user.
+
+    This controls which VMs the assigned user can see and access via console.
+    """
+    range_obj = db.query(Range).options(
+        joinedload(Range.vms)
+    ).filter(Range.id == range_id).first()
+
+    if not range_obj:
+        raise HTTPException(status_code=404, detail="Range not found")
+
+    # Check permission (owner, admin, or evaluator/engineer)
+    is_owner = range_obj.created_by == current_user.id
+    is_admin = current_user.role == "admin"
+    has_role = current_user.has_any_role("engineer", "evaluator")
+
+    if not (is_owner or is_admin or has_role):
+        raise HTTPException(status_code=403, detail="Not authorized to modify visibility")
+
+    # Validate that all VM IDs belong to this range
+    range_vm_ids = {str(vm.id) for vm in range_obj.vms}
+    for vm_id in data.hidden_vm_ids:
+        if str(vm_id) not in range_vm_ids:
+            raise HTTPException(
+                status_code=400,
+                detail=f"VM {vm_id} does not belong to this range"
+            )
+
+    range_obj.hidden_vm_ids = [str(vm_id) for vm_id in data.hidden_vm_ids]
+    db.commit()
+    db.refresh(range_obj)
+
+    logger.info(
+        f"Range {range_id} VM visibility updated by {current_user.username}: "
+        f"{len(data.hidden_vm_ids)} VMs hidden"
+    )
+
+    hidden_ids = set(str(vm_id) for vm_id in (range_obj.hidden_vm_ids or []))
+
+    vms = [
+        RangeVMVisibilityVM(
+            id=vm.id,
+            hostname=vm.hostname,
+            status=vm.status.value if hasattr(vm.status, 'value') else str(vm.status),
+            is_hidden=str(vm.id) in hidden_ids,
+        )
+        for vm in range_obj.vms
+    ]
+
+    return RangeVMVisibilityResponse(
+        range_id=range_obj.id,
+        range_name=range_obj.name,
+        hidden_vm_ids=range_obj.hidden_vm_ids or [],
+        vms=vms,
+    )
+
+
