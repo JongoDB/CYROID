@@ -51,6 +51,8 @@ services:
       APP_VERSION: ""
       # Use GHCR DinD image (same as production)
       DIND_IMAGE: ${DIND_IMAGE:-ghcr.io/jongodb/cyroid-dind:latest}
+      # Traefik dynamic config directory (shared with Traefik for DinD VNC routing)
+      TRAEFIK_VNC_ROUTES_DIR: /app/traefik/dynamic
     volumes:
       # Mount source code for hot-reload
       - ./backend:/app
@@ -61,6 +63,8 @@ services:
       - ${CYROID_DATA_DIR:-/data/cyroid}/template-storage:${CYROID_DATA_DIR:-/data/cyroid}/template-storage
       - ${CYROID_DATA_DIR:-/data/cyroid}/vm-storage:${CYROID_DATA_DIR:-/data/cyroid}/vm-storage
       - ${CYROID_DATA_DIR:-/data/cyroid}/shared:${CYROID_DATA_DIR:-/data/cyroid}/shared
+      # Shared directory for Traefik dynamic config (VNC routes)
+      - ./traefik/dynamic:/app/traefik/dynamic
 
   frontend:
     build:

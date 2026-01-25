@@ -160,6 +160,8 @@ services:
       CYROID_MGMT_SUBNET: 172.30.0.0/24
       CYROID_RANGES_NETWORK: cyroid-ranges
       CYROID_RANGES_SUBNET: 172.30.1.0/24
+      # Traefik dynamic config directory (shared with Traefik for DinD VNC routing)
+      TRAEFIK_VNC_ROUTES_DIR: /app/traefik/dynamic
     volumes:
       # Mount Docker socket to manage DinD containers
       - /var/run/docker.sock:/var/run/docker.sock
@@ -168,6 +170,8 @@ services:
       - ${CYROID_DATA_DIR:-/data/cyroid}/template-storage:${CYROID_DATA_DIR:-/data/cyroid}/template-storage
       - ${CYROID_DATA_DIR:-/data/cyroid}/vm-storage:${CYROID_DATA_DIR:-/data/cyroid}/vm-storage
       - ${CYROID_DATA_DIR:-/data/cyroid}/shared:${CYROID_DATA_DIR:-/data/cyroid}/shared
+      # Shared directory for Traefik dynamic config (VNC routes)
+      - ./traefik/dynamic:/app/traefik/dynamic
     networks:
       cyroid-mgmt:
         ipv4_address: 172.30.0.15
