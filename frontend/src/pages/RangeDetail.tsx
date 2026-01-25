@@ -984,7 +984,7 @@ export default function RangeDetail() {
             <button
               onClick={() => setShowExportDialog(true)}
               className="inline-flex items-center px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
-              title="Export Range"
+              title="Export as portable ZIP package for backup or transfer"
             >
               <Download className="h-4 w-4 mr-1" />
               Export
@@ -993,6 +993,7 @@ export default function RangeDetail() {
             <button
               onClick={() => setShowSaveBlueprintModal(true)}
               className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+              title="Save as reusable blueprint for deploying multiple instances"
             >
               <LayoutTemplate className="h-4 w-4 mr-2" />
               Save as Blueprint
