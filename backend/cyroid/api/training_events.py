@@ -313,6 +313,8 @@ def get_event(
     current_user: CurrentUser,
 ):
     """Get event details by ID."""
+    from cyroid.models.range import Range
+
     event = db.query(TrainingEvent).filter(TrainingEvent.id == event_id).first()
     if not event:
         raise HTTPException(status_code=404, detail="Event not found")
@@ -320,7 +322,7 @@ def get_event(
     if not can_view_event(event, current_user):
         raise HTTPException(status_code=403, detail="Not authorized to view this event")
 
-    # Get participants
+    # Get participants with range info
     participants = db.query(EventParticipant).filter(
         EventParticipant.event_id == event_id
     ).all()
@@ -328,6 +330,16 @@ def get_event(
     participant_responses = []
     for p in participants:
         user = db.query(User).filter(User.id == p.user_id).first()
+
+        # Get range info if assigned
+        range_status = None
+        range_name = None
+        if p.range_id:
+            range_obj = db.query(Range).filter(Range.id == p.range_id).first()
+            if range_obj:
+                range_status = range_obj.status.value
+                range_name = range_obj.name
+
         participant_responses.append(EventParticipantResponse(
             id=p.id,
             event_id=p.event_id,
@@ -336,6 +348,9 @@ def get_event(
             is_confirmed=p.is_confirmed,
             created_at=p.created_at,
             username=user.username if user else None,
+            range_id=p.range_id,
+            range_status=range_status,
+            range_name=range_name,
         ))
 
     response_dict = build_event_response(event, db)
@@ -438,9 +453,17 @@ def start_event(
     event_id: UUID,
     db: DBSession,
     current_user: CurrentUser,
-    auto_deploy: bool = Query(False, description="Auto-deploy the blueprint if attached"),
+    auto_deploy: bool = Query(False, description="Auto-deploy one range per student from blueprint"),
 ):
-    """Start an event (optionally deploy the blueprint)."""
+    """Start an event (optionally deploy per-student ranges from blueprint).
+
+    If auto_deploy=True and the event has a blueprint_id:
+    - Creates one range per student participant
+    - Each range is named "{event_name} - {username}"
+    - Ranges are linked to participants via EventParticipant.range_id
+    - Each range has assigned_to_user_id set to the student
+    - Deployment tasks are queued for each range
+    """
     event = db.query(TrainingEvent).filter(TrainingEvent.id == event_id).first()
     if not event:
         raise HTTPException(status_code=404, detail="Event not found")
@@ -451,14 +474,64 @@ def start_event(
     if event.status not in [EventStatus.SCHEDULED, EventStatus.DRAFT]:
         raise HTTPException(status_code=400, detail="Event cannot be started from current status")
 
+    # Auto-deploy ranges for students if requested
+    if auto_deploy and event.blueprint_id:
+        from cyroid.services.blueprint_service import create_range_from_blueprint
+        from cyroid.tasks.deployment import deploy_range_task
+
+        blueprint = db.query(RangeBlueprint).filter(RangeBlueprint.id == event.blueprint_id).first()
+        if not blueprint:
+            raise HTTPException(status_code=404, detail="Blueprint not found")
+
+        # Get student participants only
+        students = db.query(EventParticipant).filter(
+            EventParticipant.event_id == event_id,
+            EventParticipant.role == "student"
+        ).all()
+
+        if not students:
+            logger.warning(f"Event {event.name}: No student participants to deploy ranges for")
+        else:
+            logger.info(f"Event {event.name}: Deploying {len(students)} ranges for students")
+
+            for participant in students:
+                user = db.query(User).filter(User.id == participant.user_id).first()
+                if not user:
+                    continue
+
+                # Create range for this student
+                range_name = f"{event.name} - {user.username}"
+                range_obj = create_range_from_blueprint(
+                    db=db,
+                    config=blueprint.config,
+                    range_name=range_name,
+                    base_prefix=blueprint.base_subnet_prefix or "10.0.0.0/8",
+                    offset=blueprint.next_offset or 0,
+                    created_by=current_user.id,
+                )
+
+                # Increment offset for next deployment
+                if blueprint.next_offset is None:
+                    blueprint.next_offset = 1
+                else:
+                    blueprint.next_offset += 1
+
+                # Link range to student and event
+                range_obj.assigned_to_user_id = participant.user_id
+                range_obj.training_event_id = event.id
+                participant.range_id = range_obj.id
+
+                db.flush()  # Ensure IDs are assigned
+
+                # Queue deployment task
+                deploy_range_task.send(str(range_obj.id))
+                logger.info(f"Queued deployment for range '{range_name}' (ID: {range_obj.id})")
+
     event.status = EventStatus.RUNNING
     db.commit()
-
-    # TODO: If auto_deploy and blueprint_id, trigger blueprint deployment
-    # This would create a range instance and store its ID in event.range_id
-
     db.refresh(event)
-    logger.info(f"Event started: {event.name}")
+
+    logger.info(f"Event started: {event.name} (auto_deploy={auto_deploy})")
     return build_event_response(event, db)
 
 
@@ -467,8 +540,12 @@ def complete_event(
     event_id: UUID,
     db: DBSession,
     current_user: CurrentUser,
+    teardown_ranges: bool = Query(True, description="Teardown participant ranges on completion"),
 ):
-    """Mark an event as completed."""
+    """Mark an event as completed.
+
+    If teardown_ranges=True (default), all participant ranges will be torn down.
+    """
     event = db.query(TrainingEvent).filter(TrainingEvent.id == event_id).first()
     if not event:
         raise HTTPException(status_code=404, detail="Event not found")
@@ -476,11 +553,25 @@ def complete_event(
     if not can_manage_event(event, current_user):
         raise HTTPException(status_code=403, detail="Not authorized")
 
+    # Teardown participant ranges if requested
+    if teardown_ranges:
+        from cyroid.tasks.deployment import teardown_range_task
+
+        participants = db.query(EventParticipant).filter(
+            EventParticipant.event_id == event_id,
+            EventParticipant.range_id.isnot(None)
+        ).all()
+
+        for participant in participants:
+            logger.info(f"Queueing teardown for range {participant.range_id}")
+            teardown_range_task.send(str(participant.range_id))
+            participant.range_id = None
+
     event.status = EventStatus.COMPLETED
     db.commit()
     db.refresh(event)
 
-    logger.info(f"Event completed: {event.name}")
+    logger.info(f"Event completed: {event.name} (teardown_ranges={teardown_ranges})")
     return build_event_response(event, db)
 
 
@@ -514,7 +605,9 @@ def list_participants(
     db: DBSession,
     current_user: CurrentUser,
 ):
-    """List event participants."""
+    """List event participants with their assigned range info."""
+    from cyroid.models.range import Range
+
     event = db.query(TrainingEvent).filter(TrainingEvent.id == event_id).first()
     if not event:
         raise HTTPException(status_code=404, detail="Event not found")
@@ -529,6 +622,16 @@ def list_participants(
     results = []
     for p in participants:
         user = db.query(User).filter(User.id == p.user_id).first()
+
+        # Get range info if assigned
+        range_status = None
+        range_name = None
+        if p.range_id:
+            range_obj = db.query(Range).filter(Range.id == p.range_id).first()
+            if range_obj:
+                range_status = range_obj.status.value
+                range_name = range_obj.name
+
         results.append(EventParticipantResponse(
             id=p.id,
             event_id=p.event_id,
@@ -537,6 +640,9 @@ def list_participants(
             is_confirmed=p.is_confirmed,
             created_at=p.created_at,
             username=user.username if user else None,
+            range_id=p.range_id,
+            range_status=range_status,
+            range_name=range_name,
         ))
 
     return results

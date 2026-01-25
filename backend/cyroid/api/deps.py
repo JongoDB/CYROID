@@ -10,6 +10,8 @@ from sqlalchemy import or_
 from cyroid.database import get_db
 from cyroid.models.user import User, UserRole
 from cyroid.models.resource_tag import ResourceTag
+from cyroid.models.event import EventParticipant, TrainingEvent
+from cyroid.models.range import Range
 from cyroid.utils.security import decode_access_token
 
 security = HTTPBearer()
@@ -101,6 +103,43 @@ def require_any_tag(*tags: str):
     return checker
 
 
+def get_student_accessible_range_ids(user_id: UUID, db: Session) -> List[UUID]:
+    """
+    Get range IDs accessible to a student via:
+    1. Direct assignment (Range.assigned_to_user_id)
+    2. Event participation (EventParticipant.range_id)
+
+    Returns:
+        List of range UUIDs the student can access
+    """
+    accessible_ids = set()
+
+    # 1. Ranges directly assigned to user
+    direct_ranges = db.query(Range.id).filter(
+        Range.assigned_to_user_id == user_id
+    ).all()
+    accessible_ids.update(r.id for r in direct_ranges)
+
+    # 2. Ranges assigned via event participation
+    participant_ranges = db.query(EventParticipant.range_id).filter(
+        EventParticipant.user_id == user_id,
+        EventParticipant.range_id.isnot(None)
+    ).all()
+    accessible_ids.update(r.range_id for r in participant_ranges if r.range_id)
+
+    return list(accessible_ids)
+
+
+def is_student_only(user: User) -> bool:
+    """
+    Check if user has ONLY the student role (and no elevated roles).
+    Students get assignment-based visibility instead of tag-based.
+    """
+    user_roles = set(user.roles)
+    elevated_roles = {'admin', 'engineer', 'evaluator', 'white_cell'}
+    return user_roles == {'student'} or (not user_roles.intersection(elevated_roles) and 'student' in user_roles)
+
+
 def filter_by_visibility(
     query,
     resource_type: str,
@@ -113,7 +152,9 @@ def filter_by_visibility(
 
     Visibility rules:
     1. Admins can see ALL resources
-    2. Non-admin users see:
+    2. Students (with no elevated roles) see ONLY assigned resources
+    3. Other non-admin users see:
+       - Resources they own
        - Resources with NO tags (public)
        - Resources with at least one matching tag
 
@@ -131,6 +172,15 @@ def filter_by_visibility(
     if current_user.is_admin:
         return query
 
+    # Students see only assigned resources (for ranges only)
+    if resource_type == 'range' and is_student_only(current_user):
+        accessible_ids = get_student_accessible_range_ids(current_user.id, db)
+        if not accessible_ids:
+            # No assignments - return empty result
+            return query.filter(model_class.id == None)
+        return query.filter(model_class.id.in_(accessible_ids))
+
+    # Tag-based visibility for other users/resources
     user_tags = current_user.tags
 
     # Get all resource IDs that have ANY tags
@@ -170,8 +220,9 @@ def check_resource_access(
     Access granted if:
     1. User is admin
     2. User is the owner (if owner_id provided)
-    3. Resource has no tags (public)
-    4. User has at least one matching tag
+    3. For ranges: student is assigned (directly or via event)
+    4. Resource has no tags (public)
+    5. User has at least one matching tag
 
     Returns True if access is granted, raises HTTPException otherwise.
     """
@@ -183,7 +234,17 @@ def check_resource_access(
     if owner_id and owner_id == current_user.id:
         return True
 
-    # Check resource tags
+    # For ranges: check if student is assigned
+    if resource_type == 'range' and is_student_only(current_user):
+        accessible_ids = get_student_accessible_range_ids(current_user.id, db)
+        if resource_id in accessible_ids:
+            return True
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You are not assigned to this lab",
+        )
+
+    # Check resource tags (for non-student users or non-range resources)
     resource_tags = db.query(ResourceTag.tag).filter(
         ResourceTag.resource_type == resource_type,
         ResourceTag.resource_id == resource_id

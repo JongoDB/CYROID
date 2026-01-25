@@ -392,6 +392,9 @@ export const rangesApi = {
       `/ranges/${rangeId}/student-guide`,
       { student_guide_id: studentGuideId }
     ),
+
+  // Student-assigned ranges
+  getMyRanges: () => api.get<Range[]>('/ranges/my-ranges'),
 }
 
 // Networks API
@@ -1721,6 +1724,10 @@ export interface EventParticipant {
   is_confirmed: boolean
   created_at: string
   username?: string
+  // Per-student range assignment
+  range_id?: string
+  range_status?: string
+  range_name?: string
 }
 
 export interface TrainingEvent {
@@ -1858,8 +1865,8 @@ export const trainingEventsApi = {
   start: (id: string, autoDeploy = false) =>
     api.post<TrainingEvent>(`/training-events/${id}/start`, null, { params: { auto_deploy: autoDeploy } }),
 
-  complete: (id: string) =>
-    api.post<TrainingEvent>(`/training-events/${id}/complete`),
+  complete: (id: string, teardownRanges = true) =>
+    api.post<TrainingEvent>(`/training-events/${id}/complete`, null, { params: { teardown_ranges: teardownRanges } }),
 
   cancel: (id: string) =>
     api.post<TrainingEvent>(`/training-events/${id}/cancel`),

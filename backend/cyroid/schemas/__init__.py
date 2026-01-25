@@ -3,7 +3,9 @@ from cyroid.schemas.user import UserBase, UserCreate, UserUpdate, UserResponse
 from cyroid.schemas.auth import LoginRequest, TokenResponse
 from cyroid.schemas.network import NetworkBase, NetworkCreate, NetworkUpdate, NetworkResponse
 from cyroid.schemas.vm import VMBase, VMCreate, VMUpdate, VMResponse
-from cyroid.schemas.range import RangeBase, RangeCreate, RangeUpdate, RangeResponse, RangeDetailResponse
+from cyroid.schemas.range import (
+    RangeBase, RangeCreate, RangeUpdate, RangeResponse, RangeDetailResponse,
+)
 from cyroid.schemas.event_log import EventLogCreate, EventLogResponse, EventLogList
 from cyroid.schemas.blueprint import (
     BlueprintCreate, BlueprintUpdate, BlueprintResponse, BlueprintDetailResponse,

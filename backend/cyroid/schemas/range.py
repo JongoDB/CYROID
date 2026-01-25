@@ -12,6 +12,9 @@ if TYPE_CHECKING:
     from cyroid.schemas.vm import VMResponse
 
 
+# ============ Range Schemas ============
+
+
 class RouterResponse(BaseModel):
     """VyOS router status for a range."""
     id: UUID
