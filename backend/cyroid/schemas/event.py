@@ -26,6 +26,10 @@ class EventParticipantResponse(EventParticipantBase):
     is_confirmed: bool
     created_at: datetime
     username: Optional[str] = None
+    # Per-student range assignment
+    range_id: Optional[UUID] = None
+    range_status: Optional[str] = None
+    range_name: Optional[str] = None
 
     class Config:
         from_attributes = True

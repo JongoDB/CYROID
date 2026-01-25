@@ -54,7 +54,7 @@ class User(Base, UUIDMixin, TimestampMixin):
     attributes = relationship("UserAttribute", back_populates="user", cascade="all, delete-orphan")
 
     # Existing relationships
-    ranges = relationship("Range", back_populates="created_by_user")
+    ranges = relationship("Range", back_populates="created_by_user", foreign_keys="Range.created_by")
     artifacts = relationship("Artifact", back_populates="uploaded_by_user")
     # Image Library relationships
     base_images = relationship("BaseImage", back_populates="created_by_user")

@@ -75,6 +75,12 @@ class EventParticipant(Base, UUIDMixin, TimestampMixin):
     # Status
     is_confirmed: Mapped[bool] = mapped_column(Boolean, default=False)
 
+    # Per-student range assignment (deployed when event starts)
+    range_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey("ranges.id", ondelete="SET NULL"), nullable=True
+    )
+
     # Relationships
     event = relationship("TrainingEvent", back_populates="participants")
     user = relationship("User")
+    range = relationship("Range", foreign_keys=[range_id])

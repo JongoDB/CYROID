@@ -58,7 +58,19 @@ class Range(Base, UUIDMixin, TimestampMixin):
 
     # Ownership
     created_by: Mapped[UUID] = mapped_column(ForeignKey("users.id"))
-    created_by_user = relationship("User", back_populates="ranges")
+    created_by_user = relationship("User", back_populates="ranges", foreign_keys=[created_by])
+
+    # Per-student assignment (for training events)
+    assigned_to_user_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    assigned_to_user = relationship("User", foreign_keys=[assigned_to_user_id])
+
+    # Training event link (for auto-deployed ranges)
+    training_event_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey("training_events.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    training_event = relationship("TrainingEvent", foreign_keys=[training_event_id])
 
     # Training content link (from Content Library)
     student_guide_id: Mapped[Optional[UUID]] = mapped_column(

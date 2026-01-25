@@ -18,6 +18,10 @@ import {
   BookOpen,
   LayoutTemplate,
   Trash2,
+  Monitor,
+  Rocket,
+  Loader2,
+  ExternalLink,
 } from 'lucide-react'
 import {
   trainingEventsApi,
@@ -267,7 +271,7 @@ export default function TrainingEventDetail() {
     }
   }
 
-  async function handleStatusChange(action: 'publish' | 'start' | 'complete' | 'cancel') {
+  async function handleStatusChange(action: 'publish' | 'start' | 'complete' | 'cancel', autoDeploy = false) {
     if (!id) return
     try {
       switch (action) {
@@ -275,7 +279,7 @@ export default function TrainingEventDetail() {
           await trainingEventsApi.publish(id)
           break
         case 'start':
-          await trainingEventsApi.start(id)
+          await trainingEventsApi.start(id, autoDeploy)
           break
         case 'complete':
           await trainingEventsApi.complete(id)
@@ -362,13 +366,24 @@ export default function TrainingEventDetail() {
               </button>
             )}
             {(event.status === 'draft' || event.status === 'scheduled') && (
-              <button
-                onClick={() => handleStatusChange('start')}
-                className="inline-flex items-center px-3 py-1.5 border border-green-300 text-sm font-medium rounded text-green-700 bg-green-50 hover:bg-green-100"
-              >
-                <Play className="h-4 w-4 mr-1" />
-                Start
-              </button>
+              <>
+                <button
+                  onClick={() => handleStatusChange('start', false)}
+                  className="inline-flex items-center px-3 py-1.5 border border-green-300 text-sm font-medium rounded text-green-700 bg-green-50 hover:bg-green-100"
+                >
+                  <Play className="h-4 w-4 mr-1" />
+                  Start
+                </button>
+                {event.blueprint_id && event.participants.some(p => p.role === 'student') && (
+                  <button
+                    onClick={() => handleStatusChange('start', true)}
+                    className="inline-flex items-center px-3 py-1.5 border border-primary-300 text-sm font-medium rounded text-primary-700 bg-primary-50 hover:bg-primary-100"
+                  >
+                    <Rocket className="h-4 w-4 mr-1" />
+                    Start & Deploy Labs
+                  </button>
+                )}
+              </>
             )}
             {event.status === 'running' && (
               <button
@@ -667,19 +682,54 @@ export default function TrainingEventDetail() {
           ) : (
             <div className="divide-y divide-gray-100">
               {event.participants.map((p) => (
-                <div key={p.id} className="flex items-center justify-between py-2">
-                  <div>
-                    <span className="text-sm font-medium text-gray-900">{p.username}</span>
-                    <span className="ml-2 text-xs text-gray-500 capitalize">{p.role}</span>
+                <div key={p.id} className="flex items-center justify-between py-3">
+                  <div className="flex items-center gap-3">
+                    <div>
+                      <span className="text-sm font-medium text-gray-900">{p.username}</span>
+                      <span className="ml-2 text-xs text-gray-500 capitalize">{p.role}</span>
+                    </div>
+                    {/* Range Status Badge */}
+                    {p.range_id && (
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                        p.range_status === 'running' ? 'bg-green-100 text-green-700' :
+                        p.range_status === 'deploying' ? 'bg-yellow-100 text-yellow-700' :
+                        p.range_status === 'error' ? 'bg-red-100 text-red-700' :
+                        p.range_status === 'stopped' ? 'bg-gray-100 text-gray-700' :
+                        'bg-blue-100 text-blue-700'
+                      }`}>
+                        {p.range_status === 'deploying' && (
+                          <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                        )}
+                        {p.range_status === 'running' && (
+                          <Monitor className="h-3 w-3 mr-1" />
+                        )}
+                        {p.range_name || 'Lab'}
+                        {p.range_status && ` (${p.range_status})`}
+                      </span>
+                    )}
                   </div>
-                  {canManage && (
-                    <button
-                      onClick={() => handleRemoveParticipant(p.user_id)}
-                      className="p-1 hover:bg-red-50 rounded text-red-500"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  )}
+                  <div className="flex items-center gap-2">
+                    {/* Open Console Button */}
+                    {p.range_id && p.range_status === 'running' && (
+                      <a
+                        href={`/ranges/${p.range_id}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center px-2 py-1 text-xs font-medium text-primary-600 hover:text-primary-700 hover:bg-primary-50 rounded"
+                      >
+                        <ExternalLink className="h-3 w-3 mr-1" />
+                        Open Lab
+                      </a>
+                    )}
+                    {canManage && (
+                      <button
+                        onClick={() => handleRemoveParticipant(p.user_id)}
+                        className="p-1 hover:bg-red-50 rounded text-red-500"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>

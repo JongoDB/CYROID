@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 from cyroid.config import get_settings
 
-from cyroid.api.deps import DBSession, CurrentUser, filter_by_visibility, check_resource_access
+from cyroid.api.deps import DBSession, CurrentUser, filter_by_visibility, check_resource_access, get_student_accessible_range_ids
 from cyroid.database import get_db
 from cyroid.models.range import Range, RangeStatus
 from cyroid.models.network import Network
@@ -31,7 +31,7 @@ from cyroid.models.blueprint import RangeInstance
 from cyroid.services.event_service import EventService
 from cyroid.schemas.range import (
     RangeCreate, RangeUpdate, RangeResponse, RangeDetailResponse,
-    RangeTemplateExport, RangeTemplateImport, NetworkTemplateData, VMTemplateData
+    RangeTemplateExport, RangeTemplateImport, NetworkTemplateData, VMTemplateData,
 )
 from cyroid.schemas.deployment_status import (
     DeploymentStatusResponse, DeploymentSummary, ResourceStatus, NetworkStatus, VMStatus as VMStatusSchema
@@ -256,19 +256,63 @@ def create_range(range_data: RangeCreate, db: DBSession, current_user: CurrentUs
     return range_obj
 
 
+@router.get("/my-ranges", response_model=List[RangeResponse])
+def get_my_ranges(
+    db: DBSession,
+    current_user: CurrentUser,
+):
+    """
+    Get ranges assigned to the current user.
+
+    Returns ranges where the user is:
+    1. Directly assigned (Range.assigned_to_user_id)
+    2. Assigned via event participation (EventParticipant.range_id)
+    """
+    accessible_ids = get_student_accessible_range_ids(current_user.id, db)
+
+    if not accessible_ids:
+        return []
+
+    ranges = db.query(Range).options(
+        joinedload(Range.networks),
+        joinedload(Range.vms)
+    ).filter(Range.id.in_(accessible_ids)).all()
+
+    return [RangeResponse.from_orm_with_counts(r) for r in ranges]
+
+
 @router.get("/{range_id}", response_model=RangeDetailResponse)
 def get_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
     range_obj = db.query(Range).options(
         joinedload(Range.networks),
         joinedload(Range.vms),
-        joinedload(Range.router)
+        joinedload(Range.router),
     ).filter(Range.id == range_id).first()
     if not range_obj:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Range not found",
         )
-    return range_obj
+
+    return RangeDetailResponse(
+        id=range_obj.id,
+        name=range_obj.name,
+        description=range_obj.description,
+        status=range_obj.status,
+        error_message=range_obj.error_message,
+        created_by=range_obj.created_by,
+        created_at=range_obj.created_at,
+        updated_at=range_obj.updated_at,
+        deployed_at=range_obj.deployed_at,
+        started_at=range_obj.started_at,
+        stopped_at=range_obj.stopped_at,
+        network_count=len(range_obj.networks) if range_obj.networks else 0,
+        vm_count=len(range_obj.vms) if range_obj.vms else 0,
+        student_guide_id=range_obj.student_guide_id,
+        networks=range_obj.networks,
+        vms=range_obj.vms,
+        router=range_obj.router,
+    )
 
 
 @router.put("/{range_id}", response_model=RangeResponse)
@@ -2617,3 +2661,5 @@ def set_student_guide(
         student_guide_id=data.student_guide_id,
         student_guide_title=content_title
     )
+
+
