@@ -109,6 +109,8 @@ class EventListResponse(BaseModel):
     has_blueprint: bool = False
     created_by_id: UUID
     created_at: datetime
+    # For my-events endpoint: the range assigned to the current user
+    my_range_id: Optional[UUID] = None
 
     class Config:
         from_attributes = True

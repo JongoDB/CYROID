@@ -1816,6 +1816,8 @@ export interface TrainingEventListItem {
   has_blueprint: boolean
   created_by_id: string
   created_at: string
+  // For my-events: the range assigned to the current user
+  my_range_id?: string
 }
 
 export interface EventCreate {

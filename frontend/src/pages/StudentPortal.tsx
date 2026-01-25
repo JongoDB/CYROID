@@ -330,9 +330,9 @@ export default function StudentPortal() {
                       View Details
                     </Link>
 
-                    {event.status === 'running' && event.has_blueprint && (
+                    {event.status === 'running' && event.my_range_id && (
                       <Link
-                        to={`/lab/${event.id}`}
+                        to={`/lab/${event.my_range_id}`}
                         className="inline-flex items-center px-3 py-1.5 text-sm font-medium text-white bg-green-600 rounded-md hover:bg-green-700 transition-colors"
                       >
                         <Play className="h-4 w-4 mr-1" />
