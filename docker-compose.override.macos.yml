@@ -1,0 +1,29 @@
+# Docker Compose overrides for macOS development
+#
+# Usage: Copy this file to docker-compose.override.yml
+#   cp docker-compose.override.macos.yml docker-compose.override.yml
+#
+# This maps volume paths to local ./data/cyroid instead of /data/cyroid
+# which is required on macOS since /data is not writable.
+
+services:
+  api:
+    volumes:
+      - ./backend:/app
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./data/cyroid/iso-cache:/data/cyroid/iso-cache
+      - ./data/cyroid/template-storage:/data/cyroid/template-storage
+      - ./data/cyroid/vm-storage:/data/cyroid/vm-storage
+      - ./data/cyroid/shared:/data/cyroid/shared
+      - ./data/seed-templates:/data/seed-templates:ro
+      - ./data/scenarios:/data/scenarios
+      - ./images:/images:ro
+
+  worker:
+    volumes:
+      - ./backend:/app
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./data/cyroid/iso-cache:/data/cyroid/iso-cache
+      - ./data/cyroid/template-storage:/data/cyroid/template-storage
+      - ./data/cyroid/vm-storage:/data/cyroid/vm-storage
+      - ./data/cyroid/shared:/data/cyroid/shared
