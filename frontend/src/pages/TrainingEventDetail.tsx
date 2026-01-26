@@ -11,7 +11,6 @@ import {
   Plus,
   X,
   Tag,
-  Play,
   CheckCircle,
   XCircle,
   CalendarCheck,
@@ -356,11 +355,13 @@ export default function TrainingEventDetail() {
               {confirmAction === 'complete' ? 'Complete Event?' : 'Cancel Event?'}
             </h3>
             <p className="text-gray-600 mb-4">
-              {rangesCount > 0 ? (
+              {confirmAction === 'complete' && rangesCount > 0 ? (
                 <>
                   This will <span className="font-semibold text-red-600">permanently delete {rangesCount} student lab{rangesCount > 1 ? 's' : ''}</span> and all associated VMs.
                   This action cannot be undone.
                 </>
+              ) : confirmAction === 'cancel' ? (
+                'This will cancel the event. Student labs will remain until the event is deleted.'
               ) : (
                 `Are you sure you want to ${confirmAction} this event?`
               )}
@@ -380,7 +381,7 @@ export default function TrainingEventDetail() {
                     : 'bg-purple-600 hover:bg-purple-700'
                 }`}
               >
-                {confirmAction === 'complete' ? 'Complete & Delete Labs' : 'Cancel & Delete Labs'}
+                {confirmAction === 'complete' ? 'Complete & Delete Labs' : 'Cancel Event'}
               </button>
             </div>
           </div>
@@ -449,24 +450,13 @@ export default function TrainingEventDetail() {
               </button>
             )}
             {(event.status === 'draft' || event.status === 'scheduled') && (
-              <>
-                <button
-                  onClick={() => handleStatusChange('start', false)}
-                  className="inline-flex items-center px-3 py-1.5 border border-green-300 text-sm font-medium rounded text-green-700 bg-green-50 hover:bg-green-100"
-                >
-                  <Play className="h-4 w-4 mr-1" />
-                  Start
-                </button>
-                {event.blueprint_id && event.participants.some(p => p.role === 'student') && (
-                  <button
-                    onClick={() => handleStatusChange('start', true)}
-                    className="inline-flex items-center px-3 py-1.5 border border-primary-300 text-sm font-medium rounded text-primary-700 bg-primary-50 hover:bg-primary-100"
-                  >
-                    <Rocket className="h-4 w-4 mr-1" />
-                    Start & Deploy Labs
-                  </button>
-                )}
-              </>
+              <button
+                onClick={() => handleStatusChange('start', true)}
+                className="inline-flex items-center px-3 py-1.5 border border-green-300 text-sm font-medium rounded text-green-700 bg-green-50 hover:bg-green-100"
+              >
+                <Rocket className="h-4 w-4 mr-1" />
+                Start & Deploy Labs
+              </button>
             )}
             {event.status === 'running' && (
               <button

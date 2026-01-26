@@ -10,6 +10,7 @@ import {
   MapPin,
   Users,
   Play,
+  Rocket,
   CheckCircle,
   XCircle,
   MoreVertical,
@@ -88,10 +89,14 @@ export default function TrainingEvents() {
   }
 
   async function handleStatusChange(id: string, action: 'publish' | 'start' | 'complete' | 'cancel') {
-    // Confirm destructive actions that delete ranges
-    if (action === 'complete' || action === 'cancel') {
-      const actionLabel = action === 'complete' ? 'complete' : 'cancel'
-      if (!confirm(`Are you sure you want to ${actionLabel} this event? All associated student labs will be permanently deleted.`)) {
+    // Confirm destructive actions
+    if (action === 'complete') {
+      if (!confirm('Are you sure you want to complete this event? All associated student labs will be permanently deleted.')) {
+        setActiveMenu(null)
+        return
+      }
+    } else if (action === 'cancel') {
+      if (!confirm('Are you sure you want to cancel this event? Student labs will remain until the event is deleted.')) {
         setActiveMenu(null)
         return
       }
@@ -103,7 +108,8 @@ export default function TrainingEvents() {
           await trainingEventsApi.publish(id)
           break
         case 'start':
-          await trainingEventsApi.start(id)
+          // Always deploy labs when starting
+          await trainingEventsApi.start(id, true)
           break
         case 'complete':
           await trainingEventsApi.complete(id)
@@ -354,10 +360,10 @@ export default function TrainingEvents() {
                                 {(event.status === 'draft' || event.status === 'scheduled') && (
                                   <button
                                     onClick={() => handleStatusChange(event.id, 'start')}
-                                    className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                                    className="flex items-center w-full px-4 py-2 text-sm text-green-700 hover:bg-green-50"
                                   >
-                                    <Play className="h-4 w-4 mr-3" />
-                                    Start
+                                    <Rocket className="h-4 w-4 mr-3" />
+                                    Start & Deploy Labs
                                   </button>
                                 )}
                                 {event.status === 'running' && (
