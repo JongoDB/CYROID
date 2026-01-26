@@ -26,7 +26,7 @@ import {
 import clsx from 'clsx';
 import { toast } from '../stores/toastStore';
 import { ConfirmDialog } from '../components/common/ConfirmDialog';
-import { DeployInstanceModal } from '../components/blueprints';
+import { DeployInstanceModal, ExportBlueprintModal } from '../components/blueprints';
 
 const statusColors: Record<string, string> = {
   draft: 'bg-gray-100 text-gray-800',
@@ -47,7 +47,7 @@ export default function BlueprintDetail() {
     instance: Instance | null;
     isLoading: boolean;
   }>({ instance: null, isLoading: false });
-  const [exporting, setExporting] = useState(false);
+  const [showExportModal, setShowExportModal] = useState(false);
   const [contentItems, setContentItems] = useState<ContentListItem[]>([]);
   const [linkedContentIds, setLinkedContentIds] = useState<string[]>([]);
   const [savingContent, setSavingContent] = useState(false);
@@ -112,28 +112,6 @@ export default function BlueprintDetail() {
     }
   };
 
-  const handleExport = async () => {
-    if (!id || !blueprint) return;
-    setExporting(true);
-    try {
-      const blob = await blueprintsApi.export(id);
-      // Create download link
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `blueprint-${blueprint.name.replace(/[^a-zA-Z0-9-_]/g, '_')}.zip`;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
-      toast.success('Blueprint exported successfully');
-    } catch (err: any) {
-      toast.error(err.response?.data?.detail || 'Failed to export blueprint');
-    } finally {
-      setExporting(false);
-    }
-  };
-
   const handleToggleContent = async (contentId: string) => {
     if (!id) return;
     const newIds = linkedContentIds.includes(contentId)
@@ -187,15 +165,10 @@ export default function BlueprintDetail() {
           </div>
           <div className="flex space-x-3">
             <button
-              onClick={handleExport}
-              disabled={exporting}
-              className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
+              onClick={() => setShowExportModal(true)}
+              className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
             >
-              {exporting ? (
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              ) : (
-                <Download className="h-4 w-4 mr-2" />
-              )}
+              <Download className="h-4 w-4 mr-2" />
               Export
             </button>
             <button
@@ -338,7 +311,7 @@ export default function BlueprintDetail() {
                     Instance
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                    Subnet
+                    #
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
                     Status
@@ -366,10 +339,7 @@ export default function BlueprintDetail() {
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {blueprint.base_subnet_prefix.split('.')[0]}.
-                      {parseInt(blueprint.base_subnet_prefix.split('.')[1]) +
-                        instance.subnet_offset}
-                      .x.x
+                      #{instance.subnet_offset + 1}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span
@@ -437,6 +407,14 @@ export default function BlueprintDetail() {
         onCancel={() => setDeleteConfirm({ instance: null, isLoading: false })}
         isLoading={deleteConfirm.isLoading}
       />
+
+      {/* Export Blueprint Modal */}
+      {showExportModal && (
+        <ExportBlueprintModal
+          blueprint={blueprint}
+          onClose={() => setShowExportModal(false)}
+        />
+      )}
     </div>
   );
 }

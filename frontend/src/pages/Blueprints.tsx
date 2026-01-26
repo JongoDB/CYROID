@@ -158,9 +158,20 @@ export default function Blueprints() {
 
               <div className="bg-gray-50 px-5 py-3 flex justify-between items-center">
                 <span className="text-xs text-gray-500">
-                  Subnet: {blueprint.base_subnet_prefix}.x.x
+                  {blueprint.is_seed && (
+                    <span className="bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded text-xs mr-2">
+                      Built-in
+                    </span>
+                  )}
+                  {blueprint.instance_count} instance{blueprint.instance_count !== 1 ? 's' : ''}
                 </span>
                 <div className="flex space-x-2">
+                  <Link
+                    to={`/blueprints/${blueprint.id}`}
+                    className="inline-flex items-center px-3 py-1.5 text-xs font-medium rounded-md text-gray-700 bg-white border border-gray-300 hover:bg-gray-50"
+                  >
+                    View
+                  </Link>
                   <button
                     onClick={() => setDeployModal(blueprint)}
                     className="inline-flex items-center px-3 py-1.5 text-xs font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700"

@@ -34,6 +34,10 @@ export default function ImportBlueprintModal({ onClose, onSuccess }: Props) {
     blueprintName?: string;
     templatesCreated: string[];
     templatesSkipped: string[];
+    dockerfilesExtracted?: string[];
+    imagesBuilt?: string[];
+    contentImported?: boolean;
+    artifactsImported?: string[];
     warnings: string[];
   } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -42,8 +46,9 @@ export default function ImportBlueprintModal({ onClose, onSuccess }: Props) {
     const selectedFile = e.target.files?.[0];
     if (!selectedFile) return;
 
-    if (!selectedFile.name.endsWith('.zip')) {
-      setError('Please select a ZIP file');
+    // Accept .zip and .tar.gz (for legacy v2.0 Range Export format)
+    if (!selectedFile.name.endsWith('.zip') && !selectedFile.name.endsWith('.tar.gz')) {
+      setError('Please select a ZIP or TAR.GZ file');
       return;
     }
 
@@ -86,6 +91,10 @@ export default function ImportBlueprintModal({ onClose, onSuccess }: Props) {
           blueprintName: result.blueprint_name,
           templatesCreated: result.templates_created,
           templatesSkipped: result.templates_skipped,
+          dockerfilesExtracted: result.dockerfiles_extracted,
+          imagesBuilt: result.images_built,
+          contentImported: result.content_imported,
+          artifactsImported: result.artifacts_imported,
           warnings: result.warnings,
         });
         setStep('done');
@@ -150,16 +159,16 @@ export default function ImportBlueprintModal({ onClose, onSuccess }: Props) {
                 >
                   <FileArchive className="mx-auto h-12 w-12 text-gray-400" />
                   <p className="mt-2 text-sm text-gray-600">
-                    Click to select a blueprint ZIP file
+                    Click to select a blueprint package
                   </p>
                   <p className="text-xs text-gray-500 mt-1">
-                    Exported from another CYROID instance
+                    Supports Blueprint Export (.zip) and legacy Range Export (.tar.gz)
                   </p>
                 </div>
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept=".zip"
+                  accept=".zip,.tar.gz"
                   onChange={handleFileSelect}
                   className="hidden"
                 />
@@ -201,6 +210,16 @@ export default function ImportBlueprintModal({ onClose, onSuccess }: Props) {
                   </span>
                 </div>
 
+                {/* Format Version */}
+                {validation.manifest_version && (
+                  <div className="text-xs text-gray-500 -mt-2">
+                    Package format: v{validation.manifest_version}
+                    {validation.manifest_version === '2.0' && ' (Legacy Range Export)'}
+                    {validation.manifest_version === '3.0' && ' (Blueprint Export)'}
+                    {validation.manifest_version === '4.0' && ' (Unified Range Blueprint)'}
+                  </div>
+                )}
+
                 {/* Blueprint Name */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700">
@@ -217,6 +236,37 @@ export default function ImportBlueprintModal({ onClose, onSuccess }: Props) {
                       A blueprint with this name already exists. Change the name to import.
                     </p>
                   )}
+                </div>
+
+                {/* Package Contents Summary */}
+                <div className="bg-gray-50 rounded-md p-3">
+                  <h4 className="text-sm font-medium text-gray-700 mb-2">Package Contents</h4>
+                  <div className="grid grid-cols-2 gap-2 text-sm">
+                    {validation.msel_included && (
+                      <div className="flex items-center text-gray-600">
+                        <span className="w-2 h-2 bg-green-400 rounded-full mr-2" />
+                        MSEL / Injects
+                      </div>
+                    )}
+                    {validation.included_dockerfiles && validation.included_dockerfiles.length > 0 && (
+                      <div className="flex items-center text-gray-600">
+                        <span className="w-2 h-2 bg-green-400 rounded-full mr-2" />
+                        {validation.included_dockerfiles.length} Dockerfile(s)
+                      </div>
+                    )}
+                    {validation.content_included && (
+                      <div className="flex items-center text-gray-600">
+                        <span className="w-2 h-2 bg-green-400 rounded-full mr-2" />
+                        Content Library
+                      </div>
+                    )}
+                    {validation.included_artifacts && validation.included_artifacts.length > 0 && (
+                      <div className="flex items-center text-gray-600">
+                        <span className="w-2 h-2 bg-green-400 rounded-full mr-2" />
+                        {validation.included_artifacts.length} Artifact(s)
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 {/* Included Templates */}
@@ -346,6 +396,37 @@ export default function ImportBlueprintModal({ onClose, onSuccess }: Props) {
                   <span className="text-sm font-medium">
                     Blueprint "{importResult.blueprintName}" imported successfully
                   </span>
+                </div>
+
+                {/* Import Summary */}
+                <div className="bg-gray-50 rounded-md p-3">
+                  <h4 className="text-sm font-medium text-gray-700 mb-2">Import Summary</h4>
+                  <div className="grid grid-cols-2 gap-2 text-sm text-gray-600">
+                    {importResult.dockerfilesExtracted && importResult.dockerfilesExtracted.length > 0 && (
+                      <div className="flex items-center">
+                        <CheckCircle className="h-3 w-3 text-green-500 mr-2" />
+                        {importResult.dockerfilesExtracted.length} Dockerfile(s)
+                      </div>
+                    )}
+                    {importResult.imagesBuilt && importResult.imagesBuilt.length > 0 && (
+                      <div className="flex items-center">
+                        <CheckCircle className="h-3 w-3 text-green-500 mr-2" />
+                        {importResult.imagesBuilt.length} Image(s) built
+                      </div>
+                    )}
+                    {importResult.contentImported && (
+                      <div className="flex items-center">
+                        <CheckCircle className="h-3 w-3 text-green-500 mr-2" />
+                        Content Library item
+                      </div>
+                    )}
+                    {importResult.artifactsImported && importResult.artifactsImported.length > 0 && (
+                      <div className="flex items-center">
+                        <CheckCircle className="h-3 w-3 text-green-500 mr-2" />
+                        {importResult.artifactsImported.length} Artifact(s)
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 {importResult.templatesCreated.length > 0 && (

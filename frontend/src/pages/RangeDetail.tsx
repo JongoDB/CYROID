@@ -5,7 +5,7 @@ import { rangesApi, networksApi, vmsApi, imagesApi, NetworkCreate, VMCreate } fr
 import type { Range, Network, VM, RealtimeEvent, BaseImage, GoldenImageLibrary, SnapshotWithLineage } from '../types'
 import {
   ArrowLeft, Plus, Loader2, X, Play, Square, RotateCw, Camera,
-  Network as NetworkIcon, Server, Trash2, Rocket, Activity, Monitor, Shield, Download, Pencil, Globe, Router, Wifi, Radio, Wrench, BookOpen, LayoutTemplate, Terminal
+  Network as NetworkIcon, Server, Trash2, Rocket, Activity, Monitor, Shield, Pencil, Globe, Router, Wifi, Radio, Wrench, BookOpen, LayoutTemplate, Terminal
 } from 'lucide-react'
 import clsx from 'clsx'
 import { VncConsole } from '../components/console/VncConsole'
@@ -14,7 +14,7 @@ import { useAuthStore } from '../stores/authStore'
 import { RelativeTime } from '../components/common/RelativeTime'
 import { useIsArmHost } from '../stores/systemStore'
 import { EmulationWarning } from '../components/common/EmulationWarning'
-import ExportRangeDialog from '../components/export/ExportRangeDialog'
+// ExportRangeDialog removed - use Blueprint Export instead (Issue #131)
 import { DeploymentProgress } from '../components/range/DeploymentProgress'
 import { useRealtimeRange } from '../hooks/useRealtimeRange'
 import { toast } from '../stores/toastStore'
@@ -137,9 +137,6 @@ export default function RangeDetail() {
       `width=${width},height=${height},left=${left},top=${top},menubar=no,toolbar=no,location=no,status=no,resizable=yes,scrollbars=no`
     )
   }
-
-  // Export dialog state
-  const [showExportDialog, setShowExportDialog] = useState(false)
 
   // Save Blueprint modal state
   const [showSaveBlueprintModal, setShowSaveBlueprintModal] = useState(false)
@@ -983,16 +980,7 @@ export default function RangeDetail() {
                 )}
               </>
             )}
-            {/* Export button - available in any status */}
-            <button
-              onClick={() => setShowExportDialog(true)}
-              className="inline-flex items-center px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
-              title="Export as portable ZIP package for backup or transfer"
-            >
-              <Download className="h-4 w-4 mr-1" />
-              Export
-            </button>
-            {/* Save as Blueprint button */}
+            {/* Save as Blueprint button - use Blueprint Export for sharing (Issue #131) */}
             <button
               onClick={() => setShowSaveBlueprintModal(true)}
               className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
@@ -2507,16 +2495,6 @@ export default function RangeDetail() {
             </div>
           </div>
         </div>
-      )}
-
-      {/* Export Range Dialog */}
-      {range && (
-        <ExportRangeDialog
-          isOpen={showExportDialog}
-          onClose={() => setShowExportDialog(false)}
-          rangeId={range.id}
-          rangeName={range.name}
-        />
       )}
 
       {/* Edit Range Modal */}

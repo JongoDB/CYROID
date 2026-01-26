@@ -3,9 +3,9 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { rangesApi, RangeCreate } from '../services/api'
 import type { Range } from '../types'
-import { Plus, Loader2, Network, X, Play, Square, Trash2, Upload, Wand2 } from 'lucide-react'
+import { Plus, Loader2, Network, X, Play, Square, Trash2, Wand2 } from 'lucide-react'
 import clsx from 'clsx'
-import ImportRangeWizard from '../components/import/ImportRangeWizard'
+// ImportRangeWizard removed - use Blueprint Import instead (Issue #131)
 import { ConfirmDialog } from '../components/common/ConfirmDialog'
 import { toast } from '../stores/toastStore'
 
@@ -22,7 +22,6 @@ export default function Ranges() {
   const [ranges, setRanges] = useState<Range[]>([])
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
-  const [showImportWizard, setShowImportWizard] = useState(false)
   const [formData, setFormData] = useState<RangeCreate>({ name: '', description: '' })
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -127,13 +126,7 @@ export default function Ranges() {
             <Wand2 className="h-4 w-4 mr-2" />
             Range Wizard
           </Link>
-          <button
-            onClick={() => setShowImportWizard(true)}
-            className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500"
-          >
-            <Upload className="h-4 w-4 mr-2" />
-            Import Range
-          </button>
+          {/* Import Range button removed - use Blueprint Import instead (Issue #131) */}
           <button
             onClick={() => setShowModal(true)}
             className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500"
@@ -305,15 +298,6 @@ export default function Ranges() {
           </div>
         </div>
       )}
-
-      {/* Import Range Wizard */}
-      <ImportRangeWizard
-        isOpen={showImportWizard}
-        onClose={() => {
-          setShowImportWizard(false)
-          fetchRanges()  // Refresh list after import
-        }}
-      />
 
       {/* Delete Confirmation Dialog */}
       <ConfirmDialog

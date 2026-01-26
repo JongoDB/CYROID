@@ -1081,15 +1081,17 @@ export interface Blueprint {
   name: string;
   description?: string;
   version: number;
-  base_subnet_prefix: string;
-  next_offset: number;
+  // Deprecated: No longer used with DinD isolation
+  base_subnet_prefix?: string;
+  next_offset?: number;
   content_ids: string[];
-  created_by: string;
+  created_by?: string;  // Nullable for seed blueprints
   created_at: string;
   updated_at: string;
   network_count: number;
   vm_count: number;
   instance_count: number;
+  is_seed: boolean;  // True for built-in blueprints
 }
 
 export interface BlueprintDetail extends Blueprint {
@@ -1138,6 +1140,10 @@ export interface BlueprintImportValidation {
   missing_images: string[];
   content_included: boolean;
   content_conflict: string | null;  // Existing content with same title
+  // v4.0 additions
+  msel_included?: boolean;
+  included_artifacts?: string[];
+  artifact_conflicts?: string[];
 }
 
 export interface BlueprintImportOptions {
@@ -1152,8 +1158,25 @@ export interface BlueprintImportResult {
   blueprint_name?: string;
   templates_created: string[];
   templates_skipped: string[];
+  images_built?: string[];
+  dockerfiles_extracted?: string[];
+  dockerfiles_skipped?: string[];
+  content_imported?: boolean;
+  content_id?: string;
+  // v4.0 additions
+  artifacts_imported?: string[];
+  artifacts_skipped?: string[];
   errors: string[];
   warnings: string[];
+}
+
+export interface BlueprintExportOptions {
+  include_msel?: boolean;
+  include_dockerfiles?: boolean;
+  include_docker_images?: boolean;
+  include_content?: boolean;
+  include_artifacts?: boolean;
+  content_id?: string;
 }
 
 // ============ Blueprint API ============
@@ -1170,8 +1193,29 @@ export const blueprintsApi = {
   listInstances: (id: string) => api.get<Instance[]>(`/blueprints/${id}/instances`),
 
   // Export/Import
-  export: async (id: string): Promise<Blob> => {
-    const response = await api.get(`/blueprints/${id}/export`, {
+  export: async (id: string, options: BlueprintExportOptions = {}): Promise<Blob> => {
+    const params = new URLSearchParams();
+    if (options.include_msel !== undefined) {
+      params.append('include_msel', String(options.include_msel));
+    }
+    if (options.include_dockerfiles !== undefined) {
+      params.append('include_dockerfiles', String(options.include_dockerfiles));
+    }
+    if (options.include_docker_images !== undefined) {
+      params.append('include_docker_images', String(options.include_docker_images));
+    }
+    if (options.include_content !== undefined) {
+      params.append('include_content', String(options.include_content));
+    }
+    if (options.include_artifacts !== undefined) {
+      params.append('include_artifacts', String(options.include_artifacts));
+    }
+    if (options.content_id) {
+      params.append('content_id', options.content_id);
+    }
+    const queryString = params.toString();
+    const url = queryString ? `/blueprints/${id}/export?${queryString}` : `/blueprints/${id}/export`;
+    const response = await api.get(url, {
       responseType: 'blob',
     });
     return response.data;
