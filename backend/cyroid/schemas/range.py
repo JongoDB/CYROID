@@ -116,7 +116,7 @@ class NetworkTemplateData(BaseModel):
 
 
 class VMTemplateData(BaseModel):
-    """VM data for range template."""
+    """VM data for range template (deprecated - use Blueprint Export instead)."""
     hostname: str
     ip_address: str
     network_name: str  # Reference to network by name
@@ -124,6 +124,8 @@ class VMTemplateData(BaseModel):
     base_image_id: Optional[str] = None
     golden_image_id: Optional[str] = None
     snapshot_id: Optional[str] = None
+    # Fallback fields for cross-environment portability
+    base_image_tag: Optional[str] = None  # Docker image tag (preferred)
     # Legacy (for backwards compatibility with old exports)
     template_name: Optional[str] = None
     cpu: int

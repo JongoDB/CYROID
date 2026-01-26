@@ -31,9 +31,9 @@ networks:
     is_isolated: true
 
 vms:
-  # Attack box - Uses Kali desktop image
+  # Attack box - Custom Kali with pre-installed tools (Metasploit, Impacket, etc.)
   - hostname: kali
-    template_name: "kali-rolling-desktop"
+    base_image_tag: "cyroid/kali-attack:latest"
     network_name: internet
     ip_address: "172.16.0.10"
     cpu: 4
@@ -42,9 +42,9 @@ vms:
     position_x: 100
     position_y: 200
 
-  # C2 Redirectors - Uses lightweight Alpine
+  # C2 Redirectors - Lightweight Alpine containers
   - hostname: redir1
-    template_name: "alpine"
+    base_image_tag: "alpine:latest"
     network_name: internet
     ip_address: "172.16.0.20"
     cpu: 1
@@ -54,7 +54,7 @@ vms:
     position_y: 100
 
   - hostname: redir2
-    template_name: "alpine"
+    base_image_tag: "alpine:latest"
     network_name: internet
     ip_address: "172.16.0.21"
     cpu: 1
@@ -63,9 +63,9 @@ vms:
     position_x: 100
     position_y: 300
 
-  # DMZ - Web server with WordPress
+  # DMZ - Vulnerable WordPress with SQLi
   - hostname: webserver
-    template_name: "redteam-lab-wordpress"
+    base_image_tag: "cyroid/redteam-lab-wordpress:latest"
     network_name: dmz
     ip_address: "172.16.1.10"
     cpu: 2
@@ -74,9 +74,9 @@ vms:
     position_x: 400
     position_y: 200
 
-  # Internal network - Domain Controller
+  # Internal network - Samba Domain Controller
   - hostname: dc01
-    template_name: "samba-dc"
+    base_image_tag: "cyroid/samba-dc:latest"
     network_name: internal
     ip_address: "172.16.2.10"
     cpu: 2
@@ -85,9 +85,9 @@ vms:
     position_x: 700
     position_y: 100
 
-  # Internal network - File Server
+  # Internal network - Samba File Server with sensitive data
   - hostname: fileserver
-    template_name: "redteam-lab-fileserver"
+    base_image_tag: "cyroid/redteam-lab-fileserver:latest"
     network_name: internal
     ip_address: "172.16.2.20"
     cpu: 1
@@ -96,9 +96,9 @@ vms:
     position_x: 700
     position_y: 200
 
-  # Internal network - Victim Workstation
+  # Internal network - Victim Workstation (simulated browsing)
   - hostname: ws01
-    template_name: "redteam-lab-workstation"
+    base_image_tag: "cyroid/redteam-lab-workstation:latest"
     network_name: internal
     ip_address: "172.16.2.30"
     cpu: 1

@@ -1061,7 +1061,10 @@ export interface VMConfig {
   hostname: string;
   ip_address: string;
   network_name: string;
-  template_name: string;
+  // Image source (new format - Docker image tag)
+  base_image_tag?: string;
+  // Deprecated: kept for backward compatibility with older blueprints
+  template_name?: string;
   cpu: number;
   ram_mb: number;
   disk_gb: number;

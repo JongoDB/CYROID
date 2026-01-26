@@ -77,7 +77,10 @@ class VMExportData(BaseModel):
     base_image_id: Optional[str] = None
     golden_image_id: Optional[str] = None
     snapshot_id: Optional[str] = None
-    # Deprecated: kept for backward compatibility
+    # Fallback fields for cross-environment portability
+    base_image_tag: Optional[str] = None  # Docker image tag (preferred fallback)
+    base_image_name: Optional[str] = None  # BaseImage name
+    # Deprecated: kept for backward compatibility with older exports
     template_name: Optional[str] = None
 
     # Compute resources

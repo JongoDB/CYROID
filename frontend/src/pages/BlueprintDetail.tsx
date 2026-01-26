@@ -243,7 +243,7 @@ export default function BlueprintDetail() {
                   <li key={i} className="bg-gray-50 rounded p-2 text-sm">
                     <span className="font-medium">{vm.hostname}</span>
                     <span className="text-gray-500 ml-2">{vm.ip_address}</span>
-                    <span className="text-gray-400 ml-2">({vm.template_name})</span>
+                    <span className="text-gray-400 ml-2">({vm.base_image_tag || vm.template_name})</span>
                   </li>
                 ))}
               </ul>

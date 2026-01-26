@@ -86,11 +86,11 @@ class BlueprintExportService:
         Collect image project names from VMs' BaseImage references.
 
         Handles multiple reference methods:
-        - base_image_id (preferred)
+        - base_image_id (preferred - UUID lookup)
         - golden_image_id -> base_image
         - snapshot_id -> golden_image -> base_image
+        - base_image_tag (preferred fallback - looks up by docker_image_tag)
         - template_name (deprecated fallback - looks up by name)
-        - base_image_tag (fallback - looks up by tag)
 
         Returns:
             Dict mapping project_name to docker_image_tag
@@ -137,16 +137,16 @@ class BlueprintExportService:
                 except (ValueError, TypeError):
                     pass
 
-            # Fallback: look up by template_name (deprecated but still used)
-            if not base_image and hasattr(vm, 'template_name') and vm.template_name:
-                base_image = db.query(BaseImage).filter(
-                    BaseImage.name == vm.template_name
-                ).first()
-
-            # Fallback: look up by base_image_tag
+            # Fallback: look up by base_image_tag (preferred for seed blueprints)
             if not base_image and hasattr(vm, 'base_image_tag') and vm.base_image_tag:
                 base_image = db.query(BaseImage).filter(
                     BaseImage.docker_image_tag == vm.base_image_tag
+                ).first()
+
+            # Fallback: look up by template_name (deprecated - kept for backward compatibility)
+            if not base_image and hasattr(vm, 'template_name') and vm.template_name:
+                base_image = db.query(BaseImage).filter(
+                    BaseImage.name == vm.template_name
                 ).first()
 
             # If we found a BaseImage with a project name, add it

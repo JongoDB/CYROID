@@ -59,17 +59,23 @@ def build_config_from_yaml(blueprint_data: dict) -> dict:
 
     # Convert VMs
     for vm in blueprint_data.get("vms", []):
-        config["vms"].append({
+        vm_config = {
             "hostname": vm.get("hostname"),
             "ip_address": vm.get("ip_address"),
             "network_name": vm.get("network_name"),
-            "template_name": vm.get("template_name"),
             "cpu": vm.get("cpu", 1),
             "ram_mb": vm.get("ram_mb", 1024),
             "disk_gb": vm.get("disk_gb", 20),
             "position_x": vm.get("position_x"),
-            "position_y": vm.get("position_y")
-        })
+            "position_y": vm.get("position_y"),
+        }
+        # Prefer base_image_tag (new format), fall back to template_name (deprecated)
+        if vm.get("base_image_tag"):
+            vm_config["base_image_tag"] = vm.get("base_image_tag")
+        elif vm.get("template_name"):
+            # Legacy support - convert template_name to base_image_tag
+            vm_config["base_image_tag"] = vm.get("template_name")
+        config["vms"].append(vm_config)
 
     # Convert events to MSEL format if present
     events = blueprint_data.get("events", [])

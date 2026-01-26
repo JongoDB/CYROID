@@ -189,11 +189,12 @@ AI_CONTEXT = """# CYROID API Quick Reference (for AI Assistants)
 
 ## Overview
 CYROID creates Docker-based cyber training ranges with isolated networks and VMs.
+Uses a three-tier Image Library: Base Images (containers/ISOs), Golden Images (configured VMs), Snapshots (forks).
 
 ## Core Workflow
 1. POST /api/v1/ranges - Create range (name, description)
 2. POST /api/v1/networks - Add networks to range (name, subnet, gateway, is_isolated)
-3. POST /api/v1/vms - Add VMs to range (hostname, template_id, network_id, ip_address)
+3. POST /api/v1/vms - Add VMs to range (hostname, base_image_id, network_id, ip_address)
 4. POST /api/v1/ranges/{id}/deploy - Deploy the range
 5. POST /api/v1/ranges/{id}/start - Start a stopped range
 6. POST /api/v1/ranges/{id}/stop - Stop a running range
@@ -222,11 +223,11 @@ CYROID creates Docker-based cyber training ranges with isolated networks and VMs
 
 ### VMs
 - GET /api/v1/vms?range_id={id} - List VMs in range
-- POST /api/v1/vms - Create VM
+- POST /api/v1/vms - Create VM (use base_image_id, golden_image_id, or snapshot_id)
   ```json
   {
     "range_id": "uuid",
-    "template_id": "uuid",
+    "base_image_id": "uuid",
     "network_id": "uuid",
     "hostname": "webserver",
     "ip_address": "172.16.1.10",
@@ -238,15 +239,25 @@ CYROID creates Docker-based cyber training ranges with isolated networks and VMs
 - POST /api/v1/vms/{id}/stop - Stop VM
 - POST /api/v1/vms/{id}/networks/{network_id}?ip_address=x.x.x.x - Add network interface
 
-### Templates
-- GET /api/v1/templates - List available VM templates
-  Returns templates with: id, name, os_type, os_variant, base_image, default_cpu, default_ram_mb
+### Image Library (VM Library)
+- GET /api/v1/cache/base-images - List base images (containers, ISOs)
+- GET /api/v1/cache/golden-images - List golden images (configured VMs)
+- GET /api/v1/cache/snapshots - List snapshots (VM forks)
+- POST /api/v1/cache/pull - Pull Docker image to cache
+- POST /api/v1/cache/build/{project} - Build Dockerfile from /data/images/{project}/
+
+### Blueprints (Reusable Range Templates)
+- GET /api/v1/blueprints - List all blueprints
+- POST /api/v1/blueprints - Create blueprint from existing range
+- POST /api/v1/blueprints/{id}/deploy - Deploy new instance from blueprint
+- GET /api/v1/blueprints/{id}/export - Export blueprint (with Dockerfiles, MSEL, content)
+- POST /api/v1/blueprints/import - Import blueprint from export file
 
 ## Network Isolation Modes
 - is_isolated=false: Network has internet access via VyOS NAT router
 - is_isolated=true: Air-gapped network, no external access
 
-## VM Types (based on template)
+## VM Types (based on image)
 - Linux containers (KasmVNC for GUI, Docker exec for terminal)
 - Windows VMs (via dockur/windows, VNC console)
 - Linux VMs (via QEMU ISO boot, VNC console)
@@ -262,9 +273,9 @@ CYROID creates Docker-based cyber training ranges with isolated networks and VMs
     {"name": "internal", "subnet": "172.16.2.0/24", "is_isolated": true}
   ],
   "vms": [
-    {"hostname": "kali", "network": "internet", "template": "Kali Linux"},
-    {"hostname": "webserver", "network": "dmz", "template": "Ubuntu Server"},
-    {"hostname": "dc01", "network": "internal", "template": "Windows Server 2019"}
+    {"hostname": "kali", "network": "internet", "base_image_tag": "cyroid/kali-attack:latest"},
+    {"hostname": "webserver", "network": "dmz", "base_image_tag": "cyroid/redteam-lab-wordpress:latest"},
+    {"hostname": "dc01", "network": "internal", "base_image_tag": "cyroid/samba-dc:latest"}
   ]
 }
 ```
@@ -280,9 +291,10 @@ Get token via: POST /api/v1/auth/login {"username": "x", "password": "y"}
 
 ## Tips
 - Always deploy range after adding all networks and VMs
-- Use template names to find template_id from GET /templates
+- Use base_image_id (UUID) or base_image_tag (docker tag) to specify VM image
 - IP addresses must be within the network's subnet
 - VMs can have multiple network interfaces via POST /vms/{id}/networks/{network_id}
+- Use Blueprints for reusable range configurations
 """
 
 
