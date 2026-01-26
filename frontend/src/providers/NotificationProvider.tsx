@@ -31,17 +31,24 @@ interface NotificationProviderProps {
 export function NotificationProvider({ children }: NotificationProviderProps) {
   const isAuthenticated = useAuthStore((s) => !!s.token)
   const loadFromServer = useNotificationStore((s) => s.loadFromServer)
-  const { toasts, addToast, dismissToast } = useToasts()
+  const clearAll = useNotificationStore((s) => s.clearAll)
+  const { toasts, addToast, dismissToast, clearAllToasts } = useToasts()
 
   // Load notifications from server on mount when authenticated
+  // Clear notifications when logged out
   useEffect(() => {
     if (isAuthenticated) {
       loadFromServer()
+    } else {
+      // Clear all toasts and notifications when logged out
+      clearAllToasts()
+      clearAll()
     }
-  }, [isAuthenticated, loadFromServer])
+  }, [isAuthenticated, loadFromServer, clearAllToasts, clearAll])
 
-  // Handle new notifications - show toast
+  // Handle new notifications - show toast (only when authenticated)
   const handleNotification = (event: RealtimeEvent) => {
+    if (!isAuthenticated) return
     const severity = getSeverity(event.event_type)
     addToast(event.message, severity)
   }
@@ -55,7 +62,8 @@ export function NotificationProvider({ children }: NotificationProviderProps) {
   return (
     <NotificationContext.Provider value={{ connectionState, isConnected }}>
       {children}
-      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+      {/* Only show toasts when authenticated */}
+      {isAuthenticated && <ToastContainer toasts={toasts} onDismiss={dismissToast} />}
     </NotificationContext.Provider>
   )
 }
