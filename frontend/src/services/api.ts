@@ -1952,4 +1952,51 @@ export const trainingEventsApi = {
     }),
 }
 
+// ============ Notifications API ============
+
+export type NotificationType =
+  | 'range_deployed' | 'range_started' | 'range_stopped' | 'range_deleted'
+  | 'vm_started' | 'vm_stopped' | 'vm_error'
+  | 'event_scheduled' | 'event_starting' | 'event_started' | 'event_completed' | 'event_cancelled'
+  | 'inject_available' | 'inject_executed'
+  | 'evidence_submitted' | 'score_updated'
+  | 'user_created' | 'user_approved'
+  | 'system_alert' | 'info'
+
+export type NotificationSeverity = 'info' | 'warning' | 'error' | 'success'
+
+export interface UserNotification {
+  id: string
+  notification_type: NotificationType
+  title: string
+  message: string
+  severity: NotificationSeverity
+  user_id?: string
+  target_role?: string
+  resource_type?: string
+  resource_id?: string
+  read_at?: string
+  created_at: string
+}
+
+export interface NotificationList {
+  notifications: UserNotification[]
+  total: number
+  unread_count: number
+}
+
+export const notificationsApi = {
+  list: (params?: { limit?: number; offset?: number; unread_only?: boolean }) =>
+    api.get<NotificationList>('/notifications', { params }),
+
+  get: (id: string) =>
+    api.get<UserNotification>(`/notifications/${id}`),
+
+  markAsRead: (notificationIds: string[]) =>
+    api.post<{ marked_read: number }>('/notifications/read', { notification_ids: notificationIds }),
+
+  markAllAsRead: () =>
+    api.post<{ marked_read: number }>('/notifications/read-all'),
+}
+
 export default api

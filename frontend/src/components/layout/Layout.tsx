@@ -169,8 +169,9 @@ export default function Layout({ children }: LayoutProps) {
           )}
 
           {/* Sectioned navigation */}
-          {filteredSections.map((section) => (
+          {filteredSections.map((section, index) => (
             <div key={section.title} className="pt-4">
+              {index > 0 && <div className="mx-3 mb-3 border-t border-gray-700" />}
               <h3 className="px-3 text-xs font-semibold text-gray-400 uppercase tracking-wider">
                 {section.title}
               </h3>
@@ -278,8 +279,9 @@ export default function Layout({ children }: LayoutProps) {
             )}
 
             {/* Sectioned navigation */}
-            {filteredSections.map((section) => (
+            {filteredSections.map((section, index) => (
               <div key={section.title} className="pt-4">
+                {index > 0 && <div className="mx-3 mb-3 border-t border-gray-700" />}
                 <h3 className="px-3 text-xs font-semibold text-gray-400 uppercase tracking-wider">
                   {section.title}
                 </h3>

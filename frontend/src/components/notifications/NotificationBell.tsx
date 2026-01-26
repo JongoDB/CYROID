@@ -16,7 +16,7 @@ const filterTabs: { label: string; value: NotificationFilter }[] = [
   { label: 'All', value: 'all' },
   { label: 'Info', value: 'info' },
   { label: 'Warn', value: 'warning' },
-  { label: 'Error', value: 'error' },
+  { label: 'Err', value: 'error' },
 ]
 
 export function NotificationBell() {

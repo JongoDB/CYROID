@@ -1,7 +1,7 @@
 // frontend/src/providers/NotificationProvider.tsx
 /**
  * Provider component that initializes global notifications.
- * Handles WebSocket connection and toast display.
+ * Handles WebSocket connection, server sync, and toast display.
  */
 import { useEffect, createContext, useContext, ReactNode } from 'react'
 import { useGlobalNotifications, ConnectionState } from '../hooks/useGlobalNotifications'
@@ -30,13 +30,15 @@ interface NotificationProviderProps {
 
 export function NotificationProvider({ children }: NotificationProviderProps) {
   const isAuthenticated = useAuthStore((s) => !!s.token)
-  const loadFromStorage = useNotificationStore((s) => s.loadFromStorage)
+  const loadFromServer = useNotificationStore((s) => s.loadFromServer)
   const { toasts, addToast, dismissToast } = useToasts()
 
-  // Load notifications from localStorage on mount
+  // Load notifications from server on mount when authenticated
   useEffect(() => {
-    loadFromStorage()
-  }, [loadFromStorage])
+    if (isAuthenticated) {
+      loadFromServer()
+    }
+  }, [isAuthenticated, loadFromServer])
 
   // Handle new notifications - show toast
   const handleNotification = (event: RealtimeEvent) => {

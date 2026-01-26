@@ -1,9 +1,9 @@
 // frontend/src/components/notifications/NotificationItem.tsx
 /**
  * Single notification item in the dropdown list.
- * Shows message, timestamp, severity indicator, and read state.
+ * Shows title, message, timestamp, severity indicator, and read state.
  */
-import { CheckCircle, AlertTriangle, XCircle } from 'lucide-react'
+import { CheckCircle, AlertTriangle, XCircle, Info } from 'lucide-react'
 import { Notification } from '../../stores/notificationStore'
 
 interface NotificationItemProps {
@@ -13,6 +13,11 @@ interface NotificationItemProps {
 
 const severityConfig = {
   info: {
+    icon: Info,
+    iconColor: 'text-blue-500',
+    dotColor: 'bg-blue-500',
+  },
+  success: {
     icon: CheckCircle,
     iconColor: 'text-green-500',
     dotColor: 'bg-green-500',
@@ -49,7 +54,7 @@ function formatRelativeTime(timestamp: string): string {
 }
 
 export function NotificationItem({ notification, onClick }: NotificationItemProps) {
-  const config = severityConfig[notification.severity]
+  const config = severityConfig[notification.severity] || severityConfig.info
   const Icon = config.icon
 
   return (
@@ -68,7 +73,14 @@ export function NotificationItem({ notification, onClick }: NotificationItemProp
 
       {/* Content */}
       <div className="flex-1 min-w-0">
-        <p className="text-sm text-gray-200 break-words">{notification.message}</p>
+        {notification.title && (
+          <p className="text-sm font-medium text-gray-100 break-words">
+            {notification.title}
+          </p>
+        )}
+        <p className={`text-sm text-gray-300 break-words ${notification.title ? 'mt-0.5' : ''}`}>
+          {notification.message}
+        </p>
         <p className="text-xs text-gray-500 mt-1">
           {formatRelativeTime(notification.timestamp)}
         </p>

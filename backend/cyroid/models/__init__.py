@@ -17,6 +17,7 @@ from cyroid.models.walkthrough_progress import WalkthroughProgress
 from cyroid.models.blueprint import RangeBlueprint, RangeInstance
 from cyroid.models.content import Content, ContentAsset, ContentType
 from cyroid.models.event import TrainingEvent, EventParticipant, EventStatus
+from cyroid.models.notification import Notification, NotificationType, NotificationSeverity
 # Image Library models
 from cyroid.models.base_image import BaseImage, ImageType
 from cyroid.models.golden_image import GoldenImage, GoldenImageSource
@@ -40,6 +41,7 @@ __all__ = [
     "RangeBlueprint", "RangeInstance",
     "Content", "ContentAsset", "ContentType",
     "TrainingEvent", "EventParticipant", "EventStatus",
+    "Notification", "NotificationType", "NotificationSeverity",
     # Image Library
     "BaseImage", "ImageType",
     "GoldenImage", "GoldenImageSource",

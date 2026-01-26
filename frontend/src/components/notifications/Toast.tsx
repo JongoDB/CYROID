@@ -4,7 +4,7 @@
  * Auto-dismisses after a timeout, can be manually dismissed.
  */
 import { useEffect, useState } from 'react'
-import { X, CheckCircle, AlertTriangle, XCircle } from 'lucide-react'
+import { X, CheckCircle, AlertTriangle, XCircle, Info } from 'lucide-react'
 import { NotificationSeverity } from '../../stores/notificationStore'
 
 interface ToastProps {
@@ -17,6 +17,12 @@ interface ToastProps {
 
 const severityConfig = {
   info: {
+    icon: Info,
+    borderColor: 'border-l-blue-500',
+    iconColor: 'text-blue-500',
+    bgColor: 'bg-blue-500/10',
+  },
+  success: {
     icon: CheckCircle,
     borderColor: 'border-l-green-500',
     iconColor: 'text-green-500',

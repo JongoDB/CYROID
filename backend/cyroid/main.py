@@ -28,6 +28,7 @@ from cyroid.api.files import router as files_router
 from cyroid.api.content import router as content_router
 from cyroid.api.training_events import router as training_events_router
 from cyroid.api.images import router as images_router
+from cyroid.api.notifications import router as notifications_router
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -128,6 +129,7 @@ app = FastAPI(
         {"name": "walkthrough", "description": "Lab walkthrough and student progress"},
         {"name": "content", "description": "Training content and materials"},
         {"name": "training-events", "description": "Training event scheduling and management"},
+        {"name": "Notifications", "description": "User-scoped notifications and alerts"},
         {"name": "system", "description": "System configuration and status"},
     ],
 )
@@ -163,6 +165,7 @@ app.include_router(files_router, prefix="/api/v1")
 app.include_router(content_router, prefix="/api/v1")
 app.include_router(training_events_router, prefix="/api/v1")
 app.include_router(images_router, prefix="/api/v1")
+app.include_router(notifications_router, prefix="/api/v1")
 
 
 @app.get("/health")
