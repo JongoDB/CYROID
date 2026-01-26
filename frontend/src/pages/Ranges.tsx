@@ -64,17 +64,21 @@ export default function Ranges() {
   }
 
   const handleStart = async (range: Range) => {
+    toast.info(`Starting "${range.name}"...`)
     try {
       await rangesApi.start(range.id)
+      toast.success(`Range "${range.name}" started`)
       fetchRanges()
     } catch (err: any) {
-      alert(err.response?.data?.detail || 'Failed to start range')
+      toast.error(err.response?.data?.detail || 'Failed to start range')
     }
   }
 
   const handleStop = async (range: Range) => {
+    toast.info(`Stopping "${range.name}"...`)
     try {
       await rangesApi.stop(range.id)
+      toast.success(`Range "${range.name}" stopped`)
       fetchRanges()
     } catch (err: any) {
       toast.error(err.response?.data?.detail || 'Failed to stop range')

@@ -429,21 +429,24 @@ export default function RangeDetail() {
   }
 
   const handleStart = async () => {
-    if (!id) return
+    if (!id || !range) return
+    toast.info(`Starting "${range.name}"...`)
     try {
       await rangesApi.start(id)
+      toast.success(`Range "${range.name}" started`)
       fetchData()
     } catch (err: any) {
-      alert(err.response?.data?.detail || 'Failed to start range')
+      toast.error(err.response?.data?.detail || 'Failed to start range')
     }
   }
 
   const handleStop = async () => {
-    if (!id) return
+    if (!id || !range) return
     setStoppingRange(true)
+    toast.info(`Stopping "${range.name}"...`)
     try {
       await rangesApi.stop(id)
-      toast.success('Range stopped successfully')
+      toast.success(`Range "${range.name}" stopped`)
       fetchData()
     } catch (err: any) {
       toast.error(err.response?.data?.detail || 'Failed to stop range')
