@@ -92,7 +92,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Install optional packages that may not be available on all architectures
+# Includes web browser for web app testing
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    firefox-esr \
     rustscan \
     feroxbuster \
     ghidra \
