@@ -1,7 +1,7 @@
 """Add source_range_id to content for cleanup tracking
 
 Revision ID: c4o5n6t7e8n9
-Revises: k3l4m5n6o7p8
+Revises: d8a6945350e2
 Create Date: 2026-01-25
 
 """
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = 'c4o5n6t7e8n9'
-down_revision: Union[str, None] = 'k3l4m5n6o7p8'
+down_revision: Union[str, None] = 'd8a6945350e2'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
