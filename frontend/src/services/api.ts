@@ -1814,6 +1814,7 @@ export interface TrainingEventListItem {
   tags: string[]
   allowed_roles: string[]
   participant_count: number
+  student_count: number
   has_blueprint: boolean
   created_by_id: string
   created_at: string

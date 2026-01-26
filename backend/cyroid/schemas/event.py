@@ -106,6 +106,7 @@ class EventListResponse(BaseModel):
     tags: List[str]
     allowed_roles: List[str]
     participant_count: int = 0
+    student_count: int = 0
     has_blueprint: bool = False
     created_by_id: UUID
     created_at: datetime

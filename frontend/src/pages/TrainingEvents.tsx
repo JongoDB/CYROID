@@ -357,15 +357,30 @@ export default function TrainingEvents() {
                                     Publish
                                   </button>
                                 )}
-                                {(event.status === 'draft' || event.status === 'scheduled') && (
-                                  <button
-                                    onClick={() => handleStatusChange(event.id, 'start')}
-                                    className="flex items-center w-full px-4 py-2 text-sm text-green-700 hover:bg-green-50"
-                                  >
-                                    <Rocket className="h-4 w-4 mr-3" />
-                                    Start & Deploy Labs
-                                  </button>
-                                )}
+                                {(event.status === 'draft' || event.status === 'scheduled') && (() => {
+                                  const canStart = event.has_blueprint && event.student_count > 0
+                                  const reason = !event.has_blueprint
+                                    ? 'No blueprint assigned'
+                                    : event.student_count === 0
+                                    ? 'No students assigned'
+                                    : ''
+                                  return (
+                                    <button
+                                      onClick={() => canStart && handleStatusChange(event.id, 'start')}
+                                      disabled={!canStart}
+                                      className={`flex items-center w-full px-4 py-2 text-sm ${
+                                        canStart
+                                          ? 'text-green-700 hover:bg-green-50'
+                                          : 'text-gray-400 cursor-not-allowed'
+                                      }`}
+                                      title={reason}
+                                    >
+                                      <Rocket className="h-4 w-4 mr-3" />
+                                      Start & Deploy Labs
+                                      {!canStart && <span className="ml-auto text-xs text-gray-400">({reason})</span>}
+                                    </button>
+                                  )
+                                })()}
                                 {event.status === 'running' && (
                                   <button
                                     onClick={() => handleStatusChange(event.id, 'complete')}

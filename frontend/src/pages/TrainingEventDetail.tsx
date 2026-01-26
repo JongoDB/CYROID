@@ -447,15 +447,38 @@ export default function TrainingEventDetail() {
                 Publish
               </button>
             )}
-            {(event.status === 'draft' || event.status === 'scheduled') && (
-              <button
-                onClick={() => handleStatusChange('start', true)}
-                className="inline-flex items-center px-3 py-1.5 border border-green-300 text-sm font-medium rounded text-green-700 bg-green-50 hover:bg-green-100"
-              >
-                <Rocket className="h-4 w-4 mr-1" />
-                Start & Deploy Labs
-              </button>
-            )}
+            {(event.status === 'draft' || event.status === 'scheduled') && (() => {
+              const hasStudents = event.participants.some(p => p.role === 'student')
+              const hasBlueprint = !!event.blueprint_id
+              const canStart = hasStudents && hasBlueprint
+              const tooltip = !hasBlueprint
+                ? 'Assign a blueprint to this event first'
+                : !hasStudents
+                ? 'Add at least one student participant first'
+                : ''
+              return (
+                <div className="relative group">
+                  <button
+                    onClick={() => canStart && handleStatusChange('start', true)}
+                    disabled={!canStart}
+                    className={`inline-flex items-center px-3 py-1.5 border text-sm font-medium rounded ${
+                      canStart
+                        ? 'border-green-300 text-green-700 bg-green-50 hover:bg-green-100 cursor-pointer'
+                        : 'border-gray-200 text-gray-400 bg-gray-50 cursor-not-allowed'
+                    }`}
+                  >
+                    <Rocket className="h-4 w-4 mr-1" />
+                    Start & Deploy Labs
+                  </button>
+                  {!canStart && (
+                    <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-1.5 bg-gray-900 text-white text-xs rounded shadow-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10">
+                      {tooltip}
+                      <div className="absolute top-full left-1/2 transform -translate-x-1/2 border-4 border-transparent border-t-gray-900" />
+                    </div>
+                  )}
+                </div>
+              )
+            })()}
             {event.status === 'running' && (
               <button
                 onClick={() => handleStatusChange('complete')}

@@ -94,6 +94,11 @@ def build_event_response(event: TrainingEvent, db: Session) -> dict:
         EventParticipant.event_id == event.id
     ).count()
 
+    student_count = db.query(EventParticipant).filter(
+        EventParticipant.event_id == event.id,
+        EventParticipant.role == "student"
+    ).count()
+
     blueprint_name = None
     if event.blueprint_id:
         blueprint = db.query(RangeBlueprint).filter(
@@ -108,6 +113,7 @@ def build_event_response(event: TrainingEvent, db: Session) -> dict:
     return {
         **{c.name: getattr(event, c.name) for c in event.__table__.columns},
         "participant_count": participant_count,
+        "student_count": student_count,
         "blueprint_name": blueprint_name,
         "created_by_username": created_by_username,
     }
@@ -233,6 +239,10 @@ def list_events(
         participant_count = db.query(EventParticipant).filter(
             EventParticipant.event_id == event.id
         ).count()
+        student_count = db.query(EventParticipant).filter(
+            EventParticipant.event_id == event.id,
+            EventParticipant.role == "student"
+        ).count()
         results.append(EventListResponse(
             id=event.id,
             name=event.name,
@@ -247,6 +257,7 @@ def list_events(
             tags=event.tags,
             allowed_roles=event.allowed_roles,
             participant_count=participant_count,
+            student_count=student_count,
             has_blueprint=event.blueprint_id is not None,
             created_by_id=event.created_by_id,
             created_at=event.created_at,
@@ -288,6 +299,10 @@ def get_my_events(
         participant_count = db.query(EventParticipant).filter(
             EventParticipant.event_id == event.id
         ).count()
+        student_count = db.query(EventParticipant).filter(
+            EventParticipant.event_id == event.id,
+            EventParticipant.role == "student"
+        ).count()
 
         # Get the current user's range_id for this event
         participant = db.query(EventParticipant).filter(
@@ -310,6 +325,7 @@ def get_my_events(
             tags=event.tags,
             allowed_roles=event.allowed_roles,
             participant_count=participant_count,
+            student_count=student_count,
             has_blueprint=event.blueprint_id is not None,
             created_by_id=event.created_by_id,
             created_at=event.created_at,
