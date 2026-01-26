@@ -104,7 +104,9 @@ def update_blueprint(
 
 @router.delete("/{blueprint_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_blueprint(blueprint_id: UUID, db: DBSession, current_user: CurrentUser):
-    """Delete a blueprint. Fails if instances exist."""
+    """Delete a blueprint and its associated content. Fails if instances exist."""
+    from cyroid.models.content import Content
+
     blueprint = db.query(RangeBlueprint).filter(RangeBlueprint.id == blueprint_id).first()
     if not blueprint:
         raise HTTPException(status_code=404, detail="Blueprint not found")
@@ -118,6 +120,17 @@ def delete_blueprint(blueprint_id: UUID, db: DBSession, current_user: CurrentUse
             status_code=400,
             detail=f"Cannot delete blueprint with {instance_count} active instances"
         )
+
+    # Delete associated content (static content is owned by the blueprint)
+    if blueprint.content_ids:
+        for content_id_str in blueprint.content_ids:
+            try:
+                content_id = UUID(content_id_str)
+                content = db.query(Content).filter(Content.id == content_id).first()
+                if content:
+                    db.delete(content)
+            except (ValueError, TypeError):
+                pass  # Skip invalid UUIDs
 
     db.delete(blueprint)
     db.commit()

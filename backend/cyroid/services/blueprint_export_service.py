@@ -1323,14 +1323,25 @@ class BlueprintExportService:
             # ============================================================
             # Create the Blueprint
             # ============================================================
+            # Build content_ids list - include imported content for static reference
+            blueprint_content_ids: List[str] = []
+            if content_id:
+                blueprint_content_ids.append(str(content_id))
+
+            # Also update config's content_ids so deploy uses the static reference
+            config_dict = export_data.blueprint.config.model_dump()
+            if content_id:
+                config_dict["content_ids"] = blueprint_content_ids
+
             blueprint = RangeBlueprint(
                 name=blueprint_name,
                 description=export_data.blueprint.description,
-                config=export_data.blueprint.config.model_dump(),
+                config=config_dict,
                 base_subnet_prefix=export_data.blueprint.base_subnet_prefix,
                 version=export_data.blueprint.version,
                 next_offset=0,  # Reset offset for new instance
                 created_by=user.id,
+                content_ids=blueprint_content_ids,  # Link imported content
             )
             db.add(blueprint)
             db.commit()
