@@ -14,10 +14,6 @@ export default function DeployInstanceModal({ blueprint, onClose, onDeploy }: Pr
   const [autoDeploy, setAutoDeploy] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
-  const nextSubnet = `${blueprint.base_subnet_prefix.split('.')[0]}.${
-    parseInt(blueprint.base_subnet_prefix.split('.')[1]) + blueprint.next_offset
-  }`;
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
@@ -72,12 +68,6 @@ export default function DeployInstanceModal({ blueprint, onClose, onDeploy }: Pr
               <label htmlFor="autoDeploy" className="ml-2 block text-sm text-gray-700">
                 Auto-deploy after creation
               </label>
-            </div>
-
-            <div className="bg-gray-50 rounded-md p-3">
-              <p className="text-sm text-gray-600">
-                <span className="font-medium">Subnet:</span> {nextSubnet}.x.x (auto-assigned)
-              </p>
             </div>
 
             <div className="flex justify-end space-x-3 pt-4">
