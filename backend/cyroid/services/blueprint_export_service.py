@@ -34,6 +34,7 @@ from cyroid.models.base_image import BaseImage
 from cyroid.models.golden_image import GoldenImage
 from cyroid.models.snapshot import Snapshot
 from cyroid.models.content import Content, ContentAsset
+from cyroid.models.artifact import Artifact
 from cyroid.models.user import User
 from cyroid.config import get_settings
 from cyroid.schemas.blueprint import BlueprintConfig
@@ -45,6 +46,7 @@ from cyroid.schemas.blueprint_export import (
     DockerfileProjectData,
     ContentExportData,
     ContentAssetExportData,
+    ArtifactExportData,
     BlueprintExportOptions,
     BlueprintImportValidation,
     BlueprintImportOptions,
@@ -304,6 +306,73 @@ class BlueprintExportService:
             raise
 
     # =========================================================================
+    # Artifact Collection Methods (v4.0)
+    # =========================================================================
+
+    def _collect_artifacts(
+        self,
+        artifact_ids: List[str],
+        temp_dir: Path,
+        db: Session,
+    ) -> Tuple[List[ArtifactExportData], List[str]]:
+        """
+        Collect artifacts and download them to temp directory.
+
+        Args:
+            artifact_ids: List of artifact UUIDs to export
+            temp_dir: Temporary directory to store files
+            db: Database session
+
+        Returns:
+            Tuple of (artifact_data_list, file_paths)
+        """
+        from cyroid.services.storage_service import get_storage_service
+
+        artifacts_data: List[ArtifactExportData] = []
+        file_paths: List[str] = []
+
+        # Create artifacts directory
+        artifacts_dir = temp_dir / "artifacts"
+        artifacts_dir.mkdir(exist_ok=True)
+
+        storage = get_storage_service()
+
+        for artifact_id in artifact_ids:
+            try:
+                artifact = db.query(Artifact).filter(Artifact.id == UUID(artifact_id)).first()
+                if not artifact:
+                    logger.warning(f"Artifact {artifact_id} not found")
+                    continue
+
+                # Generate archive path
+                archive_filename = f"{artifact.sha256_hash[:8]}_{artifact.name}"
+                archive_path = f"artifacts/{archive_filename}"
+                local_path = artifacts_dir / archive_filename
+
+                # Download from MinIO
+                try:
+                    storage.client.fget_object(storage.bucket, artifact.file_path, str(local_path))
+                    file_paths.append(str(local_path))
+
+                    artifacts_data.append(ArtifactExportData(
+                        name=artifact.name,
+                        description=artifact.description,
+                        category=artifact.category.value if hasattr(artifact.category, 'value') else str(artifact.category),
+                        sha256_hash=artifact.sha256_hash,
+                        file_size=artifact.file_size,
+                        archive_path=archive_path,
+                    ))
+                    logger.debug(f"Collected artifact: {artifact.name}")
+
+                except Exception as e:
+                    logger.warning(f"Could not download artifact {artifact.name}: {e}")
+
+            except (ValueError, TypeError) as e:
+                logger.warning(f"Invalid artifact ID {artifact_id}: {e}")
+
+        return artifacts_data, file_paths
+
+    # =========================================================================
     # Image Building Methods
     # =========================================================================
 
@@ -444,6 +513,42 @@ class BlueprintExportService:
 
         try:
             # ============================================================
+            # Handle MSEL option (v4.0)
+            # ============================================================
+            export_config = config
+            msel_included = False
+
+            if hasattr(config, 'msel') and config.msel:
+                if options.include_msel:
+                    msel_included = True
+                else:
+                    # Create a copy of config without MSEL
+                    config_dict = config.model_dump()
+                    config_dict['msel'] = None
+                    export_config = BlueprintConfig.model_validate(config_dict)
+                    logger.info("MSEL excluded from export per options")
+
+            # ============================================================
+            # Collect Artifacts (v4.0)
+            # ============================================================
+            artifacts_data: List[ArtifactExportData] = []
+            artifact_files: List[str] = []
+
+            if options.include_artifacts:
+                # Get artifact IDs from blueprint config if available
+                artifact_ids = []
+                if hasattr(config, 'artifact_ids') and config.artifact_ids:
+                    artifact_ids = config.artifact_ids
+                elif hasattr(blueprint, 'artifact_ids') and blueprint.artifact_ids:
+                    artifact_ids = blueprint.artifact_ids
+
+                if artifact_ids:
+                    artifacts_data, artifact_files = self._collect_artifacts(
+                        artifact_ids, temp_path, db
+                    )
+                    logger.info(f"Collected {len(artifacts_data)} artifacts for export")
+
+            # ============================================================
             # Collect Dockerfiles (v3.0)
             # ============================================================
             dockerfiles: List[DockerfileProjectData] = []
@@ -493,23 +598,31 @@ class BlueprintExportService:
                 name=blueprint.name,
                 description=blueprint.description,
                 version=blueprint.version,
-                base_subnet_prefix=blueprint.base_subnet_prefix,
-                next_offset=blueprint.next_offset,
-                config=config,
+                base_subnet_prefix=blueprint.base_subnet_prefix or "10.0.0.0/8",
+                next_offset=blueprint.next_offset or 0,
+                config=export_config,  # Use export_config which may have MSEL stripped
                 student_guide_id=str(content_id) if content_id else None,
             )
 
-            # Build export structure
+            # Get CYROID version
+            try:
+                cyroid_version = get_settings().app_version
+            except Exception:
+                cyroid_version = None
+
+            # Build export structure (v4.0)
             export_data = BlueprintExportFull(
                 manifest=BlueprintExportManifest(
-                    version="3.0",  # v3.0 for Dockerfile/Content support
+                    version="4.0",  # v4.0: Unified Range Blueprints
                     export_type="blueprint",
                     created_at=datetime.utcnow(),
                     created_by=user.username,
+                    cyroid_version=cyroid_version,
                     blueprint_name=blueprint.name,
-                    template_count=0,  # Deprecated
+                    msel_included=msel_included,
                     dockerfile_count=len(dockerfiles),
                     content_included=content_data is not None,
+                    artifact_count=len(artifacts_data),
                     docker_images_included=options.include_docker_images,
                     checksums={},  # Will be computed after writing files
                 ),
@@ -517,6 +630,7 @@ class BlueprintExportService:
                 templates=[],  # Deprecated
                 dockerfiles=dockerfiles,
                 content=content_data,
+                artifacts=artifacts_data,
             )
 
             # Write blueprint.json
@@ -563,8 +677,11 @@ class BlueprintExportService:
                         arcname = os.path.relpath(file_path, temp_dir)
                         zf.write(file_path, arcname)
 
-            logger.info(f"Created blueprint export: {archive_path} "
-                       f"(dockerfiles={len(dockerfiles)}, content={'yes' if content_data else 'no'})")
+            logger.info(f"Created blueprint export v4.0: {archive_path} "
+                       f"(msel={'yes' if msel_included else 'no'}, "
+                       f"dockerfiles={len(dockerfiles)}, "
+                       f"content={'yes' if content_data else 'no'}, "
+                       f"artifacts={len(artifacts_data)})")
             return Path(archive_path), filename
 
         finally:
@@ -579,26 +696,114 @@ class BlueprintExportService:
         """
         Extract and parse a blueprint export archive.
 
+        Supports multiple formats:
+        - v4.0: Unified Range Blueprints (blueprint.json with version "4.0")
+        - v3.0: Blueprint Export (blueprint.json with version "3.0")
+        - v2.0: Range Export (range.json) - converted to blueprint format
+
         Returns:
             Tuple of (export_data, temp_dir_path)
             Caller is responsible for cleaning up temp_dir_path.
         """
         temp_dir = tempfile.mkdtemp(prefix="cyroid-blueprint-import-")
 
-        # Extract archive
-        with zipfile.ZipFile(archive_path, "r") as zf:
-            zf.extractall(temp_dir)
+        # Handle both ZIP and tar.gz archives
+        archive_str = str(archive_path)
+        if archive_str.endswith('.tar.gz') or archive_str.endswith('.tgz'):
+            import tarfile
+            with tarfile.open(archive_path, "r:gz") as tf:
+                tf.extractall(temp_dir)
+        else:
+            with zipfile.ZipFile(archive_path, "r") as zf:
+                zf.extractall(temp_dir)
 
-        # Read the main blueprint JSON
+        # Check for v2.0 Range Export format (uses range.json)
+        range_json_path = os.path.join(temp_dir, "range.json")
         blueprint_json_path = os.path.join(temp_dir, "blueprint.json")
-        if not os.path.exists(blueprint_json_path):
-            shutil.rmtree(temp_dir, ignore_errors=True)
-            raise ValueError("Archive missing blueprint.json")
 
-        with open(blueprint_json_path, "r") as f:
-            data = json.load(f)
+        if os.path.exists(range_json_path) and not os.path.exists(blueprint_json_path):
+            # Convert v2.0 Range Export to Blueprint format
+            logger.info("Detected v2.0 Range Export format, converting to blueprint")
+            data = self._convert_range_export_to_blueprint(range_json_path)
+        elif os.path.exists(blueprint_json_path):
+            with open(blueprint_json_path, "r") as f:
+                data = json.load(f)
+        else:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            raise ValueError("Archive missing blueprint.json or range.json")
 
         return BlueprintExportFull.model_validate(data), Path(temp_dir)
+
+    def _convert_range_export_to_blueprint(self, range_json_path: str) -> dict:
+        """
+        Convert v2.0 Range Export format to Blueprint format.
+
+        Range exports have a different structure focused on range instances,
+        this converts them to the blueprint format for import.
+        """
+        with open(range_json_path, "r") as f:
+            range_data = json.load(f)
+
+        # Extract the relevant fields from range export
+        # Range export format has: manifest, range, networks, vms, msel, artifacts, etc.
+        range_info = range_data.get("range", {})
+        networks = range_data.get("networks", [])
+        vms = range_data.get("vms", [])
+        msel_data = range_data.get("msel")
+
+        # Build config similar to BlueprintConfig
+        config = {
+            "networks": networks,
+            "vms": vms,
+            "msel": msel_data,
+        }
+
+        # Build manifest
+        manifest = {
+            "version": "2.0",  # Mark as converted from v2.0
+            "export_type": "blueprint",
+            "created_at": range_data.get("manifest", {}).get("created_at", datetime.utcnow().isoformat()),
+            "created_by": range_data.get("manifest", {}).get("created_by"),
+            "blueprint_name": range_info.get("name", "Imported Range"),
+            "msel_included": msel_data is not None,
+            "dockerfile_count": 0,
+            "content_included": False,
+            "artifact_count": len(range_data.get("artifacts", [])),
+            "docker_images_included": False,
+            "checksums": {},
+        }
+
+        # Build blueprint data
+        blueprint = {
+            "name": range_info.get("name", "Imported Range"),
+            "description": range_info.get("description"),
+            "version": 1,
+            "base_subnet_prefix": "10.0.0.0/8",
+            "next_offset": 0,
+            "config": config,
+            "student_guide_id": None,
+        }
+
+        # Convert artifacts if present
+        artifacts = []
+        for artifact in range_data.get("artifacts", []):
+            artifacts.append({
+                "name": artifact.get("name"),
+                "description": artifact.get("description"),
+                "category": artifact.get("category", "tool"),
+                "sha256_hash": artifact.get("sha256_hash", ""),
+                "file_size": artifact.get("file_size", 0),
+                "archive_path": artifact.get("archive_path", ""),
+            })
+
+        return {
+            "manifest": manifest,
+            "blueprint": blueprint,
+            "templates": [],
+            "dockerfiles": [],
+            "content": None,
+            "artifacts": artifacts,
+        }
 
     def _read_archive(self, archive_path: Path) -> BlueprintExportFull:
         """Read and parse a blueprint export archive (convenience method)."""
@@ -614,6 +819,8 @@ class BlueprintExportService:
         """
         Validate a blueprint import archive and detect conflicts.
 
+        Supports v2.0 (Range Export), v3.0, and v4.0 formats.
+
         Returns:
             BlueprintImportValidation with validation status and conflicts
         """
@@ -623,6 +830,9 @@ class BlueprintExportService:
         dockerfile_conflicts: List[str] = []
         missing_images: List[str] = []
         content_conflict: Optional[str] = None
+        included_artifacts: List[str] = []
+        artifact_conflicts: List[str] = []
+        msel_included = False
 
         try:
             export_data = self._read_archive(archive_path)
@@ -636,6 +846,12 @@ class BlueprintExportService:
         blueprint_name = export_data.blueprint.name
         manifest_version = export_data.manifest.version
         conflicts: List[str] = []
+
+        # Add warning for legacy formats
+        if manifest_version == "2.0":
+            warnings.append("This is a v2.0 Range Export format - converted to blueprint format for import")
+        elif manifest_version == "3.0":
+            warnings.append("This is a v3.0 Blueprint format - consider re-exporting as v4.0 for full feature support")
 
         # Check blueprint name conflict
         existing = db.query(RangeBlueprint).filter(
@@ -691,6 +907,29 @@ class BlueprintExportService:
                 content_conflict = f"Content '{export_data.content.title}' already exists (id={existing_content.id})"
                 warnings.append(content_conflict)
 
+        # ============================================================
+        # Validate MSEL (v4.0)
+        # ============================================================
+        if hasattr(export_data.manifest, 'msel_included'):
+            msel_included = export_data.manifest.msel_included
+        elif hasattr(config, 'msel') and config.msel:
+            msel_included = True
+
+        # ============================================================
+        # Validate Artifacts (v4.0)
+        # ============================================================
+        if hasattr(export_data, 'artifacts') and export_data.artifacts:
+            for artifact in export_data.artifacts:
+                included_artifacts.append(artifact.name)
+
+                # Check for artifact with same hash
+                existing_artifact = db.query(Artifact).filter(
+                    Artifact.sha256_hash == artifact.sha256_hash
+                ).first()
+                if existing_artifact:
+                    artifact_conflicts.append(artifact.name)
+                    warnings.append(f"Artifact '{artifact.name}' already exists (hash match)")
+
         is_valid = len(errors) == 0
 
         return BlueprintImportValidation(
@@ -707,6 +946,9 @@ class BlueprintExportService:
             missing_images=missing_images,
             content_included=content_included,
             content_conflict=content_conflict,
+            msel_included=msel_included,
+            included_artifacts=included_artifacts,
+            artifact_conflicts=artifact_conflicts,
         )
 
     # =========================================================================

@@ -14,8 +14,10 @@ class RangeBlueprint(Base, UUIDMixin, TimestampMixin):
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     version: Mapped[int] = mapped_column(Integer, default=1)
     config: Mapped[dict] = mapped_column(JSON)  # networks, VMs, MSEL, router
-    base_subnet_prefix: Mapped[str] = mapped_column(String(20))  # e.g., "10.100"
-    next_offset: Mapped[int] = mapped_column(Integer, default=0)
+
+    # DEPRECATED: No longer used with DinD isolation - kept for backward compatibility
+    base_subnet_prefix: Mapped[Optional[str]] = mapped_column(String(20), nullable=True, default="10.0.0.0/8")
+    next_offset: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, default=0)
 
     # Linked content for training events (auto-selected when blueprint chosen)
     content_ids: Mapped[Optional[List[str]]] = mapped_column(JSON, default=list)

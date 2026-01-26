@@ -40,11 +40,12 @@ def create_blueprint(data: BlueprintCreate, db: DBSession, current_user: Current
     config = extract_config_from_range(db, data.range_id)
 
     # Create blueprint
+    # Note: base_subnet_prefix and next_offset are deprecated with DinD isolation
     blueprint = RangeBlueprint(
         name=data.name,
         description=data.description,
         config=config.model_dump(),
-        base_subnet_prefix=data.base_subnet_prefix,
+        base_subnet_prefix=data.base_subnet_prefix,  # Optional, kept for backward compatibility
         created_by=current_user.id,
         version=1,
         next_offset=0,
@@ -188,6 +189,10 @@ def export_blueprint(
     blueprint_id: UUID,
     db: DBSession,
     current_user: CurrentUser,
+    include_msel: bool = Query(
+        default=True,
+        description="Include MSEL (Master Scenario Events List) injects"
+    ),
     include_dockerfiles: bool = Query(
         default=True,
         description="Include Dockerfiles from /data/images/ for referenced images"
@@ -200,33 +205,43 @@ def export_blueprint(
         default=True,
         description="Include Content Library items (student guides, etc.)"
     ),
+    include_artifacts: bool = Query(
+        default=False,
+        description="Include artifact files (tools, scripts, evidence templates)"
+    ),
     content_id: str = Query(
         default=None,
         description="Specific Content Library ID to include (UUID)"
     ),
 ):
     """
-    Export a blueprint as a portable ZIP package (v3.0).
+    Export a blueprint as a portable ZIP package (v4.0 unified format).
 
     The package includes:
-    - Blueprint configuration (networks, VMs, MSEL)
-    - Dockerfiles from /data/images/ for referenced images
-    - Content Library items (student guides, etc.)
+    - Blueprint configuration (networks, VMs)
+    - MSEL injects (optional)
+    - Dockerfiles from /data/images/ for referenced images (optional)
+    - Content Library items (optional)
+    - Artifact files (optional)
     - Manifest with checksums
 
     Options:
+    - include_msel: Include MSEL injects
     - include_dockerfiles: Include Dockerfile projects for custom images
     - include_docker_images: Include Docker image tarballs (very large)
     - include_content: Include Content Library items
+    - include_artifacts: Include artifact files
     - content_id: Specific Content ID to include
     """
     export_service = get_blueprint_export_service()
 
     try:
         options = BlueprintExportOptions(
+            include_msel=include_msel,
             include_dockerfiles=include_dockerfiles,
             include_docker_images=include_docker_images,
             include_content=include_content,
+            include_artifacts=include_artifacts,
         )
 
         # Parse content_id if provided

@@ -1408,9 +1408,14 @@ def teardown_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
     return range_obj
 
 
-@router.get("/{range_id}/export", response_model=RangeTemplateExport)
+@router.get("/{range_id}/export", response_model=RangeTemplateExport, deprecated=True)
 def export_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
-    """Export a range as a reusable template."""
+    """
+    Export a range as a reusable template.
+
+    DEPRECATED: Use POST /blueprints to save as blueprint, then GET /blueprints/{id}/export.
+    This endpoint will be removed in a future version.
+    """
     range_obj = db.query(Range).filter(Range.id == range_id).first()
     if not range_obj:
         raise HTTPException(
@@ -1462,13 +1467,18 @@ def export_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
     )
 
 
-@router.post("/import", response_model=RangeDetailResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/import", response_model=RangeDetailResponse, status_code=status.HTTP_201_CREATED, deprecated=True)
 def import_range(
     import_data: RangeTemplateImport,
     db: DBSession,
     current_user: CurrentUser,
 ):
-    """Import a range from a template."""
+    """
+    Import a range from a template.
+
+    DEPRECATED: Use POST /blueprints/import instead.
+    This endpoint will be removed in a future version.
+    """
     template = import_data.template
     range_name = import_data.name_override or template.name
 
@@ -1720,7 +1730,7 @@ def get_redis_client():
     return redis.from_url(settings.redis_url)
 
 
-@router.post("/{range_id}/export/full")
+@router.post("/{range_id}/export/full", deprecated=True)
 def export_range_full(
     range_id: UUID,
     options: ExportRequest,
@@ -1730,6 +1740,9 @@ def export_range_full(
 ):
     """
     Export range with full configuration (all VM settings, templates, MSEL, artifacts).
+
+    DEPRECATED: Use POST /blueprints to save as blueprint, then GET /blueprints/{id}/export.
+    This endpoint will be removed in a future version.
 
     For online exports (include_docker_images=False): Returns file directly.
     For offline exports (include_docker_images=True): Starts background job and returns job ID.
@@ -1866,9 +1879,13 @@ def _run_offline_export(range_id: UUID, job_id: str, options: ExportRequest, use
         db.close()
 
 
-@router.get("/export/jobs/{job_id}", response_model=ExportJobStatus)
+@router.get("/export/jobs/{job_id}", response_model=ExportJobStatus, deprecated=True)
 def get_export_job_status(job_id: str, current_user: CurrentUser):
-    """Get status of a background export job."""
+    """
+    Get status of a background export job.
+
+    DEPRECATED: Range export endpoints are deprecated. Use blueprint export instead.
+    """
     redis_client = get_redis_client()
     job_data = redis_client.get(f"export_job:{job_id}")
 
@@ -1878,13 +1895,16 @@ def get_export_job_status(job_id: str, current_user: CurrentUser):
     return ExportJobStatus.model_validate_json(job_data)
 
 
-@router.get("/export/jobs/{job_id}/download")
+@router.get("/export/jobs/{job_id}/download", deprecated=True)
 def download_export(
     job_id: str,
     token: str = None,
     db: Session = Depends(get_db),
 ):
-    """Download a completed export archive.
+    """
+    Download a completed export archive.
+
+    DEPRECATED: Range export endpoints are deprecated. Use blueprint export instead.
 
     Uses query param token for direct browser downloads of large files.
     This avoids loading multi-GB files into memory as blobs.
@@ -1937,7 +1957,7 @@ def download_export(
     )
 
 
-@router.post("/import/validate", response_model=ImportValidationResult)
+@router.post("/import/validate", response_model=ImportValidationResult, deprecated=True)
 async def validate_import(
     file: UploadFile = File(...),
     db: DBSession = None,
@@ -1945,6 +1965,9 @@ async def validate_import(
 ):
     """
     Validate an import archive and preview conflicts.
+
+    DEPRECATED: Use POST /blueprints/import/validate instead.
+    This endpoint will be removed in a future version.
 
     Upload a .zip or .tar.gz export archive to validate before importing.
     Returns validation results including any conflicts with existing templates or networks.
@@ -1968,7 +1991,7 @@ async def validate_import(
             os.unlink(temp_file.name)
 
 
-@router.post("/import/execute", response_model=ImportResult)
+@router.post("/import/execute", response_model=ImportResult, deprecated=True)
 async def execute_import(
     file: UploadFile = File(...),
     name_override: str = None,
@@ -1981,6 +2004,9 @@ async def execute_import(
 ):
     """
     Execute a range import from an archive.
+
+    DEPRECATED: Use POST /blueprints/import instead.
+    This endpoint will be removed in a future version.
 
     Upload a .zip or .tar.gz export archive to import.
 
@@ -2023,13 +2049,16 @@ async def execute_import(
             os.unlink(temp_file.name)
 
 
-@router.post("/import/load-images")
+@router.post("/import/load-images", deprecated=True)
 async def load_docker_images(
     file: UploadFile = File(...),
     current_user: CurrentUser = None,
 ):
     """
     Load Docker images from an offline export archive.
+
+    DEPRECATED: Use POST /blueprints/import/load-images instead.
+    This endpoint will be removed in a future version.
 
     Use this endpoint to pre-load Docker images before importing a range
     on an air-gapped system.

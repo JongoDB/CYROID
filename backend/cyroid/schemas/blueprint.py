@@ -58,7 +58,8 @@ class BlueprintCreate(BaseModel):
     range_id: UUID
     name: str = Field(..., min_length=1, max_length=100)
     description: Optional[str] = None
-    base_subnet_prefix: str = Field(..., pattern=r"^\d{1,3}\.\d{1,3}$")  # e.g., "10.100"
+    # DEPRECATED: No longer used with DinD isolation - kept for backward compatibility
+    base_subnet_prefix: Optional[str] = Field(default=None, pattern=r"^\d{1,3}\.\d{1,3}(\.\d{1,3}\.\d{1,3}/\d{1,2})?$")
 
 
 class BlueprintUpdate(BaseModel):
@@ -72,8 +73,9 @@ class BlueprintResponse(BaseModel):
     name: str
     description: Optional[str]
     version: int
-    base_subnet_prefix: str
-    next_offset: int
+    # DEPRECATED: No longer used with DinD isolation - kept for backward compatibility
+    base_subnet_prefix: Optional[str] = None
+    next_offset: Optional[int] = 0
     content_ids: List[str] = []  # Linked content for training events
     created_by: Optional[UUID] = None  # Nullable for seed blueprints
     created_at: datetime
