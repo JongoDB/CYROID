@@ -1,4 +1,19 @@
 # CYROID Red Team Training Lab Blueprint
+#
+# Required Docker Images:
+#   - cyroid/kali-attack:latest        (build from data/images/kali-attack/)
+#   - cyroid/redteam-lab-wordpress:latest  (build from data/images/redteam-lab-wordpress/)
+#   - cyroid/redteam-lab-fileserver:latest (build from data/images/redteam-lab-fileserver/)
+#   - cyroid/redteam-lab-workstation:latest (build from data/images/redteam-lab-workstation/)
+#   - cyroid/samba-dc:latest           (build from data/images/samba-dc/)
+#   - alpine:latest                    (pulled from Docker Hub)
+#
+# Build all images:
+#   for dir in data/images/*/; do
+#     name=$(basename "$dir")
+#     docker build -t "cyroid/$name:latest" "$dir"
+#   done
+#
 seed_id: red-team-training-lab
 name: Red Team Training Lab
 description: |
