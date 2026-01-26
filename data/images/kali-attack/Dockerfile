@@ -1,14 +1,14 @@
 # CYROID Kali Attack Box
 # Full offensive security toolkit with KasmVNC desktop access
 #
-# Based on kasmweb/core-kali-rolling with additional penetration testing tools
+# Based on kasmweb/kali-rolling-desktop (includes Firefox) with additional penetration testing tools
 # See: https://github.com/kasmtech/workspaces-images
 #
 # Build: docker build -t cyroid/kali-attack:latest .
 # Run: docker run -d -p 6901:6901 -e VNC_PW=password cyroid/kali-attack:latest
 
 ARG BASE_TAG="1.15.0"
-FROM kasmweb/core-kali-rolling:${BASE_TAG}
+FROM kasmweb/kali-rolling-desktop:${BASE_TAG}
 
 LABEL maintainer="CYROID <https://github.com/cyroid>"
 LABEL description="CYROID Kali Attack Box - Full offensive security toolkit"
