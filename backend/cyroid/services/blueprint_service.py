@@ -265,6 +265,7 @@ def create_range_from_blueprint(
 
     # Link student guide from blueprint's content_ids (static reference, not duplicated)
     # Content is created during blueprint import and shared across all range instances
+    student_guide_linked = False
     if config.content_ids:
         from uuid import UUID as UUID_type
         from cyroid.models.content import Content
@@ -275,9 +276,30 @@ def create_range_from_blueprint(
                 content_uuid = UUID_type(cid)
                 if db.query(Content).filter(Content.id == content_uuid).first():
                     range_obj.student_guide_id = content_uuid
+                    student_guide_linked = True
                     break
             except (ValueError, TypeError):
                 continue
+
+    # Fallback: Create content from MSEL walkthrough for blueprints without content_ids
+    # This maintains backward compatibility with existing blueprints
+    if not student_guide_linked and config.msel and config.msel.walkthrough:
+        from cyroid.models.content import Content, ContentType
+
+        walkthrough_title = config.msel.walkthrough.get('title', f"{range_obj.name} - Student Guide")
+        content = Content(
+            title=walkthrough_title,
+            description=f"Auto-generated from blueprint deployment",
+            content_type=ContentType.STUDENT_GUIDE,
+            body_markdown="",
+            walkthrough_data=config.msel.walkthrough,
+            created_by_id=created_by,
+            tags=["auto-generated", "blueprint-walkthrough"],
+            is_published=True,
+        )
+        db.add(content)
+        db.flush()
+        range_obj.student_guide_id = content.id
 
     db.flush()
     return range_obj
