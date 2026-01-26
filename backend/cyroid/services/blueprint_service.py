@@ -279,6 +279,7 @@ def create_range_from_blueprint(
                 created_by_id=created_by,
                 tags=["auto-generated", "blueprint-walkthrough"],
                 is_published=True,
+                source_range_id=range_obj.id,  # Track source for cleanup on range delete
             )
             db.add(content)
             db.flush()

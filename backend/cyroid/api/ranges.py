@@ -389,6 +389,12 @@ def delete_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
         logger.warning(f"Failed to cleanup Docker resources for range {range_id}: {e}")
         # Continue with database deletion even if Docker cleanup fails
 
+    # Delete auto-generated content associated with this range (Issue #152)
+    # This cleans up content created during blueprint deployment
+    deleted_content = db.query(Content).filter(Content.source_range_id == range_id).delete()
+    if deleted_content > 0:
+        logger.info(f"Deleted {deleted_content} auto-generated content item(s) for range {range_id}")
+
     # Delete associated range instances (from blueprint deployments) to avoid FK constraint (Issue #73)
     db.query(RangeInstance).filter(RangeInstance.range_id == range_id).delete()
 

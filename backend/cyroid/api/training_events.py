@@ -565,11 +565,13 @@ def start_event(
 def _delete_event_ranges(event_id: UUID, db: Session) -> int:
     """Delete all ranges associated with event participants.
 
+    Also cleans up auto-generated content linked to those ranges (Issue #152).
     Returns the number of ranges deleted.
     """
     import asyncio
     from cyroid.models.range import Range
     from cyroid.models.blueprint import RangeInstance
+    from cyroid.models.content import Content
     from cyroid.services.docker_service import get_docker_service
     from cyroid.services.dind_service import get_dind_service
 
@@ -607,6 +609,11 @@ def _delete_event_ranges(event_id: UUID, db: Session) -> int:
 
             except Exception as e:
                 logger.warning(f"Failed to cleanup Docker for range {range_id}: {e}")
+
+            # Delete auto-generated content for this range (Issue #152)
+            deleted_content = db.query(Content).filter(Content.source_range_id == range_id).delete()
+            if deleted_content > 0:
+                logger.info(f"Deleted {deleted_content} auto-generated content item(s) for range {range_id}")
 
             # Delete range instances (FK constraint)
             db.query(RangeInstance).filter(RangeInstance.range_id == range_id).delete()

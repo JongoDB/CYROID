@@ -48,8 +48,16 @@ class Content(Base, UUIDMixin, TimestampMixin):
     # Publishing
     is_published: Mapped[bool] = mapped_column(Boolean, default=False)
 
+    # Source tracking - if content was auto-generated from a range deployment
+    # When the source range is deleted, this content should also be deleted
+    source_range_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey("ranges.id", ondelete="SET NULL"),
+        nullable=True
+    )
+
     # Relationships
     created_by_user = relationship("User", foreign_keys=[created_by_id])
+    source_range = relationship("Range", foreign_keys=[source_range_id])
     assets = relationship("ContentAsset", back_populates="content", cascade="all, delete-orphan")
 
 
