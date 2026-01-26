@@ -17,6 +17,7 @@ import {
   Edit,
   Trash2,
   CalendarCheck,
+  Loader2,
 } from 'lucide-react'
 import { trainingEventsApi, TrainingEventListItem, EventStatus } from '../services/api'
 import { useAuthStore } from '../stores/authStore'
@@ -41,6 +42,7 @@ export default function TrainingEvents() {
   const [myEventsOnly, setMyEventsOnly] = useState(false)
   const [showFilters, setShowFilters] = useState(false)
   const [activeMenu, setActiveMenu] = useState<string | null>(null)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
 
   const isInstructor = user?.roles?.includes('admin') || user?.roles?.includes('engineer')
 
@@ -79,13 +81,16 @@ export default function TrainingEvents() {
 
   async function handleDelete(id: string) {
     if (!confirm('Are you sure you want to delete this event? All associated student labs will be permanently deleted.')) return
+    setActiveMenu(null)
+    setDeletingId(id)
     try {
       await trainingEventsApi.delete(id)
       setEvents(events.filter((e) => e.id !== id))
     } catch (err) {
       console.error('Failed to delete:', err)
+    } finally {
+      setDeletingId(null)
     }
-    setActiveMenu(null)
   }
 
   async function handleStatusChange(id: string, action: 'publish' | 'start' | 'complete' | 'cancel') {
@@ -267,11 +272,14 @@ export default function TrainingEvents() {
             const statusInfo = STATUS_INFO[event.status]
             const StatusIcon = statusInfo.icon
             const canManage = user?.id === event.created_by_id || user?.roles?.includes('admin')
+            const isDeleting = deletingId === event.id
 
             return (
               <div
                 key={event.id}
-                className="bg-white shadow rounded-lg hover:shadow-md transition-shadow"
+                className={`bg-white shadow rounded-lg transition-shadow ${
+                  isDeleting ? 'opacity-50 pointer-events-none' : 'hover:shadow-md'
+                }`}
               >
                 <div className="p-4 sm:p-6">
                   <div className="flex items-start justify-between">
@@ -332,13 +340,20 @@ export default function TrainingEvents() {
                       )}
                       {canManage && (
                         <div className="relative">
-                          <button
-                            onClick={() => setActiveMenu(activeMenu === event.id ? null : event.id)}
-                            className="p-2 rounded-full hover:bg-gray-100"
-                          >
-                            <MoreVertical className="h-5 w-5 text-gray-400" />
-                          </button>
-                          {activeMenu === event.id && (
+                          {isDeleting ? (
+                            <div className="flex items-center px-3 py-1 text-sm text-gray-500">
+                              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                              Deleting...
+                            </div>
+                          ) : (
+                            <>
+                              <button
+                                onClick={() => setActiveMenu(activeMenu === event.id ? null : event.id)}
+                                className="p-2 rounded-full hover:bg-gray-100"
+                              >
+                                <MoreVertical className="h-5 w-5 text-gray-400" />
+                              </button>
+                              {activeMenu === event.id && (
                             <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg ring-1 ring-black ring-opacity-5 z-50">
                               <div className="py-1">
                                 <button
@@ -410,6 +425,8 @@ export default function TrainingEvents() {
                                 </div>
                               </div>
                             </div>
+                          )}
+                            </>
                           )}
                         </div>
                       )}

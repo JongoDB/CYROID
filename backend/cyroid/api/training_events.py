@@ -794,7 +794,11 @@ def add_participant(
     db: DBSession,
     current_user: CurrentUser,
 ):
-    """Add a participant to an event."""
+    """Add a participant to an event.
+
+    If the event is RUNNING and has a blueprint, and the participant is a student,
+    automatically creates and deploys a range for them.
+    """
     event = db.query(TrainingEvent).filter(TrainingEvent.id == event_id).first()
     if not event:
         raise HTTPException(status_code=404, detail="Event not found")
@@ -823,6 +827,55 @@ def add_participant(
     )
 
     db.add(participant)
+    db.flush()  # Get the participant ID before potential range creation
+
+    # If event is RUNNING with a blueprint and this is a student, deploy their range
+    if (
+        event.status == EventStatus.RUNNING
+        and event.blueprint_id
+        and data.role == "student"
+    ):
+        from cyroid.services.blueprint_service import create_range_from_blueprint
+        from cyroid.tasks.deployment import deploy_range_task
+        from cyroid.schemas.blueprint import BlueprintConfig
+
+        blueprint = db.query(RangeBlueprint).filter(RangeBlueprint.id == event.blueprint_id).first()
+        if blueprint:
+            try:
+                blueprint_config = BlueprintConfig.model_validate(blueprint.config)
+
+                # Create range for this student
+                range_name = f"{event.name} - {user.username}"
+                range_obj = create_range_from_blueprint(
+                    db=db,
+                    config=blueprint_config,
+                    range_name=range_name,
+                    base_prefix=blueprint.base_subnet_prefix or "10.0.0.0/8",
+                    offset=blueprint.next_offset or 0,
+                    created_by=current_user.id,
+                )
+
+                # Increment offset for next deployment
+                if blueprint.next_offset is None:
+                    blueprint.next_offset = 1
+                else:
+                    blueprint.next_offset += 1
+
+                # Link range to student and event
+                range_obj.assigned_to_user_id = participant.user_id
+                range_obj.training_event_id = event.id
+                participant.range_id = range_obj.id
+
+                db.flush()
+
+                # Queue deployment task
+                deploy_range_task.send(str(range_obj.id))
+                logger.info(f"Auto-deployed range '{range_name}' for late-joining student {user.username}")
+
+            except Exception as e:
+                logger.error(f"Failed to auto-deploy range for student {user.username}: {e}")
+                # Don't fail the participant addition, just log the error
+
     db.commit()
     db.refresh(participant)
 
@@ -834,6 +887,7 @@ def add_participant(
         is_confirmed=participant.is_confirmed,
         created_at=participant.created_at,
         username=user.username,
+        range_id=participant.range_id,
     )
 
 

@@ -250,7 +250,10 @@
       "Bash(git merge:*)",
       "Bash(git ls-tree:*)",
       "Bash(npm search:*)",
-      "Bash(established\" errors during development.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")"
+      "Bash(established\" errors during development.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(gh pr checks:*)",
+      "Bash(gh run rerun:*)",
+      "Bash(alembic history:*)"
     ]
   },
   "enableAllProjectMcpServers": true,
