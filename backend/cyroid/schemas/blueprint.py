@@ -50,6 +50,7 @@ class BlueprintConfig(BaseModel):
     vms: List[VMConfig]
     router: Optional[RouterConfig] = None
     msel: Optional[MSELConfig] = None
+    content_ids: Optional[List[str]] = None  # Linked content IDs for static reference
 
 
 # ============ Blueprint Schemas ============
