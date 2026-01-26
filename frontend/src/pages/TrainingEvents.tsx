@@ -96,7 +96,7 @@ export default function TrainingEvents() {
         return
       }
     } else if (action === 'cancel') {
-      if (!confirm('Are you sure you want to cancel this event? Student labs will remain until the event is deleted.')) {
+      if (!confirm('Are you sure you want to cancel this event? All student labs will be permanently deleted. The event will remain in cancelled status.')) {
         setActiveMenu(null)
         return
       }

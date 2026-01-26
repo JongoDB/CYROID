@@ -355,13 +355,11 @@ export default function TrainingEventDetail() {
               {confirmAction === 'complete' ? 'Complete Event?' : 'Cancel Event?'}
             </h3>
             <p className="text-gray-600 mb-4">
-              {confirmAction === 'complete' && rangesCount > 0 ? (
+              {rangesCount > 0 ? (
                 <>
                   This will <span className="font-semibold text-red-600">permanently delete {rangesCount} student lab{rangesCount > 1 ? 's' : ''}</span> and all associated VMs.
-                  This action cannot be undone.
+                  {confirmAction === 'cancel' && ' The event will remain in cancelled status.'}
                 </>
-              ) : confirmAction === 'cancel' ? (
-                'This will cancel the event. Student labs will remain until the event is deleted.'
               ) : (
                 `Are you sure you want to ${confirmAction} this event?`
               )}
@@ -381,7 +379,7 @@ export default function TrainingEventDetail() {
                     : 'bg-purple-600 hover:bg-purple-700'
                 }`}
               >
-                {confirmAction === 'complete' ? 'Complete & Delete Labs' : 'Cancel Event'}
+                {confirmAction === 'complete' ? 'Complete & Delete Labs' : 'Cancel & Delete Labs'}
               </button>
             </div>
           </div>
