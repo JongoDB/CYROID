@@ -3081,9 +3081,13 @@ local-hostname: {name}
 
             # Get image as tar stream from host
             # named=True preserves the image tags
-            # Calculate timeout based on image size: base 120s + 1s per 50MB (min 120s, max 1800s/30min)
+            # Calculate timeout based on image size: base 300s + 1s per 10MB (no max)
+            # Large images (15GB+) need significant time for docker load to extract layers
             image_size_mb = image_size / 1024 / 1024
-            export_timeout = min(1800, max(120, 120 + int(image_size_mb / 50)))
+            export_timeout = max(300, 300 + int(image_size_mb / 10))
+            # For very large images, ensure at least 30 minutes
+            if image_size_mb > 10000:
+                export_timeout = max(export_timeout, 1800)
             logger.info(f"Using export timeout of {export_timeout}s for {image_size_mb:.1f}MB image")
 
             # Use subprocess-based transfer to avoid Python Docker SDK blocking issues

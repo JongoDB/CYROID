@@ -13,7 +13,10 @@ RUN apt-get update && apt-get install -y \
     p7zip-full \
     genisoimage \
     iptables \
-    && rm -rf /var/lib/apt/lists/*
+    curl \
+    && rm -rf /var/lib/apt/lists/* \
+    # Install Docker CLI for subprocess-based image transfers
+    && curl -fsSL https://download.docker.com/linux/static/stable/$(uname -m)/docker-27.4.1.tgz | tar xz -C /usr/local/bin --strip-components=1 docker/docker
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt

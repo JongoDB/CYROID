@@ -25,7 +25,7 @@ from cyroid.services.event_service import EventService
 logger = logging.getLogger(__name__)
 
 
-@dramatiq.actor(max_retries=3, min_backoff=1000, time_limit=1800000)  # 30 min for large image transfers
+@dramatiq.actor(max_retries=3, min_backoff=1000, time_limit=3600000)  # 1 hour for very large image transfers (15GB+)
 def deploy_range_task(range_id: str):
     """
     Async task to deploy a range using DinD isolation.
