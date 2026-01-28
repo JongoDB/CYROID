@@ -3086,64 +3086,112 @@ local-hostname: {name}
             export_timeout = min(1800, max(120, 120 + int(image_size_mb / 50)))
             logger.info(f"Using export timeout of {export_timeout}s for {image_size_mb:.1f}MB image")
 
-            try:
-                logger.info(f"Starting image export (tags: {host_image.tags})...")
-                # Create a client with extended timeout for large image exports
-                export_client = docker.from_env(timeout=export_timeout)
-                export_image = export_client.images.get(image)
-                image_data = export_image.save(named=True)
-                logger.info(f"Image export stream created, loading into DinD at {docker_url}...")
-            except Exception as save_err:
-                logger.error(f"Failed to export image '{image}' from host: {type(save_err).__name__}: {save_err}")
-                import traceback
-                logger.error(f"Export traceback: {traceback.format_exc()}")
-                report_progress(0, image_size, 'error')
-                return False
-
-            # Wrap the generator to track progress
+            # Use subprocess-based transfer to avoid Python Docker SDK blocking issues
+            # on macOS Docker Desktop. This pipes `docker save` directly to `docker load`
+            # via the DinD container, which is more reliable for large images.
+            import subprocess
             import time
-            transferred_bytes = [0]
-            last_progress_report = [time.time()]
+
+            logger.info(f"Starting subprocess-based image transfer for '{image}'...")
+
+            # Get DinD container name for docker exec
+            dind_container = f"cyroid-range-{range_id.split('-')[0]}-{range_id[:8]}"
+            # Actually we need to find the real container name
+            try:
+                dind_containers = [c for c in self.client.containers.list()
+                                   if range_id[:8] in c.name and 'range' in c.name]
+                if dind_containers:
+                    dind_container = dind_containers[0].name
+                    logger.info(f"Found DinD container: {dind_container}")
+                else:
+                    # Fall back to using docker_url directly
+                    logger.info(f"Using DinD at {docker_url} via API")
+            except Exception as e:
+                logger.warning(f"Could not find DinD container name: {e}")
+
             start_time = time.time()
 
-            def progress_wrapper(data_generator):
-                """Wrap generator to track bytes transferred and report progress."""
-                for chunk in data_generator:
-                    transferred_bytes[0] += len(chunk)
-                    # Report progress every 2 seconds to avoid spamming
-                    now = time.time()
-                    if now - last_progress_report[0] >= 2.0:
-                        last_progress_report[0] = now
-                        if image_size > 0:
-                            pct = min(100, int((transferred_bytes[0] / image_size) * 100))
-                            elapsed = int(now - start_time)
-                            transferred_mb = transferred_bytes[0] / 1024 / 1024
-                            total_mb = image_size / 1024 / 1024
-                            report_progress(transferred_bytes[0], image_size, f'transferring:{pct}')
-                            logger.info(f"Transfer progress: {transferred_mb:.1f}/{total_mb:.1f} MB ({pct}%) - {elapsed}s elapsed")
-                    yield chunk
-
-            # Load into DinD - images.load accepts an iterator of bytes
             try:
-                logger.info(f"Loading image into DinD (this may take a while for large images)...")
-                result = range_client.images.load(progress_wrapper(image_data))
+                # Use docker save piped to docker load via DinD
+                # This runs in subprocesses which handle I/O better than the Python SDK
+                logger.info(f"Piping 'docker save {image}' to DinD load...")
+
+                # Start docker save process
+                save_proc = subprocess.Popen(
+                    ['docker', 'save', image],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    bufsize=1024*1024  # 1MB buffer
+                )
+
+                # Start docker load process in DinD container
+                load_proc = subprocess.Popen(
+                    ['docker', 'exec', '-i', dind_container, 'docker', 'load'],
+                    stdin=save_proc.stdout,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE
+                )
+
+                # Allow save_proc to receive SIGPIPE if load_proc exits
+                save_proc.stdout.close()
+
+                # Monitor progress in a separate thread
+                import threading
+                transferred = [0]
+                monitoring = [True]
+
+                def monitor_progress():
+                    last_report = time.time()
+                    while monitoring[0]:
+                        time.sleep(2)
+                        if not monitoring[0]:
+                            break
+                        elapsed = int(time.time() - start_time)
+                        # Estimate progress based on time (rough estimate)
+                        estimated_pct = min(99, int((elapsed / (image_size_mb / 40)) * 100))  # ~40MB/s estimate
+                        if time.time() - last_report >= 2.0:
+                            last_report = time.time()
+                            report_progress(int(image_size * estimated_pct / 100), image_size, f'transferring:{estimated_pct}')
+                            logger.info(f"Transfer in progress... ~{estimated_pct}% - {elapsed}s elapsed")
+
+                monitor_thread = threading.Thread(target=monitor_progress, daemon=True)
+                monitor_thread.start()
+
+                # Wait for load to complete
+                load_stdout, load_stderr = load_proc.communicate(timeout=export_timeout)
+                monitoring[0] = False
+                monitor_thread.join(timeout=2.0)
+
+                # Check results
+                if load_proc.returncode != 0:
+                    logger.error(f"Docker load failed: {load_stderr.decode()}")
+                    report_progress(0, image_size, 'error')
+                    return False
+
                 elapsed = int(time.time() - start_time)
-                logger.info(f"Image load completed in {elapsed}s")
-            except Exception as load_err:
-                logger.error(f"Failed to load image '{image}' into DinD: {type(load_err).__name__}: {load_err}")
+                logger.info(f"Subprocess transfer completed in {elapsed}s: {load_stdout.decode().strip()}")
+
+            except subprocess.TimeoutExpired:
+                logger.error(f"Image transfer timed out after {export_timeout}s")
+                save_proc.kill()
+                load_proc.kill()
+                report_progress(0, image_size, 'error')
+                return False
+            except Exception as proc_err:
+                logger.error(f"Subprocess transfer failed: {type(proc_err).__name__}: {proc_err}")
                 import traceback
-                logger.error(f"Load traceback: {traceback.format_exc()}")
-                # Check for common issues
-                if "connection" in str(load_err).lower() or "timeout" in str(load_err).lower():
-                    logger.error(f"Connection issue during image transfer - DinD may have restarted or network issue")
+                logger.error(f"Traceback: {traceback.format_exc()}")
                 report_progress(0, image_size, 'error')
                 return False
 
-            if result:
-                loaded_images = [img.tags[0] if img.tags else img.id for img in result]
-                logger.info(f"Successfully transferred to DinD: {loaded_images}")
-            else:
-                logger.info(f"Successfully transferred '{image}' to DinD (no result metadata)")
+            # Verify image exists in DinD
+            try:
+                range_client.images.get(image)
+                logger.info(f"Verified image '{image}' exists in DinD")
+            except docker.errors.ImageNotFound:
+                logger.error(f"Image '{image}' not found in DinD after transfer")
+                report_progress(0, image_size, 'error')
+                return False
 
             report_progress(image_size, image_size, 'complete')
             return True
