@@ -103,6 +103,9 @@ class Settings(BaseSettings):
     vm_storage_dir: str = os.path.join(_get_default_data_dir(), "vm-storage")
     global_shared_dir: str = os.path.join(_get_default_data_dir(), "shared")
 
+    # Catalog
+    catalog_storage_dir: str = os.path.join(_get_default_data_dir(), "catalogs")
+
     # VyOS Router Configuration
     vyos_image: str = "2stacks/vyos:1.2.0-rc11"
     management_network_name: str = "cyroid-management"

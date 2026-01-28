@@ -33,6 +33,7 @@ services:
       - ${CYROID_DATA_DIR:-/data/cyroid}/template-storage:${CYROID_DATA_DIR:-/data/cyroid}/template-storage
       - ${CYROID_DATA_DIR:-/data/cyroid}/vm-storage:${CYROID_DATA_DIR:-/data/cyroid}/vm-storage
       - ${CYROID_DATA_DIR:-/data/cyroid}/shared:${CYROID_DATA_DIR:-/data/cyroid}/shared
+      - ${CYROID_DATA_DIR:-/data/cyroid}/catalogs:${CYROID_DATA_DIR:-/data/cyroid}/catalogs
       - ./data/seed-templates:/data/seed-templates:ro
       - ./data/seed-blueprints:/data/seed-blueprints:ro
       - ./data/scenarios:/data/scenarios
@@ -63,6 +64,7 @@ services:
       - ${CYROID_DATA_DIR:-/data/cyroid}/template-storage:${CYROID_DATA_DIR:-/data/cyroid}/template-storage
       - ${CYROID_DATA_DIR:-/data/cyroid}/vm-storage:${CYROID_DATA_DIR:-/data/cyroid}/vm-storage
       - ${CYROID_DATA_DIR:-/data/cyroid}/shared:${CYROID_DATA_DIR:-/data/cyroid}/shared
+      - ${CYROID_DATA_DIR:-/data/cyroid}/catalogs:${CYROID_DATA_DIR:-/data/cyroid}/catalogs
       # Shared directory for Traefik dynamic config (VNC routes)
       - ./traefik/dynamic:/app/traefik/dynamic
 
