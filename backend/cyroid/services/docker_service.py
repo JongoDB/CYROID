@@ -3081,9 +3081,17 @@ local-hostname: {name}
 
             # Get image as tar stream from host
             # named=True preserves the image tags
+            # Calculate timeout based on image size: base 120s + 1s per 50MB (min 120s, max 1800s/30min)
+            image_size_mb = image_size / 1024 / 1024
+            export_timeout = min(1800, max(120, 120 + int(image_size_mb / 50)))
+            logger.info(f"Using export timeout of {export_timeout}s for {image_size_mb:.1f}MB image")
+
             try:
                 logger.info(f"Starting image export (tags: {host_image.tags})...")
-                image_data = host_image.save(named=True)
+                # Create a client with extended timeout for large image exports
+                export_client = docker.from_env(timeout=export_timeout)
+                export_image = export_client.images.get(image)
+                image_data = export_image.save(named=True)
                 logger.info(f"Image export stream created, loading into DinD at {docker_url}...")
             except Exception as save_err:
                 logger.error(f"Failed to export image '{image}' from host: {type(save_err).__name__}: {save_err}")
