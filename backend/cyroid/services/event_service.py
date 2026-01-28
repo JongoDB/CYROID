@@ -2,6 +2,7 @@
 import asyncio
 import json
 import logging
+import threading
 from uuid import UUID
 from typing import Optional, List
 from sqlalchemy.orm import Session, joinedload
@@ -9,6 +10,9 @@ from sqlalchemy import desc
 from cyroid.models.event_log import EventLog, EventType
 
 logger = logging.getLogger(__name__)
+
+# Thread-local storage for event loops used in sync contexts
+_thread_local = threading.local()
 
 
 class EventService:
@@ -64,7 +68,7 @@ class EventService:
     def _broadcast_event(self, event: EventLog) -> None:
         """Broadcast an event to WebSocket clients via Redis pub/sub."""
         try:
-            from cyroid.services.event_broadcaster import broadcast_event
+            from cyroid.services.event_broadcaster import broadcast_event, get_broadcaster
 
             # Parse extra_data if present
             data = None
@@ -79,7 +83,7 @@ class EventService:
                 data = {}
             data["event_id"] = str(event.id)
 
-            # Run async broadcast in background
+            # Run async broadcast
             # Use asyncio.create_task if we're in an async context
             try:
                 loop = asyncio.get_running_loop()
@@ -92,8 +96,16 @@ class EventService:
                     data=data
                 ))
             except RuntimeError:
-                # No running loop - create a new one for sync context
-                asyncio.run(broadcast_event(
+                # No running loop - use a thread-local persistent loop
+                # This prevents the "Event loop is closed" error from asyncio.run()
+                # which closes the loop after each call, breaking the Redis connection
+                if not hasattr(_thread_local, 'loop') or _thread_local.loop.is_closed():
+                    _thread_local.loop = asyncio.new_event_loop()
+                    # Reset the broadcaster's Redis connection for this new loop
+                    broadcaster = get_broadcaster()
+                    broadcaster._redis = None
+
+                _thread_local.loop.run_until_complete(broadcast_event(
                     event_type=event.event_type.value,
                     message=event.message,
                     range_id=event.range_id,
@@ -104,7 +116,7 @@ class EventService:
 
         except Exception as e:
             # Don't fail the event logging if broadcast fails
-            logger.warning(f"Failed to broadcast event: {e}")
+            logger.error(f"Failed to broadcast event: {e}")
 
     def get_events(
         self,
