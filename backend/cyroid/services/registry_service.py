@@ -160,6 +160,31 @@ class RegistryService:
             logger.error(f"Failed to push {image_tag}: {e}")
             return False
 
+    async def ensure_image_in_registry(
+        self,
+        image_tag: str,
+        progress_callback: Optional[Callable[[str, int], None]] = None
+    ) -> bool:
+        """Ensure image is in registry, pushing if needed (push-on-demand).
+
+        Args:
+            image_tag: Image tag like 'myimage:v1.0'
+            progress_callback: Optional callback for progress updates
+
+        Returns:
+            True if image is in registry (already there or pushed), False on failure
+        """
+        # Check if already in registry
+        if await self.image_exists(image_tag):
+            logger.info(f"Image {image_tag} already in registry, skipping push")
+            if progress_callback:
+                progress_callback("Image already in registry", 100)
+            return True
+
+        # Push to registry
+        logger.info(f"Image {image_tag} not in registry, pushing...")
+        return await self.push_image(image_tag, progress_callback)
+
 
 # Singleton instance
 _registry_service: Optional[RegistryService] = None

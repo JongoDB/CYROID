@@ -179,6 +179,33 @@ class TestRegistryService:
 
             assert result is False
 
+    @pytest.mark.asyncio
+    async def test_ensure_image_skips_push_if_exists(self, registry_service):
+        """Test ensure_image_in_registry skips push if image already in registry."""
+        with patch.object(registry_service, 'image_exists', new_callable=AsyncMock) as mock_exists:
+            mock_exists.return_value = True
+
+            with patch.object(registry_service, 'push_image', new_callable=AsyncMock) as mock_push:
+                result = await registry_service.ensure_image_in_registry("myimage:latest")
+
+                assert result is True
+                mock_exists.assert_called_once_with("myimage:latest")
+                mock_push.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_ensure_image_pushes_if_not_exists(self, registry_service):
+        """Test ensure_image_in_registry pushes if image not in registry."""
+        with patch.object(registry_service, 'image_exists', new_callable=AsyncMock) as mock_exists:
+            mock_exists.return_value = False
+
+            with patch.object(registry_service, 'push_image', new_callable=AsyncMock) as mock_push:
+                mock_push.return_value = True
+
+                result = await registry_service.ensure_image_in_registry("myimage:latest")
+
+                assert result is True
+                mock_push.assert_called_once()
+
 
 class TestRegistryServiceSingleton:
     """Test cases for the singleton pattern."""
