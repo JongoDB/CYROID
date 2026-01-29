@@ -30,6 +30,7 @@ from cyroid.api.training_events import router as training_events_router
 from cyroid.api.images import router as images_router
 from cyroid.api.notifications import router as notifications_router
 from cyroid.api.catalog import router as catalog_router
+from cyroid.api.registry import router as registry_router
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -155,6 +156,7 @@ app.include_router(training_events_router, prefix="/api/v1")
 app.include_router(images_router, prefix="/api/v1")
 app.include_router(notifications_router, prefix="/api/v1")
 app.include_router(catalog_router, prefix="/api/v1")
+app.include_router(registry_router, prefix="/api/v1")
 
 
 @app.get("/health")
