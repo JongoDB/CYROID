@@ -2,10 +2,10 @@
 import { useEffect, useState, useMemo, useCallback, useRef } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { rangesApi, networksApi, vmsApi, imagesApi, NetworkCreate, VMCreate } from '../services/api'
-import type { Range, Network, VM, RealtimeEvent, BaseImage, GoldenImageLibrary, SnapshotWithLineage } from '../types'
+import type { Range, Network, VM, RealtimeEvent, BaseImage, GoldenImageLibrary, SnapshotWithLineage, NetworkInterfaceCreate } from '../types'
 import {
   ArrowLeft, Plus, Loader2, X, Play, Square, RotateCw, Camera,
-  Network as NetworkIcon, Server, Trash2, Rocket, Activity, Monitor, Shield, Pencil, Globe, Router, Wifi, Radio, Wrench, BookOpen, LayoutTemplate, Terminal
+  Network as NetworkIcon, Server, Trash2, Rocket, Activity, Monitor, Shield, Pencil, Globe, Router, Wifi, Radio, Wrench, BookOpen, LayoutTemplate, Terminal, Layers
 } from 'lucide-react'
 import clsx from 'clsx'
 import { VncConsole } from '../components/console/VncConsole'
@@ -35,6 +35,143 @@ const statusColors: Record<string, string> = {
   pending: 'bg-gray-100 text-gray-800',
   creating: 'bg-yellow-100 text-yellow-800',
   error: 'bg-red-100 text-red-800'
+}
+
+// Network Interface Editor for Multi-NIC Support
+interface NetworkInterfaceEditorProps {
+  interfaces: NetworkInterfaceCreate[]
+  onChange: (interfaces: NetworkInterfaceCreate[]) => void
+  networks: Network[]
+  disabled?: boolean
+}
+
+function NetworkInterfaceEditor({ interfaces, onChange, networks, disabled }: NetworkInterfaceEditorProps) {
+  const [availableIpsMap, setAvailableIpsMap] = useState<Record<string, string[]>>({})
+  const [loadingIps, setLoadingIps] = useState<Record<number, boolean>>({})
+
+  const fetchAvailableIps = async (networkId: string, index: number) => {
+    if (!networkId) return
+    setLoadingIps(prev => ({ ...prev, [index]: true }))
+    try {
+      const response = await vmsApi.getAvailableIps(networkId, 50)
+      setAvailableIpsMap(prev => ({ ...prev, [networkId]: response.available_ips || [] }))
+      // Auto-select first available IP
+      if (response.available_ips?.length > 0) {
+        const updated = [...interfaces]
+        updated[index] = { ...updated[index], ip_address: response.available_ips[0] }
+        onChange(updated)
+      }
+    } catch (err) {
+      console.error('Failed to fetch IPs:', err)
+    } finally {
+      setLoadingIps(prev => ({ ...prev, [index]: false }))
+    }
+  }
+
+  const handleNetworkChange = (index: number, networkId: string) => {
+    const updated = [...interfaces]
+    updated[index] = { network_id: networkId, ip_address: null }
+    onChange(updated)
+    if (networkId) {
+      fetchAvailableIps(networkId, index)
+    }
+  }
+
+  const handleIpChange = (index: number, ip: string) => {
+    const updated = [...interfaces]
+    updated[index] = { ...updated[index], ip_address: ip || null }
+    onChange(updated)
+  }
+
+  const addInterface = () => {
+    onChange([...interfaces, { network_id: '', ip_address: null }])
+  }
+
+  const removeInterface = (index: number) => {
+    if (index === 0) return // Can't remove primary
+    onChange(interfaces.filter((_, i) => i !== index))
+  }
+
+  // Get networks not already selected (to prevent duplicates)
+  const getAvailableNetworks = (currentIndex: number) => {
+    const usedNetworkIds = interfaces
+      .filter((_, i) => i !== currentIndex)
+      .map(iface => iface.network_id)
+      .filter(id => id) // Filter out empty strings
+    return networks.filter(n => !usedNetworkIds.includes(n.id))
+  }
+
+  return (
+    <div className="space-y-3">
+      <label className="block text-sm font-medium text-gray-700 flex items-center gap-2">
+        <Layers className="h-4 w-4 text-blue-500" />
+        Network Interfaces
+      </label>
+
+      {interfaces.map((iface, index) => (
+        <div key={index} className="flex items-center gap-2 p-3 bg-gray-50 rounded-lg border border-gray-200">
+          <span className="text-xs font-medium text-gray-500 w-16 flex-shrink-0">
+            {index === 0 ? 'Primary' : `NIC ${index + 1}`}
+          </span>
+
+          <select
+            value={iface.network_id}
+            onChange={(e) => handleNetworkChange(index, e.target.value)}
+            disabled={disabled}
+            className="flex-1 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm"
+          >
+            <option value="">Select network...</option>
+            {getAvailableNetworks(index).map(network => (
+              <option key={network.id} value={network.id}>
+                {network.name} ({network.subnet})
+              </option>
+            ))}
+          </select>
+
+          <select
+            value={iface.ip_address || ''}
+            onChange={(e) => handleIpChange(index, e.target.value)}
+            disabled={disabled || !iface.network_id || loadingIps[index]}
+            className="w-40 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm"
+          >
+            <option value="">{loadingIps[index] ? 'Loading...' : 'Auto-assign'}</option>
+            {(availableIpsMap[iface.network_id] || []).map(ip => (
+              <option key={ip} value={ip}>{ip}</option>
+            ))}
+          </select>
+
+          {index > 0 && !disabled && (
+            <button
+              type="button"
+              onClick={() => removeInterface(index)}
+              className="p-1.5 text-red-500 hover:text-red-700 hover:bg-red-50 rounded"
+              title="Remove interface"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
+          {index === 0 && <div className="w-8" />} {/* Spacer for alignment */}
+        </div>
+      ))}
+
+      {interfaces.length < networks.length && !disabled && (
+        <button
+          type="button"
+          onClick={addInterface}
+          className="flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-800 px-2 py-1 rounded hover:bg-blue-50 transition-colors"
+        >
+          <Plus className="w-4 h-4" />
+          Add Network Interface
+        </button>
+      )}
+
+      {interfaces.length > 1 && (
+        <p className="text-xs text-gray-500 mt-1">
+          Primary interface determines the VM's main network. Additional interfaces enable multi-homing.
+        </p>
+      )}
+    </div>
+  )
 }
 
 export default function RangeDetail() {
@@ -68,6 +205,9 @@ export default function RangeDetail() {
   const [vmSourceType, setVmSourceType] = useState<'base' | 'golden' | 'snapshot'>('base')
   const [vmForm, setVmForm] = useState<Partial<VMCreate>>({
     hostname: '',
+    // Multi-NIC support: array of network interfaces (first is primary)
+    networks: [{ network_id: '', ip_address: null }],
+    // Legacy single-network fields (deprecated, kept for reference)
     ip_address: '',
     network_id: '',
     // Image Library source fields (mutually exclusive)
@@ -277,10 +417,6 @@ export default function RangeDetail() {
 
   // DEPRECATED: suggestedPrefix removed - no longer used with DinD isolation (Issue #131)
 
-  // State for available IPs dropdown
-  const [availableIps, setAvailableIps] = useState<string[]>([])
-  const [loadingIps, setLoadingIps] = useState(false)
-
   // Helper: Calculate default gateway from subnet (e.g., 10.0.1.0/24 -> 10.0.1.1)
   const calculateGatewayFromSubnet = useCallback((subnet: string): string => {
     const match = subnet.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})\/\d{1,2}$/)
@@ -290,39 +426,11 @@ export default function RangeDetail() {
     return ''
   }, [])
 
-  // Fetch available IPs when network is selected for VM
-  const fetchAvailableIps = useCallback(async (networkId: string) => {
-    if (!networkId) {
-      setAvailableIps([])
-      return
-    }
-    setLoadingIps(true)
-    try {
-      const response = await vmsApi.getAvailableIps(networkId, 50)
-      setAvailableIps(response.available_ips || [])
-      // Auto-select the first available IP
-      if (response.available_ips?.length > 0) {
-        setVmForm(prev => ({ ...prev, ip_address: response.available_ips[0] }))
-      }
-    } catch (err) {
-      console.error('Failed to fetch available IPs:', err)
-      setAvailableIps([])
-    } finally {
-      setLoadingIps(false)
-    }
-  }, [])
-
   // Handler: When subnet changes, auto-fill gateway
   const handleSubnetChange = useCallback((subnet: string) => {
     const gateway = calculateGatewayFromSubnet(subnet)
     setNetworkForm(prev => ({ ...prev, subnet, gateway }))
   }, [calculateGatewayFromSubnet])
-
-  // Handler: When network is selected for VM, fetch available IPs and set prefix
-  const handleNetworkSelectForVm = useCallback((networkId: string) => {
-    setVmForm(prev => ({ ...prev, network_id: networkId, ip_address: '' }))
-    fetchAvailableIps(networkId)
-  }, [fetchAvailableIps])
 
   // Determine if selected image requires emulation on ARM host
   const imageRequiresEmulation = useMemo(() => {
@@ -668,11 +776,20 @@ export default function RangeDetail() {
       // For Windows with DHCP, ip_address can be empty
       const usesDhcp = showWindowsOptions && vmForm.use_dhcp
 
+      // Prepare network interfaces - filter out empty ones and handle DHCP
+      const networkInterfaces = (vmForm.networks || [])
+        .filter(iface => iface.network_id) // Only include interfaces with a selected network
+        .map((iface, index) => ({
+          network_id: iface.network_id,
+          // For primary interface with DHCP, clear the IP; otherwise use selected IP
+          ip_address: (index === 0 && usesDhcp) ? null : (iface.ip_address || null)
+        }))
+
       const vmData: VMCreate = {
         range_id: id,
-        network_id: vmForm.network_id!,
+        // Use the new networks array for multi-NIC support
+        networks: networkInterfaces,
         hostname: vmForm.hostname!,
-        ip_address: usesDhcp ? '' : vmForm.ip_address!,
         cpu: vmForm.cpu!,
         ram_mb: vmForm.ram_mb!,
         disk_gb: vmForm.disk_gb!
@@ -747,7 +864,11 @@ export default function RangeDetail() {
       setShowVmModal(false)
       setVmSourceType('base')
       setVmForm({
-        hostname: '', ip_address: '', network_id: '',
+        hostname: '',
+        // Multi-NIC: reset to single empty interface
+        networks: [{ network_id: '', ip_address: null }],
+        // Legacy fields (deprecated)
+        ip_address: '', network_id: '',
         base_image_id: '', golden_image_id: '', snapshot_id: '', template_id: '',
         cpu: 2, ram_mb: 2048, disk_gb: 20,
         windows_version: '', windows_username: '', windows_password: '',
@@ -1702,65 +1823,26 @@ export default function RangeDetail() {
                 {imageRequiresEmulation && (
                   <EmulationWarning className="mt-2" />
                 )}
+
+                {/* Multi-NIC Network Interface Editor */}
+                <NetworkInterfaceEditor
+                  interfaces={vmForm.networks || [{ network_id: '', ip_address: null }]}
+                  onChange={(networkInterfaces) => setVmForm(prev => ({ ...prev, networks: networkInterfaces }))}
+                  networks={networks}
+                  disabled={submitting}
+                />
+
+                {/* Hostname */}
                 <div>
-                  <label className="block text-sm font-medium text-gray-700">Network</label>
-                  <select
+                  <label className="block text-sm font-medium text-gray-700">Hostname</label>
+                  <input
+                    type="text"
                     required
-                    value={vmForm.network_id}
-                    onChange={(e) => handleNetworkSelectForVm(e.target.value)}
+                    value={vmForm.hostname}
+                    onChange={(e) => setVmForm({ ...vmForm, hostname: e.target.value })}
                     className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
-                  >
-                    <option value="">Select a network</option>
-                    {networks.map(n => (
-                      <option key={n.id} value={n.id}>{n.name} ({n.subnet})</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700">Hostname</label>
-                    <input
-                      type="text"
-                      required
-                      value={vmForm.hostname}
-                      onChange={(e) => setVmForm({ ...vmForm, hostname: e.target.value })}
-                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
-                      placeholder="web-server-01"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700">IP Address</label>
-                    {loadingIps ? (
-                      <div className="mt-1 flex items-center text-gray-500 text-sm">
-                        <Loader2 className="animate-spin h-4 w-4 mr-2" />
-                        Loading IPs...
-                      </div>
-                    ) : availableIps.length > 0 ? (
-                      <select
-                        required
-                        value={vmForm.ip_address}
-                        onChange={(e) => setVmForm({ ...vmForm, ip_address: e.target.value })}
-                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
-                      >
-                        {availableIps.map(ip => (
-                          <option key={ip} value={ip}>{ip}</option>
-                        ))}
-                      </select>
-                    ) : (
-                      <input
-                        type="text"
-                        required
-                        value={vmForm.ip_address}
-                        onChange={(e) => setVmForm({ ...vmForm, ip_address: e.target.value })}
-                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
-                        placeholder={vmForm.network_id ? 'No available IPs' : 'Select network first'}
-                        disabled={!vmForm.network_id}
-                      />
-                    )}
-                    {vmForm.network_id && availableIps.length > 0 && (
-                      <p className="mt-1 text-xs text-gray-500">{availableIps.length} IPs available</p>
-                    )}
-                  </div>
+                    placeholder="web-server-01"
+                  />
                 </div>
                 <div className="grid grid-cols-3 gap-4">
                   <div>
@@ -1796,21 +1878,6 @@ export default function RangeDetail() {
                     />
                   </div>
                 </div>
-
-                {/* IP Address for non-Windows, non-Linux ISO templates (regular containers) */}
-                {!showWindowsOptions && !showLinuxISOOptions && (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700">IP Address</label>
-                    <input
-                      type="text"
-                      required
-                      value={vmForm.ip_address}
-                      onChange={(e) => setVmForm({ ...vmForm, ip_address: e.target.value })}
-                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
-                      placeholder="10.0.1.10"
-                    />
-                  </div>
-                )}
 
                 {/* Windows-specific options */}
                 {showWindowsOptions && (
@@ -1929,18 +1996,7 @@ export default function RangeDetail() {
                       </select>
                     </div>
                     {!vmForm.use_dhcp && (
-                      <div className="grid grid-cols-3 gap-4">
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700">IP Address</label>
-                          <input
-                            type="text"
-                            required
-                            value={vmForm.ip_address}
-                            onChange={(e) => setVmForm({ ...vmForm, ip_address: e.target.value })}
-                            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
-                            placeholder="10.0.1.10"
-                          />
-                        </div>
+                      <div className="grid grid-cols-2 gap-4">
                         <div>
                           <label className="block text-sm font-medium text-gray-700">Gateway</label>
                           <input
@@ -1966,7 +2022,7 @@ export default function RangeDetail() {
                     <p className="text-xs text-gray-500">
                       {vmForm.use_dhcp
                         ? 'Windows will request network configuration from DHCP server'
-                        : 'Configure static IP, gateway, and DNS servers for Windows'}
+                        : 'IP address comes from primary network interface above. Configure gateway and DNS for Windows OS.'}
                     </p>
 
                     <div className="grid grid-cols-2 gap-4">
@@ -2119,19 +2175,6 @@ export default function RangeDetail() {
                   </div>
                 )}
 
-                {/* Additional Networks Info */}
-                {networks.length > 1 && vmForm.network_id && (
-                  <div className="bg-blue-50 border border-blue-200 rounded-md p-3">
-                    <p className="text-xs text-blue-700">
-                      <strong>Multiple Networks:</strong> Additional network interfaces can be added after the VM is started.
-                      Go to the <span className="font-medium">Execution Console</span> and use the <span className="font-medium">Network Interfaces</span> panel to connect this VM to other networks.
-                    </p>
-                    <p className="text-xs text-blue-600 mt-1">
-                      Available networks: {networks.filter(n => n.id !== vmForm.network_id).map(n => n.name).join(', ')}
-                    </p>
-                  </div>
-                )}
-
                 {/* Linux ISO-specific options */}
                 {showLinuxISOOptions && (
                   <div className="border-t pt-4 space-y-4">
@@ -2236,19 +2279,8 @@ export default function RangeDetail() {
                           : 'Server mode is headless, no GUI - use SSH to connect'}
                       </p>
                     </div>
-                    {/* Network Configuration */}
-                    <div className="grid grid-cols-3 gap-4">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700">IP Address</label>
-                        <input
-                          type="text"
-                          required
-                          value={vmForm.ip_address}
-                          onChange={(e) => setVmForm({ ...vmForm, ip_address: e.target.value })}
-                          className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
-                          placeholder="10.0.1.10"
-                        />
-                      </div>
+                    {/* Network Configuration (Gateway/DNS only - IP from interface editor) */}
+                    <div className="grid grid-cols-2 gap-4">
                       <div>
                         <label className="block text-sm font-medium text-gray-700">Gateway</label>
                         <input
@@ -2270,7 +2302,7 @@ export default function RangeDetail() {
                         />
                       </div>
                     </div>
-                    <p className="text-xs text-gray-500">Static network configuration for the VM</p>
+                    <p className="text-xs text-gray-500">IP address is set from the primary network interface. Configure gateway and DNS for guest OS.</p>
                     {/* User Configuration */}
                     <div className="grid grid-cols-2 gap-4">
                       <div>
@@ -2370,18 +2402,6 @@ export default function RangeDetail() {
                         ({linuxContainerType === 'kasmvnc' ? 'KasmVNC' : 'LinuxServer'})
                       </span>
                     </h4>
-                    {/* IP Address for containers */}
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700">IP Address</label>
-                      <input
-                        type="text"
-                        required
-                        value={vmForm.ip_address}
-                        onChange={(e) => setVmForm({ ...vmForm, ip_address: e.target.value })}
-                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
-                        placeholder="10.0.1.10"
-                      />
-                    </div>
                     {/* User Configuration */}
                     {linuxContainerType === 'kasmvnc' ? (
                       <>
