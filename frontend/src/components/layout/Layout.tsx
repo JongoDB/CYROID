@@ -20,7 +20,8 @@ import {
   BookOpen,
   CalendarDays,
   GraduationCap,
-  Store
+  Store,
+  Sparkles
 } from 'lucide-react'
 import clsx from 'clsx'
 import PasswordChangeModal from '../common/PasswordChangeModal'
@@ -75,8 +76,8 @@ const navSections: NavSection[] = [
     ]
   },
   {
-    title: 'Content Catalog',
-    isStorefront: true,  // Distinct styling for marketplace
+    title: 'CYROID Storefront',
+    isStorefront: true,  // Distinct button styling for marketplace
     items: [
       { name: 'Browse Catalog', href: '/catalog', icon: Store, requiredRoles: ['admin', 'engineer', 'evaluator'] },
     ]
@@ -179,15 +180,9 @@ export default function Layout({ children }: LayoutProps) {
 
           {/* Sectioned navigation */}
           {filteredSections.map((section, index) => (
-            <div key={section.title} className={clsx(
-              "pt-4",
-              section.isStorefront && "mt-4 mx-2 rounded-lg bg-gradient-to-r from-indigo-900/50 to-purple-900/50 p-2"
-            )}>
-              {index > 0 && !section.isStorefront && <div className="mx-3 mb-3 border-t border-gray-700" />}
-              <h3 className={clsx(
-                "px-3 text-xs font-semibold uppercase tracking-wider",
-                section.isStorefront ? "text-indigo-300" : "text-gray-400"
-              )}>
+            <div key={section.title} className="pt-4">
+              {index > 0 && <div className="mx-3 mb-3 border-t border-gray-700" />}
+              <h3 className="px-3 text-xs font-semibold text-gray-400 uppercase tracking-wider">
                 {section.title}
               </h3>
               <div className="mt-2 space-y-1">
@@ -200,18 +195,18 @@ export default function Layout({ children }: LayoutProps) {
                       "flex items-center px-3 py-2 text-sm font-medium rounded-md",
                       section.isStorefront
                         ? location.pathname === item.href || location.pathname.startsWith(item.href + '/')
-                          ? "bg-indigo-600 text-white"
-                          : "text-indigo-200 hover:bg-indigo-800/50 hover:text-white"
+                          ? "bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-lg shadow-indigo-500/25"
+                          : "bg-gradient-to-r from-indigo-600/80 to-purple-600/80 text-white hover:from-indigo-500 hover:to-purple-500"
                         : location.pathname === item.href
                           ? "bg-gray-800 text-white"
                           : "text-gray-300 hover:bg-gray-700 hover:text-white"
                     )}
                   >
-                    <item.icon className={clsx(
-                      "mr-3 h-5 w-5",
-                      section.isStorefront && "text-indigo-300"
-                    )} />
+                    <item.icon className="mr-3 h-5 w-5" />
                     {item.name}
+                    {section.isStorefront && (
+                      <Sparkles className="ml-auto h-4 w-4 text-yellow-300" />
+                    )}
                   </Link>
                 ))}
               </div>
@@ -302,15 +297,9 @@ export default function Layout({ children }: LayoutProps) {
 
             {/* Sectioned navigation */}
             {filteredSections.map((section, index) => (
-              <div key={section.title} className={clsx(
-                "pt-4",
-                section.isStorefront && "mt-4 mx-2 rounded-lg bg-gradient-to-r from-indigo-900/50 to-purple-900/50 p-2"
-              )}>
-                {index > 0 && !section.isStorefront && <div className="mx-3 mb-3 border-t border-gray-700" />}
-                <h3 className={clsx(
-                  "px-3 text-xs font-semibold uppercase tracking-wider",
-                  section.isStorefront ? "text-indigo-300" : "text-gray-400"
-                )}>
+              <div key={section.title} className="pt-4">
+                {index > 0 && <div className="mx-3 mb-3 border-t border-gray-700" />}
+                <h3 className="px-3 text-xs font-semibold text-gray-400 uppercase tracking-wider">
                   {section.title}
                 </h3>
                 <div className="mt-2 space-y-1">
@@ -322,18 +311,18 @@ export default function Layout({ children }: LayoutProps) {
                         "flex items-center px-3 py-2 text-sm font-medium rounded-md",
                         section.isStorefront
                           ? location.pathname === item.href || location.pathname.startsWith(item.href + '/')
-                            ? "bg-indigo-600 text-white"
-                            : "text-indigo-200 hover:bg-indigo-800/50 hover:text-white"
+                            ? "bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-lg shadow-indigo-500/25"
+                            : "bg-gradient-to-r from-indigo-600/80 to-purple-600/80 text-white hover:from-indigo-500 hover:to-purple-500"
                           : location.pathname === item.href
                             ? "bg-gray-800 text-white"
                             : "text-gray-300 hover:bg-gray-700 hover:text-white"
                       )}
                     >
-                      <item.icon className={clsx(
-                        "mr-3 h-5 w-5",
-                        section.isStorefront && "text-indigo-300"
-                      )} />
+                      <item.icon className="mr-3 h-5 w-5" />
                       {item.name}
+                      {section.isStorefront && (
+                        <Sparkles className="ml-auto h-4 w-4 text-yellow-300" />
+                      )}
                     </Link>
                   ))}
                 </div>
