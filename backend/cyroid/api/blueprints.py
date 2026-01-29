@@ -1,13 +1,14 @@
 # backend/cyroid/api/blueprints.py
 import os
 import tempfile
+from pathlib import Path
 from typing import List
 from uuid import UUID
 from fastapi import APIRouter, HTTPException, status, UploadFile, File, Query
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
-from cyroid.api.deps import DBSession, CurrentUser
+from cyroid.api.deps import DBSession, CurrentUser, DownloadUser
 from cyroid.models import Range, RangeBlueprint, RangeInstance
 from cyroid.models.catalog import CatalogInstalledItem
 from cyroid.schemas.blueprint import (
@@ -242,7 +243,7 @@ def get_export_size(
 def export_blueprint(
     blueprint_id: UUID,
     db: DBSession,
-    current_user: CurrentUser,
+    current_user: DownloadUser,  # Uses token query param for browser downloads
     include_msel: bool = Query(
         default=True,
         description="Include MSEL (Master Scenario Events List) injects"
@@ -324,6 +325,140 @@ def export_blueprint(
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Export failed: {str(e)}")
+
+
+# ============ Async Export Endpoints ============
+
+@router.post("/{blueprint_id}/export/start")
+def start_async_export(
+    blueprint_id: UUID,
+    db: DBSession,
+    current_user: CurrentUser,
+    include_msel: bool = Query(default=True),
+    include_dockerfiles: bool = Query(default=True),
+    include_docker_images: bool = Query(default=False),
+    include_content: bool = Query(default=True),
+    include_artifacts: bool = Query(default=False),
+):
+    """
+    Start an async blueprint export job.
+
+    Returns a job_id that can be used to check status, cancel, or download.
+    This is preferred for large exports (especially with Docker images).
+    """
+    import uuid
+    from cyroid.tasks.blueprint_export import export_blueprint_async, update_job_status
+
+    # Verify blueprint exists
+    blueprint = db.query(RangeBlueprint).filter(RangeBlueprint.id == blueprint_id).first()
+    if not blueprint:
+        raise HTTPException(status_code=404, detail="Blueprint not found")
+
+    # Generate job ID
+    job_id = str(uuid.uuid4())
+
+    # Initialize job status
+    update_job_status(job_id, "pending", "Queued for export...", 0, 6)
+
+    # Build options dict
+    options_dict = {
+        "include_msel": include_msel,
+        "include_dockerfiles": include_dockerfiles,
+        "include_docker_images": include_docker_images,
+        "include_content": include_content,
+        "include_artifacts": include_artifacts,
+    }
+
+    # Queue the task
+    export_blueprint_async.send(
+        job_id,
+        str(blueprint_id),
+        str(current_user.id),
+        options_dict,
+    )
+
+    return {
+        "job_id": job_id,
+        "status": "pending",
+        "message": "Export job queued",
+    }
+
+
+@router.get("/export/{job_id}/status")
+def get_export_status(job_id: str, current_user: CurrentUser):
+    """
+    Get the status of an async export job.
+
+    Returns current step, progress, and any errors.
+    """
+    from cyroid.tasks.blueprint_export import get_job_status
+
+    status = get_job_status(job_id)
+    if not status:
+        raise HTTPException(status_code=404, detail="Export job not found")
+
+    return status
+
+
+@router.post("/export/{job_id}/cancel")
+def cancel_export(job_id: str, current_user: CurrentUser):
+    """
+    Cancel an in-progress export job.
+
+    This will stop the export and clean up any temporary files.
+    """
+    from cyroid.tasks.blueprint_export import cancel_job, get_job_status
+
+    status = get_job_status(job_id)
+    if not status:
+        raise HTTPException(status_code=404, detail="Export job not found")
+
+    if status.get("status") not in ("pending", "running"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot cancel job with status: {status.get('status')}"
+        )
+
+    if cancel_job(job_id):
+        return {"message": "Export cancelled", "job_id": job_id}
+    else:
+        raise HTTPException(status_code=400, detail="Failed to cancel export")
+
+
+@router.get("/export/{job_id}/download")
+def download_export(job_id: str, current_user: DownloadUser):
+    """
+    Download a completed export.
+
+    The job must be in 'completed' status.
+    After download, the job data and files are cleaned up.
+    """
+    from cyroid.tasks.blueprint_export import get_job_status, cleanup_job
+
+    status = get_job_status(job_id)
+    if not status:
+        raise HTTPException(status_code=404, detail="Export job not found")
+
+    if status.get("status") != "completed":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Export not ready. Status: {status.get('status')}"
+        )
+
+    download_path = status.get("download_path")
+    filename = status.get("filename")
+
+    if not download_path or not Path(download_path).exists():
+        raise HTTPException(status_code=404, detail="Export file not found")
+
+    # Return the file
+    # Note: We don't clean up immediately to allow re-download
+    # Cleanup happens via TTL in Redis or manual cleanup
+    return FileResponse(
+        path=download_path,
+        filename=filename,
+        media_type="application/zip",
+    )
 
 
 @router.post("/import/validate", response_model=BlueprintImportValidation)

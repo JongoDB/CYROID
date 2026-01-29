@@ -270,3 +270,45 @@ def check_resource_access(
 CurrentUser = Annotated[User, Depends(get_current_user)]
 AdminUser = Annotated[User, Depends(require_admin())]
 DBSession = Annotated[Session, Depends(get_db)]
+
+
+def get_current_user_from_token_param(
+    token: str = None,
+    db: Session = Depends(get_db),
+) -> User:
+    """
+    Extract and validate user from JWT token passed as query parameter.
+    Used for browser download endpoints where headers can't be set.
+    """
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token required",
+        )
+
+    user_id = decode_access_token(token)
+
+    if user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+        )
+
+    user = db.query(User).options(joinedload(User.attributes)).filter(User.id == user_id).first()
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found",
+        )
+
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User account is deactivated",
+        )
+
+    return user
+
+
+# For download endpoints that need browser-native downloads
+DownloadUser = Annotated[User, Depends(get_current_user_from_token_param)]
