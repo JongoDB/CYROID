@@ -1,16 +1,24 @@
 // frontend/src/stores/toastStore.ts
 /**
  * Toast notification store for displaying real-time feedback.
+ * Supports optional action buttons for user interaction.
  */
 import { create } from 'zustand'
 
 export type ToastType = 'success' | 'error' | 'warning' | 'info'
+
+export interface ToastAction {
+  label: string
+  onClick: () => void
+  variant?: 'primary' | 'secondary'
+}
 
 export interface Toast {
   id: string
   type: ToastType
   message: string
   duration?: number
+  actions?: ToastAction[]
 }
 
 interface ToastState {
@@ -68,4 +76,17 @@ export const toast = {
     useToastStore.getState().addToast({ type: 'warning', message, duration }),
   info: (message: string, duration?: number) =>
     useToastStore.getState().addToast({ type: 'info', message, duration }),
+  // Toast with action buttons - auto-dismiss disabled by default for actionable toasts
+  withActions: (
+    type: ToastType,
+    message: string,
+    actions: ToastAction[],
+    duration?: number
+  ) =>
+    useToastStore.getState().addToast({
+      type,
+      message,
+      actions,
+      duration: duration ?? 0, // Default to no auto-dismiss for action toasts
+    }),
 }

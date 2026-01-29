@@ -1,6 +1,6 @@
 // frontend/src/pages/ImageCache.tsx
 import { useState, useEffect, useRef } from 'react'
-import { cacheApi, DockerPullStatus, DockerBuildStatus, BuildableImage } from '../services/api'
+import { cacheApi, registryApi, DockerPullStatus, DockerBuildStatus, BuildableImage } from '../services/api'
 import { useAuthStore } from '../stores/authStore'
 import type {
   CachedImage,
@@ -486,7 +486,38 @@ export default function ImageCache() {
           delete pollingIntervalsRef.current[`build-${buildKey}`]
 
           if (statusRes.data.status === 'completed') {
-            toast.success(`Built ${imageName} successfully`)
+            const fullImageTag = statusRes.data.full_tag || `cyroid/${imageName}:latest`
+            // Show toast with push-to-registry action
+            toast.withActions(
+              'success',
+              `Built ${imageName} successfully. Push to local registry for DinD ranges?`,
+              [
+                {
+                  label: 'Push to Registry',
+                  variant: 'primary',
+                  onClick: async () => {
+                    try {
+                      const pushRes = await registryApi.pushImage(fullImageTag)
+                      if (pushRes.data.success) {
+                        toast.success(`Pushed ${fullImageTag} to registry`)
+                      } else {
+                        toast.error(pushRes.data.message || 'Failed to push image')
+                      }
+                    } catch (err: any) {
+                      toast.error(err.response?.data?.detail || 'Failed to push image to registry')
+                    }
+                  },
+                },
+                {
+                  label: 'Skip',
+                  variant: 'secondary',
+                  onClick: () => {
+                    // Just dismiss - push-on-demand will handle it during deployment
+                  },
+                },
+              ],
+              15000 // Auto-dismiss after 15s if no action taken
+            )
             await loadData()
           } else if (statusRes.data.status === 'failed' && statusRes.data.error) {
             toast.error(`Build failed: ${statusRes.data.error}`)
