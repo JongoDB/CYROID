@@ -3,6 +3,7 @@ import logging
 from typing import Optional, List, Callable
 import httpx
 import docker
+import docker.errors
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +95,69 @@ class RegistryService:
             response = await client.get(f"{self.REGISTRY_URL}/v2/")
             return response.status_code == 200
         except httpx.RequestError:
+            return False
+
+    async def push_image(
+        self,
+        image_tag: str,
+        progress_callback: Optional[Callable[[str, int], None]] = None
+    ) -> bool:
+        """Push image from host Docker to local registry.
+
+        Args:
+            image_tag: Image tag like 'myimage:v1.0'
+            progress_callback: Optional callback(status, percent) for progress updates
+
+        Returns:
+            True if push succeeded, False otherwise
+        """
+        try:
+            docker_client = self._get_docker_client()
+
+            # Get the image
+            try:
+                image = docker_client.images.get(image_tag)
+            except docker.errors.ImageNotFound:
+                logger.error(f"Image not found locally: {image_tag}")
+                return False
+
+            # Tag for registry
+            registry_tag = self.get_registry_tag(image_tag)
+            image.tag(registry_tag)
+
+            if progress_callback:
+                progress_callback("Pushing to registry...", 10)
+
+            # Push to registry
+            push_output = docker_client.images.push(
+                registry_tag,
+                stream=True,
+                decode=True
+            )
+
+            # Process push output for progress
+            for line in push_output:
+                if 'error' in line:
+                    logger.error(f"Push error: {line['error']}")
+                    return False
+                if progress_callback and 'status' in line:
+                    status = line.get('status', '')
+                    if 'Pushing' in status:
+                        progress_callback("Pushing layers...", 50)
+                    elif 'Pushed' in status:
+                        progress_callback("Layer pushed", 80)
+
+            if progress_callback:
+                progress_callback("Push complete", 100)
+
+            logger.info(f"Successfully pushed {image_tag} to registry as {registry_tag}")
+            return True
+
+        except docker.errors.APIError as e:
+            logger.error(f"Docker API error pushing {image_tag}: {e}")
+            return False
+        except Exception as e:
+            logger.error(f"Failed to push {image_tag}: {e}")
             return False
 
 

@@ -2,6 +2,7 @@
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 import httpx
+import docker.errors
 
 from cyroid.services.registry_service import RegistryService
 
@@ -146,6 +147,37 @@ class TestRegistryService:
         result = registry_service.get_registry_tag("localhost/myimage:v1.0")
         # localhost has no dot, so not stripped - this is expected behavior
         assert result == "172.30.0.16:5000/localhost/myimage:v1.0"
+
+    @pytest.mark.asyncio
+    async def test_push_image_success(self, registry_service):
+        """Test push_image successfully pushes to registry."""
+        mock_image = MagicMock()
+        mock_image.tag.return_value = True
+
+        mock_docker = MagicMock()
+        mock_docker.images.get.return_value = mock_image
+        mock_docker.images.push.return_value = iter([
+            {"status": "Pushing"},
+            {"status": "Pushed"},
+        ])
+
+        with patch.object(registry_service, '_get_docker_client', return_value=mock_docker):
+            result = await registry_service.push_image("myimage:latest")
+
+            assert result is True
+            mock_image.tag.assert_called_once()
+            mock_docker.images.push.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_push_image_handles_missing_image(self, registry_service):
+        """Test push_image returns False when image doesn't exist locally."""
+        mock_docker = MagicMock()
+        mock_docker.images.get.side_effect = docker.errors.ImageNotFound("not found")
+
+        with patch.object(registry_service, '_get_docker_client', return_value=mock_docker):
+            result = await registry_service.push_image("nonexistent:latest")
+
+            assert result is False
 
 
 class TestRegistryServiceSingleton:
