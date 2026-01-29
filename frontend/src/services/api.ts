@@ -1288,6 +1288,10 @@ export const blueprintsApi = {
     });
     return response.data;
   },
+
+  // Update blueprint from a modified range
+  updateFromRange: (blueprintId: string, rangeId: string) =>
+    api.put(`/blueprints/${blueprintId}/update-from-range/${rangeId}`),
 };
 
 export const instancesApi = {
