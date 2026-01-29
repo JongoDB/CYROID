@@ -3009,7 +3009,8 @@ local-hostname: {name}
             progress_callback: Optional callback for progress reporting.
                 Signature: (transferred: int, total: int, status: str) -> None
                 Status values: 'starting', 'found_on_host', 'pulling_to_host',
-                'pulled_to_host', 'already_exists', 'transferring', 'complete', 'error'
+                'pulled_to_host', 'already_exists', 'pushing_to_registry',
+                'pulling_from_registry', 'transferring', 'complete', 'error'
 
         Returns:
             True if transfer succeeded, False otherwise
@@ -3075,7 +3076,46 @@ local-hostname: {name}
             except docker.errors.ImageNotFound:
                 pass  # Need to transfer
 
-            # Export image from host and import to DinD
+            # Try registry-based transfer first (much faster with layer caching)
+            try:
+                from cyroid.services.registry_service import get_registry_service
+                registry = get_registry_service()
+
+                if await registry.is_healthy():
+                    report_progress(0, image_size, 'pushing_to_registry')
+
+                    # Ensure image is in registry (push-on-demand)
+                    if await registry.ensure_image_in_registry(image):
+                        registry_tag = registry.get_registry_tag(image)
+                        report_progress(0, image_size, 'pulling_from_registry')
+
+                        # Pull from registry into DinD
+                        try:
+                            range_client.images.pull(registry_tag)
+
+                            # Retag to original name
+                            pulled_image = range_client.images.get(registry_tag)
+                            if ':' in image:
+                                repo, tag = image.rsplit(':', 1)
+                            else:
+                                repo, tag = image, 'latest'
+                            pulled_image.tag(repo, tag)
+
+                            logger.info(f"Successfully transferred '{image}' via registry")
+                            report_progress(image_size, image_size, 'complete')
+                            return True
+                        except Exception as e:
+                            logger.warning(f"Failed to pull from registry, falling back to tar: {e}")
+                    else:
+                        logger.warning(f"Failed to push to registry, falling back to tar")
+                else:
+                    logger.info("Registry not healthy, using tar transfer")
+            except ImportError:
+                logger.info("Registry service not available, using tar transfer")
+            except Exception as e:
+                logger.warning(f"Registry transfer failed, falling back to tar: {e}")
+
+            # Export image from host and import to DinD (tar-based fallback)
             logger.info(f"Exporting image '{image}' ({image_size / 1024 / 1024:.1f} MB) from host...")
             report_progress(0, image_size, 'transferring')
 
