@@ -135,6 +135,18 @@ class TestRegistryService:
         result = registry_service.get_registry_tag("myimage")
         assert result == "172.30.0.16:5000/myimage:latest"
 
+    def test_parse_image_tag_with_registry_port(self, registry_service):
+        """Test parsing image tag with registry port (edge case)."""
+        image, tag = registry_service._parse_image_tag("registry.example.com:5000/myimage:v1.0")
+        assert image == "registry.example.com:5000/myimage"
+        assert tag == "v1.0"
+
+    def test_get_registry_tag_with_localhost(self, registry_service):
+        """Test converting localhost registry image tag."""
+        result = registry_service.get_registry_tag("localhost/myimage:v1.0")
+        # localhost has no dot, so not stripped - this is expected behavior
+        assert result == "172.30.0.16:5000/localhost/myimage:v1.0"
+
 
 class TestRegistryServiceSingleton:
     """Test cases for the singleton pattern."""
