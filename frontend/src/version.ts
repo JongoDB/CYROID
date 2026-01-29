@@ -1,2 +1,3 @@
 // Auto-generated version file - updated during release process
-export const APP_VERSION = '0.21.2';
+// NOTE: This is a fallback - actual version comes from /api/v1/version endpoint
+export const APP_VERSION = '0.30.4';
