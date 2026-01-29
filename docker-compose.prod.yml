@@ -56,10 +56,10 @@ services:
       - ${CYROID_DATA_DIR}/template-storage:${CYROID_DATA_DIR}/template-storage
       - ${CYROID_DATA_DIR}/vm-storage:${CYROID_DATA_DIR}/vm-storage
       - ${CYROID_DATA_DIR}/shared:${CYROID_DATA_DIR}/shared
-      - ./data/seed-templates:/data/seed-templates:ro
-      - ./data/seed-blueprints:/data/seed-blueprints:ro
-      - ./data/scenarios:/data/scenarios
-      - ./data/images:/data/images
+      - ${CYROID_DATA_DIR}/catalogs:${CYROID_DATA_DIR}/catalogs
+      # Runtime directories for catalog-installed content
+      - ${CYROID_DATA_DIR}/scenarios:/data/scenarios
+      - ${CYROID_DATA_DIR}/images:/data/images
       - ./traefik/dynamic:/app/traefik/dynamic
     restart: always
     labels:
@@ -84,6 +84,10 @@ services:
       - ${CYROID_DATA_DIR}/template-storage:${CYROID_DATA_DIR}/template-storage
       - ${CYROID_DATA_DIR}/vm-storage:${CYROID_DATA_DIR}/vm-storage
       - ${CYROID_DATA_DIR}/shared:${CYROID_DATA_DIR}/shared
+      - ${CYROID_DATA_DIR}/catalogs:${CYROID_DATA_DIR}/catalogs
+      # Runtime directories for catalog-installed content
+      - ${CYROID_DATA_DIR}/scenarios:/data/scenarios
+      - ${CYROID_DATA_DIR}/images:/data/images
       - ./traefik/dynamic:/app/traefik/dynamic
     restart: always
 

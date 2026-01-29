@@ -632,7 +632,7 @@ class CatalogService:
         if not msel_content and events:
             msel_content = self._build_msel_from_events(events)
 
-        # Build the blueprint config using the seeder's helper
+        # Build the blueprint config from YAML structure
         config = build_config_from_yaml(blueprint_data)
 
         # If we built MSEL content, make sure it's in the config

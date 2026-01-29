@@ -542,11 +542,9 @@ CYROID/
 │   │   └── types/             # TypeScript types
 │   └── Dockerfile
 │
-├── data/                       # Data directories
-│   ├── images/                # Dockerfile projects for building images
-│   ├── scenarios/             # Training scenarios
-│   ├── seed-templates/        # Built-in templates
-│   └── seed-blueprints/       # Built-in blueprints
+├── data/                       # Runtime data (gitignored, created at startup)
+│   ├── images/                # Catalog-installed Dockerfile projects
+│   └── scenarios/             # Catalog-installed training scenarios
 │
 ├── scripts/                    # Utility scripts
 │   ├── init-networks.sh       # Network initialization

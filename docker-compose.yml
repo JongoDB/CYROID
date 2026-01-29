@@ -95,6 +95,10 @@ services:
       - ${CYROID_DATA_DIR:-/data/cyroid}/template-storage:${CYROID_DATA_DIR:-/data/cyroid}/template-storage
       - ${CYROID_DATA_DIR:-/data/cyroid}/vm-storage:${CYROID_DATA_DIR:-/data/cyroid}/vm-storage
       - ${CYROID_DATA_DIR:-/data/cyroid}/shared:${CYROID_DATA_DIR:-/data/cyroid}/shared
+      - ${CYROID_DATA_DIR:-/data/cyroid}/catalogs:${CYROID_DATA_DIR:-/data/cyroid}/catalogs
+      # Runtime directories for catalog-installed content
+      - ${CYROID_DATA_DIR:-/data/cyroid}/scenarios:/data/scenarios
+      - ${CYROID_DATA_DIR:-/data/cyroid}/images:/data/images
       # Shared directory for Traefik dynamic config (VNC routes)
       - ./traefik/dynamic:/app/traefik/dynamic
     expose:
@@ -162,6 +166,10 @@ services:
       - ${CYROID_DATA_DIR:-/data/cyroid}/template-storage:${CYROID_DATA_DIR:-/data/cyroid}/template-storage
       - ${CYROID_DATA_DIR:-/data/cyroid}/vm-storage:${CYROID_DATA_DIR:-/data/cyroid}/vm-storage
       - ${CYROID_DATA_DIR:-/data/cyroid}/shared:${CYROID_DATA_DIR:-/data/cyroid}/shared
+      - ${CYROID_DATA_DIR:-/data/cyroid}/catalogs:${CYROID_DATA_DIR:-/data/cyroid}/catalogs
+      # Runtime directories for catalog-installed content
+      - ${CYROID_DATA_DIR:-/data/cyroid}/scenarios:/data/scenarios
+      - ${CYROID_DATA_DIR:-/data/cyroid}/images:/data/images
       # Shared directory for Traefik dynamic config (VNC routes)
       - ./traefik/dynamic:/app/traefik/dynamic
     networks:
