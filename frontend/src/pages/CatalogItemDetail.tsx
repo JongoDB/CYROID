@@ -22,6 +22,7 @@ import {
   Package,
   Tag,
   Hash,
+  HardDrive,
 } from 'lucide-react'
 import clsx from 'clsx'
 
@@ -29,7 +30,7 @@ const TYPE_BADGE_COLORS: Record<string, string> = {
   blueprint: 'bg-indigo-100 text-indigo-800',
   scenario: 'bg-emerald-100 text-emerald-800',
   image: 'bg-blue-100 text-blue-800',
-  template: 'bg-orange-100 text-orange-800',
+  base_image: 'bg-orange-100 text-orange-800',
   content: 'bg-pink-100 text-pink-800',
 }
 
@@ -37,7 +38,7 @@ const TYPE_ICONS: Record<string, React.ElementType> = {
   blueprint: Layers,
   scenario: FileText,
   image: Server,
-  template: Package,
+  base_image: HardDrive,
   content: BookOpen,
 }
 

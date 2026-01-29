@@ -2050,7 +2050,7 @@ export const notificationsApi = {
 
 export type CatalogSourceType = 'git' | 'http' | 'local'
 export type CatalogSyncStatus = 'idle' | 'syncing' | 'error'
-export type CatalogItemType = 'blueprint' | 'scenario' | 'image' | 'template' | 'content'
+export type CatalogItemType = 'blueprint' | 'scenario' | 'image' | 'base_image' | 'content'
 
 export interface CatalogSource {
   id: string

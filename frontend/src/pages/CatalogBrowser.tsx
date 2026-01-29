@@ -26,6 +26,7 @@ import {
   AlertCircle,
   ChevronDown,
   Tag,
+  HardDrive,
 } from 'lucide-react'
 import clsx from 'clsx'
 
@@ -36,6 +37,7 @@ const TYPE_TABS: { key: FilterTab; label: string; icon: React.ElementType }[] = 
   { key: 'blueprint', label: 'Blueprints', icon: Layers },
   { key: 'scenario', label: 'Scenarios', icon: FileText },
   { key: 'image', label: 'Images', icon: Server },
+  { key: 'base_image', label: 'Base Images', icon: HardDrive },
   { key: 'content', label: 'Content', icon: BookOpen },
 ]
 
@@ -43,7 +45,7 @@ const TYPE_BADGE_COLORS: Record<CatalogItemType, string> = {
   blueprint: 'bg-indigo-100 text-indigo-800',
   scenario: 'bg-emerald-100 text-emerald-800',
   image: 'bg-blue-100 text-blue-800',
-  template: 'bg-orange-100 text-orange-800',
+  base_image: 'bg-orange-100 text-orange-800',
   content: 'bg-pink-100 text-pink-800',
 }
 

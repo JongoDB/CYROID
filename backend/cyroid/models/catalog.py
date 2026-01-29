@@ -29,7 +29,7 @@ class CatalogItemType(str, Enum):
     BLUEPRINT = "blueprint"
     SCENARIO = "scenario"
     IMAGE = "image"
-    TEMPLATE = "template"
+    BASE_IMAGE = "base_image"
     CONTENT = "content"
 
 

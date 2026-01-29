@@ -3,7 +3,7 @@
 Catalog service for managing catalog sources, browsing items, and installing content.
 
 Catalog sources are Git repos, HTTP endpoints, or local directories that contain
-an index.json describing available blueprints, scenarios, images, and templates.
+an index.json describing available blueprints, scenarios, images, and base images.
 The service handles syncing sources, browsing their indexes, and installing items
 into the local CYROID instance.
 """
@@ -321,7 +321,7 @@ class CatalogService:
 
         Args:
             source: The catalog source to browse.
-            item_type: Optional filter by item type (blueprint, scenario, image, template).
+            item_type: Optional filter by item type (blueprint, scenario, image, base_image).
             search: Optional text search against name and description.
             tags: Optional tag filter (items must have at least one matching tag).
 
@@ -528,8 +528,8 @@ class CatalogService:
             self._install_scenario(item_path, detail)
         elif detail.type == CatalogItemType.IMAGE:
             self._install_image(item_path, detail, build_images)
-        elif detail.type == CatalogItemType.TEMPLATE:
-            local_resource_id = self._install_template(item_path, detail)
+        elif detail.type == CatalogItemType.BASE_IMAGE:
+            local_resource_id = self._install_base_image(item_path, detail)
         elif detail.type == CatalogItemType.CONTENT:
             local_resource_id = self._install_content(item_path, detail, user_id)
         else:
@@ -975,19 +975,19 @@ class CatalogService:
             logger.error(f"Failed to build image {image_tag}: {e}")
             return False
 
-    def _install_template(
+    def _install_base_image(
         self,
         item_path: Path,
         detail: CatalogItemDetail,
     ) -> Optional[UUID]:
-        """Install a template from the catalog by reading its YAML and registering a BaseImage.
+        """Install a base image from the catalog by reading its YAML and registering a BaseImage.
 
-        Templates define VM types (container, linux_vm, windows_vm) and their
-        base Docker images. The template YAML is parsed and a corresponding
-        BaseImage record is created.
+        Base images define VM types (container, linux_vm, windows_vm) and their
+        Docker images. The YAML is parsed and a corresponding BaseImage record
+        is created.
 
         Args:
-            item_path: Path to the template YAML file.
+            item_path: Path to the base image YAML file.
             detail: The catalog item detail.
 
         Returns:
@@ -1004,32 +1004,32 @@ class CatalogService:
                     yaml_path = yaml_files[0]
                 else:
                     raise FileNotFoundError(
-                        f"No YAML template file found in {item_path}"
+                        f"No YAML base image file found in {item_path}"
                     )
         else:
-            raise FileNotFoundError(f"Template file not found at {item_path}")
+            raise FileNotFoundError(f"Base image file not found at {item_path}")
 
         if not yaml_path.exists():
-            raise FileNotFoundError(f"Template file not found: {yaml_path}")
+            raise FileNotFoundError(f"Base image file not found: {yaml_path}")
 
         with open(yaml_path, "r", encoding="utf-8") as f:
-            template_data = yaml.safe_load(f)
+            base_image_data = yaml.safe_load(f)
 
-        if not template_data:
-            raise ValueError(f"Empty template file: {yaml_path}")
+        if not base_image_data:
+            raise ValueError(f"Empty base image file: {yaml_path}")
 
         # Extract fields
-        seed_id = template_data.get("seed_id", detail.id)
-        name = template_data.get("name", detail.name)
-        description = template_data.get("description", detail.description)
-        vm_type = template_data.get("vm_type", "container")
-        os_type = template_data.get("os_type", "linux")
-        base_image_tag = template_data.get("base_image", "")
-        native_arch = template_data.get("native_arch", "x86_64")
-        default_cpu = template_data.get("default_cpu", 2)
-        default_ram_mb = template_data.get("default_ram_mb", 4096)
-        default_disk_gb = template_data.get("default_disk_gb", 40)
-        tags = template_data.get("tags", [])
+        seed_id = base_image_data.get("seed_id", detail.id)
+        name = base_image_data.get("name", detail.name)
+        description = base_image_data.get("description", detail.description)
+        vm_type = base_image_data.get("vm_type", "container")
+        os_type = base_image_data.get("os_type", "linux")
+        base_image_tag = base_image_data.get("base_image", "")
+        native_arch = base_image_data.get("native_arch", "x86_64")
+        default_cpu = base_image_data.get("default_cpu", 2)
+        default_ram_mb = base_image_data.get("default_ram_mb", 4096)
+        default_disk_gb = base_image_data.get("default_disk_gb", 40)
+        tags = base_image_data.get("tags", [])
 
         # Determine image type from vm_type
         if vm_type in ("container",):
@@ -1076,7 +1076,7 @@ class CatalogService:
         self.db.flush()
 
         logger.info(
-            f"Registered template as BaseImage '{name}' "
+            f"Installed BaseImage '{name}' "
             f"(type={image_type}, vm_type={vm_type}, id={base_image.id})"
         )
         return base_image.id
