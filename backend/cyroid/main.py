@@ -40,23 +40,9 @@ async def lifespan(app: FastAPI):
     """Application lifespan events for startup and shutdown."""
     # Startup
     from cyroid.services.event_broadcaster import get_connection_manager, get_broadcaster
-    from cyroid.services.blueprint_seeder import seed_all_blueprints
     from cyroid.services.scenario_filesystem import get_scenarios_dir
-    from cyroid.database import get_session_local
 
-    # Seed built-in blueprints
-    logger.info("Checking seed blueprints...")
-    try:
-        SessionLocal = get_session_local()
-        db = SessionLocal()
-        seeded_blueprints = seed_all_blueprints(db)
-        if seeded_blueprints:
-            logger.info(f"Seeded {len(seeded_blueprints)} blueprints")
-        db.close()
-    except Exception as e:
-        logger.warning(f"Seeding skipped: {e}")
-
-    # Log scenarios directory (no seeding - filesystem-based)
+    # Log scenarios directory (filesystem-based, populated via catalog install)
     scenarios_dir = get_scenarios_dir()
     logger.info(f"Scenarios directory: {scenarios_dir} (exists: {scenarios_dir.exists()})")
 

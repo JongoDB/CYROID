@@ -40,6 +40,57 @@ logger = logging.getLogger(__name__)
 IMAGES_DIR = "/data/images"
 
 
+def build_config_from_yaml(blueprint_data: dict) -> dict:
+    """Build the config JSON from blueprint YAML structure."""
+    config = {
+        "networks": [],
+        "vms": [],
+        "router": blueprint_data.get("router"),
+        "msel": None
+    }
+
+    # Convert networks
+    for net in blueprint_data.get("networks", []):
+        config["networks"].append({
+            "name": net.get("name"),
+            "subnet": net.get("subnet"),
+            "gateway": net.get("gateway"),
+            "is_isolated": net.get("is_isolated", False)
+        })
+
+    # Convert VMs
+    for vm in blueprint_data.get("vms", []):
+        vm_config = {
+            "hostname": vm.get("hostname"),
+            "ip_address": vm.get("ip_address"),
+            "network_name": vm.get("network_name"),
+            "cpu": vm.get("cpu", 1),
+            "ram_mb": vm.get("ram_mb", 1024),
+            "disk_gb": vm.get("disk_gb", 20),
+            "position_x": vm.get("position_x"),
+            "position_y": vm.get("position_y"),
+        }
+        # Prefer base_image_tag (new format), fall back to template_name (deprecated)
+        if vm.get("base_image_tag"):
+            vm_config["base_image_tag"] = vm.get("base_image_tag")
+        elif vm.get("template_name"):
+            vm_config["base_image_tag"] = vm.get("template_name")
+        config["vms"].append(vm_config)
+
+    # Convert events to MSEL format if present
+    events = blueprint_data.get("events", [])
+    walkthrough = blueprint_data.get("walkthrough")
+    if events or walkthrough:
+        msel_content = yaml.dump({"events": events}, default_flow_style=False) if events else ""
+        config["msel"] = {
+            "content": msel_content,
+            "format": "yaml",
+            "walkthrough": walkthrough
+        }
+
+    return config
+
+
 class CatalogService:
     """Service for catalog source management, index browsing, and content installation."""
 
@@ -532,8 +583,6 @@ class CatalogService:
         Returns:
             UUID of the created RangeBlueprint.
         """
-        from cyroid.services.blueprint_seeder import build_config_from_yaml
-
         # Read blueprint.yaml
         blueprint_yaml_path = item_path / "blueprint.yaml"
         if not blueprint_yaml_path.exists():
@@ -583,7 +632,7 @@ class CatalogService:
         if not msel_content and events:
             msel_content = self._build_msel_from_events(events)
 
-        # Build the blueprint config using the seeder's helper
+        # Build the blueprint config from YAML structure
         config = build_config_from_yaml(blueprint_data)
 
         # If we built MSEL content, make sure it's in the config

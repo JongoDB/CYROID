@@ -34,10 +34,9 @@ services:
       - ${CYROID_DATA_DIR:-/data/cyroid}/vm-storage:${CYROID_DATA_DIR:-/data/cyroid}/vm-storage
       - ${CYROID_DATA_DIR:-/data/cyroid}/shared:${CYROID_DATA_DIR:-/data/cyroid}/shared
       - ${CYROID_DATA_DIR:-/data/cyroid}/catalogs:${CYROID_DATA_DIR:-/data/cyroid}/catalogs
-      - ./data/seed-templates:/data/seed-templates:ro
-      - ./data/seed-blueprints:/data/seed-blueprints:ro
-      - ./data/scenarios:/data/scenarios
-      - ./data/images:/data/images
+      # Runtime directories for catalog-installed content
+      - ${CYROID_DATA_DIR:-/data/cyroid}/scenarios:/data/scenarios
+      - ${CYROID_DATA_DIR:-/data/cyroid}/images:/data/images
       - ./traefik/dynamic:/app/traefik/dynamic
     # Enable hot-reload in development
     command: bash -c "alembic upgrade head && uvicorn cyroid.main:app --host 0.0.0.0 --port 8000 --reload"
@@ -65,6 +64,9 @@ services:
       - ${CYROID_DATA_DIR:-/data/cyroid}/vm-storage:${CYROID_DATA_DIR:-/data/cyroid}/vm-storage
       - ${CYROID_DATA_DIR:-/data/cyroid}/shared:${CYROID_DATA_DIR:-/data/cyroid}/shared
       - ${CYROID_DATA_DIR:-/data/cyroid}/catalogs:${CYROID_DATA_DIR:-/data/cyroid}/catalogs
+      # Runtime directories for catalog-installed content
+      - ${CYROID_DATA_DIR:-/data/cyroid}/scenarios:/data/scenarios
+      - ${CYROID_DATA_DIR:-/data/cyroid}/images:/data/images
       # Shared directory for Traefik dynamic config (VNC routes)
       - ./traefik/dynamic:/app/traefik/dynamic
 

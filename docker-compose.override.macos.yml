@@ -15,9 +15,10 @@ services:
       - ./data/cyroid/template-storage:/data/cyroid/template-storage
       - ./data/cyroid/vm-storage:/data/cyroid/vm-storage
       - ./data/cyroid/shared:/data/cyroid/shared
-      - ./data/seed-templates:/data/seed-templates:ro
-      - ./data/scenarios:/data/scenarios
-      - ./images:/images:ro
+      - ./data/cyroid/catalogs:/data/cyroid/catalogs
+      # Runtime directories for catalog-installed content
+      - ./data/cyroid/scenarios:/data/scenarios
+      - ./data/cyroid/images:/data/images
 
   worker:
     volumes:
@@ -27,3 +28,7 @@ services:
       - ./data/cyroid/template-storage:/data/cyroid/template-storage
       - ./data/cyroid/vm-storage:/data/cyroid/vm-storage
       - ./data/cyroid/shared:/data/cyroid/shared
+      - ./data/cyroid/catalogs:/data/cyroid/catalogs
+      # Runtime directories for catalog-installed content
+      - ./data/cyroid/scenarios:/data/scenarios
+      - ./data/cyroid/images:/data/images
