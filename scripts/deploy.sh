@@ -156,10 +156,30 @@ show_help() {
 create_data_directories() {
     log_step "Creating data directories"
 
-    sudo mkdir -p "$DATA_DIR"/{iso-cache,template-storage,vm-storage,shared}
-    sudo chown -R "$(id -u):$(id -g)" "$DATA_DIR" 2>/dev/null || true
+    # Convert relative path to absolute if needed
+    if [[ "$DATA_DIR" != /* ]]; then
+        # Remove leading ./ if present and convert to absolute path
+        DATA_DIR="${DATA_DIR#./}"
+        DATA_DIR="$(cd "$PROJECT_ROOT" && pwd)/$DATA_DIR"
+        log_info "Using absolute path: $DATA_DIR"
+    fi
 
-    log_info "Data directory: $DATA_DIR"
+    # Try creating directories without sudo first
+    if mkdir -p "$DATA_DIR"/{iso-cache,template-storage,vm-storage,shared,catalogs,scenarios,images} 2>/dev/null; then
+        log_info "Data directory created: $DATA_DIR"
+    else
+        # Fall back to sudo if regular mkdir fails
+        log_warn "Need elevated permissions for $DATA_DIR"
+        if command -v sudo &> /dev/null; then
+            sudo mkdir -p "$DATA_DIR"/{iso-cache,template-storage,vm-storage,shared,catalogs,scenarios,images}
+            sudo chown -R "$(id -u):$(id -g)" "$DATA_DIR" 2>/dev/null || true
+            log_info "Data directory created with sudo: $DATA_DIR"
+        else
+            log_error "Cannot create $DATA_DIR - permission denied and sudo not available"
+            log_info "Please create the directory manually or choose a different location"
+            exit 1
+        fi
+    fi
 }
 
 create_env_file() {
