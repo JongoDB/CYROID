@@ -4,6 +4,7 @@ import {
   blueprintsApi,
   BlueprintImportValidation,
   BlueprintImportOptions,
+  registryApi,
 } from '../../services/api';
 import {
   X,
@@ -13,7 +14,9 @@ import {
   XCircle,
   AlertTriangle,
   FileArchive,
+  Database,
 } from 'lucide-react';
+import { toast } from '../../stores/toastStore';
 
 interface Props {
   onClose: () => void;
@@ -29,6 +32,7 @@ export default function ImportBlueprintModal({ onClose, onSuccess }: Props) {
   const [newName, setNewName] = useState('');
   const [templateStrategy, setTemplateStrategy] = useState<'skip' | 'update' | 'error'>('skip');
   const [contentStrategy, setContentStrategy] = useState<'skip' | 'rename' | 'use_existing'>('skip');
+  const [pushToRegistry, setPushToRegistry] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [importResult, setImportResult] = useState<{
     blueprintName?: string;
@@ -98,6 +102,11 @@ export default function ImportBlueprintModal({ onClose, onSuccess }: Props) {
           warnings: result.warnings,
         });
         setStep('done');
+
+        // Push images to local registry if checkbox was checked
+        if (pushToRegistry && result.images_built && result.images_built.length > 0) {
+          pushImagesToRegistry(result.images_built);
+        }
       } else {
         setError(result.errors[0] || 'Import failed');
         setStep('review');
@@ -105,6 +114,35 @@ export default function ImportBlueprintModal({ onClose, onSuccess }: Props) {
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to import blueprint');
       setStep('review');
+    }
+  };
+
+  const pushImagesToRegistry = async (images: string[]) => {
+    toast.info(`Pushing ${images.length} image(s) to local registry...`);
+
+    let successCount = 0;
+    let errorCount = 0;
+
+    for (const imageTag of images) {
+      try {
+        await registryApi.pushImage(imageTag);
+        successCount++;
+      } catch (err) {
+        console.error(`Failed to push ${imageTag} to registry:`, err);
+        errorCount++;
+      }
+    }
+
+    if (errorCount === 0) {
+      toast.success(`Successfully pushed ${successCount} image(s) to local registry`);
+    } else if (successCount > 0) {
+      toast.warning(
+        `Pushed ${successCount} image(s) to registry, ${errorCount} failed. Images will be pushed on-demand during deployment.`
+      );
+    } else {
+      toast.error(
+        `Failed to push images to registry. They will be pushed on-demand during deployment.`
+      );
     }
   };
 
@@ -119,6 +157,7 @@ export default function ImportBlueprintModal({ onClose, onSuccess }: Props) {
     setNewName('');
     setTemplateStrategy('skip');
     setContentStrategy('skip');
+    setPushToRegistry(false);
     setError(null);
     setImportResult(null);
     setStep('upload');
@@ -341,6 +380,29 @@ export default function ImportBlueprintModal({ onClose, onSuccess }: Props) {
                         ✓ Content will be imported as a new item
                       </p>
                     )}
+                  </div>
+                )}
+
+                {/* Push to Local Registry Option */}
+                {(validation.included_dockerfiles?.length ?? 0) > 0 && (
+                  <div className="bg-purple-50 rounded-md p-3">
+                    <label className="flex items-start cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={pushToRegistry}
+                        onChange={(e) => setPushToRegistry(e.target.checked)}
+                        className="mt-0.5 h-4 w-4 text-purple-600 focus:ring-purple-500 border-gray-300 rounded"
+                      />
+                      <div className="ml-3">
+                        <span className="flex items-center text-sm font-medium text-purple-800">
+                          <Database className="h-4 w-4 mr-1.5" />
+                          Push imported images to local registry
+                        </span>
+                        <p className="text-xs text-purple-600 mt-0.5">
+                          Pre-push images for faster DinD range deployments. If unchecked, images will be pushed on-demand during deployment.
+                        </p>
+                      </div>
+                    </label>
                   </div>
                 )}
 
