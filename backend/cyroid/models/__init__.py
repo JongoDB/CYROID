@@ -21,6 +21,8 @@ from cyroid.models.notification import Notification, NotificationType, Notificat
 # Image Library models
 from cyroid.models.base_image import BaseImage, ImageType
 from cyroid.models.golden_image import GoldenImage, GoldenImageSource
+# Catalog models
+from cyroid.models.catalog import CatalogSource, CatalogInstalledItem, CatalogSourceType, CatalogSyncStatus, CatalogItemType
 
 __all__ = [
     "Base",
@@ -45,4 +47,6 @@ __all__ = [
     # Image Library
     "BaseImage", "ImageType",
     "GoldenImage", "GoldenImageSource",
+    # Catalog
+    "CatalogSource", "CatalogInstalledItem", "CatalogSourceType", "CatalogSyncStatus", "CatalogItemType",
 ]
