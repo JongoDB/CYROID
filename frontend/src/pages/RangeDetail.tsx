@@ -275,10 +275,7 @@ export default function RangeDetail() {
     return null
   }, [vmSourceType, selectedBaseImage, selectedGoldenImage, selectedSnapshot])
 
-  // Extract subnet prefix from first network for blueprint suggestion
-  const suggestedPrefix = networks?.[0]?.subnet
-    ? networks[0].subnet.split('.').slice(0, 2).join('.')
-    : '10.100';
+  // DEPRECATED: suggestedPrefix removed - no longer used with DinD isolation (Issue #131)
 
   // State for available IPs dropdown
   const [availableIps, setAvailableIps] = useState<string[]>([])
@@ -2644,7 +2641,6 @@ export default function RangeDetail() {
         <SaveBlueprintModal
           rangeId={range.id}
           rangeName={range.name}
-          suggestedPrefix={suggestedPrefix}
           onClose={() => setShowSaveBlueprintModal(false)}
           onSuccess={() => {}}
         />

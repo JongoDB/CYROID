@@ -1106,7 +1106,8 @@ export interface BlueprintCreate {
   range_id: string;
   name: string;
   description?: string;
-  base_subnet_prefix: string;
+  // DEPRECATED: No longer used with DinD isolation - kept for backward compatibility
+  base_subnet_prefix?: string;
 }
 
 export interface Instance {
@@ -1182,6 +1183,24 @@ export interface BlueprintExportOptions {
   content_id?: string;
 }
 
+export interface BlueprintExportSizeEstimate {
+  blueprint_id: string;
+  blueprint_name: string;
+  base_size_bytes: number;
+  docker_images: {
+    tag: string;
+    size_bytes: number;
+    size_human: string;
+    missing?: boolean;
+    error?: string;
+  }[];
+  docker_images_total_bytes: number;
+  docker_images_total_human: string;
+  total_bytes: number;
+  total_human: string;
+  error?: string;
+}
+
 // ============ Blueprint API ============
 
 export const blueprintsApi = {
@@ -1196,6 +1215,14 @@ export const blueprintsApi = {
   listInstances: (id: string) => api.get<Instance[]>(`/blueprints/${id}/instances`),
 
   // Export/Import
+  getExportSize: async (id: string, includeDockerImages: boolean = false): Promise<BlueprintExportSizeEstimate> => {
+    const params = new URLSearchParams();
+    params.append('include_docker_images', String(includeDockerImages));
+    const response = await api.get<BlueprintExportSizeEstimate>(
+      `/blueprints/${id}/export-size?${params.toString()}`
+    );
+    return response.data;
+  },
   export: async (id: string, options: BlueprintExportOptions = {}): Promise<Blob> => {
     const params = new URLSearchParams();
     if (options.include_msel !== undefined) {

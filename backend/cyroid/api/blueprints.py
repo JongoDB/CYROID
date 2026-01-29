@@ -197,6 +197,37 @@ def list_instances(blueprint_id: UUID, db: DBSession, current_user: CurrentUser)
 
 # ============ Export/Import Endpoints ============
 
+@router.get("/{blueprint_id}/export-size")
+def get_export_size(
+    blueprint_id: UUID,
+    db: DBSession,
+    current_user: CurrentUser,
+    include_docker_images: bool = Query(
+        default=False,
+        description="Include Docker image tarballs in size estimate"
+    ),
+):
+    """
+    Get estimated export size for a blueprint.
+
+    Returns size estimates for Docker images if requested.
+    Useful for showing users expected download size before exporting.
+    """
+    export_service = get_blueprint_export_service()
+
+    try:
+        result = export_service.estimate_export_size(
+            blueprint_id=blueprint_id,
+            db=db,
+            include_docker_images=include_docker_images,
+        )
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to estimate size: {str(e)}")
+
+
 @router.get("/{blueprint_id}/export")
 def export_blueprint(
     blueprint_id: UUID,

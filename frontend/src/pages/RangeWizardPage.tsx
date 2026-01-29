@@ -146,7 +146,6 @@ export default function RangeWizardPage() {
             range_id: rangeId,
             name: `${rangeName} Blueprint`,
             description: `Blueprint created from Range Wizard`,
-            base_subnet_prefix: '10.0',
           });
           toast.success('Blueprint created successfully');
         } catch (blueprintError) {

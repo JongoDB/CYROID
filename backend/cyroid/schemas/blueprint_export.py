@@ -121,6 +121,8 @@ class BlueprintExportManifest(BaseModel):
     content_included: bool = False
     artifact_count: int = 0  # NEW: Number of artifact files
     docker_images_included: bool = False
+    docker_image_count: int = 0  # Number of Docker image tarballs
+    docker_images: List[str] = []  # List of image tags exported
     # Checksums for integrity verification
     checksums: Dict[str, str] = {}
 

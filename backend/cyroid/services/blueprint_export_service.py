@@ -473,6 +473,244 @@ class BlueprintExportService:
         return images_built, errors
 
     # =========================================================================
+    # Docker Image Export Methods (v4.0)
+    # =========================================================================
+
+    def _collect_image_tags_from_config(
+        self,
+        config: BlueprintConfig,
+        db: Session,
+    ) -> Set[str]:
+        """
+        Collect all Docker image tags referenced by VMs in the config.
+
+        Returns:
+            Set of Docker image tags
+        """
+        image_tags: Set[str] = set()
+
+        for vm in config.vms:
+            image_tag = None
+
+            # Try to get image tag from BaseImage reference
+            if hasattr(vm, 'base_image_id') and vm.base_image_id:
+                try:
+                    base_image = db.query(BaseImage).filter(
+                        BaseImage.id == UUID(vm.base_image_id)
+                    ).first()
+                    if base_image and base_image.docker_image_tag:
+                        image_tag = base_image.docker_image_tag
+                except (ValueError, TypeError):
+                    pass
+
+            # Try golden image -> base image
+            if not image_tag and hasattr(vm, 'golden_image_id') and vm.golden_image_id:
+                try:
+                    golden = db.query(GoldenImage).filter(
+                        GoldenImage.id == UUID(vm.golden_image_id)
+                    ).first()
+                    if golden and golden.base_image_id:
+                        base_image = db.query(BaseImage).filter(
+                            BaseImage.id == golden.base_image_id
+                        ).first()
+                        if base_image and base_image.docker_image_tag:
+                            image_tag = base_image.docker_image_tag
+                except (ValueError, TypeError):
+                    pass
+
+            # Try snapshot -> golden -> base
+            if not image_tag and hasattr(vm, 'snapshot_id') and vm.snapshot_id:
+                try:
+                    snapshot = db.query(Snapshot).filter(
+                        Snapshot.id == UUID(vm.snapshot_id)
+                    ).first()
+                    if snapshot and snapshot.golden_image_id:
+                        golden = db.query(GoldenImage).filter(
+                            GoldenImage.id == snapshot.golden_image_id
+                        ).first()
+                        if golden and golden.base_image_id:
+                            base_image = db.query(BaseImage).filter(
+                                BaseImage.id == golden.base_image_id
+                            ).first()
+                            if base_image and base_image.docker_image_tag:
+                                image_tag = base_image.docker_image_tag
+                except (ValueError, TypeError):
+                    pass
+
+            # Fallback: direct base_image_tag field
+            if not image_tag and hasattr(vm, 'base_image_tag') and vm.base_image_tag:
+                image_tag = vm.base_image_tag
+
+            # Fallback: template_name lookup
+            if not image_tag and hasattr(vm, 'template_name') and vm.template_name:
+                base_image = db.query(BaseImage).filter(
+                    BaseImage.name == vm.template_name
+                ).first()
+                if base_image and base_image.docker_image_tag:
+                    image_tag = base_image.docker_image_tag
+
+            if image_tag:
+                image_tags.add(image_tag)
+
+        return image_tags
+
+    def _export_docker_images(
+        self,
+        image_tags: Set[str],
+        temp_dir: Path,
+    ) -> Tuple[List[str], List[str]]:
+        """
+        Export Docker images as tarballs to the temp directory.
+
+        Args:
+            image_tags: Set of Docker image tags to export
+            temp_dir: Temporary directory to store tarballs
+
+        Returns:
+            Tuple of (exported_images, errors)
+        """
+        exported: List[str] = []
+        errors: List[str] = []
+
+        if not image_tags:
+            return exported, errors
+
+        # Create images directory
+        images_dir = temp_dir / "images"
+        images_dir.mkdir(exist_ok=True)
+
+        try:
+            client = docker.from_env()
+        except Exception as e:
+            logger.error(f"Failed to connect to Docker: {e}")
+            errors.append(f"Failed to connect to Docker: {e}")
+            return exported, errors
+
+        for image_tag in image_tags:
+            try:
+                # Check if image exists locally
+                try:
+                    image = client.images.get(image_tag)
+                except docker.errors.ImageNotFound:
+                    logger.warning(f"Image {image_tag} not found locally, attempting pull")
+                    try:
+                        image = client.images.pull(image_tag)
+                    except Exception as pull_err:
+                        errors.append(f"Image {image_tag} not found and pull failed: {pull_err}")
+                        continue
+
+                # Generate safe filename
+                safe_name = self._safe_image_name(image_tag)
+                tarball_path = images_dir / f"{safe_name}.tar"
+
+                # Export image using docker save
+                logger.info(f"Exporting Docker image: {image_tag} -> {tarball_path}")
+
+                with open(tarball_path, 'wb') as f:
+                    for chunk in image.save(named=True):
+                        f.write(chunk)
+
+                exported.append(image_tag)
+                logger.info(f"Exported Docker image: {image_tag} ({tarball_path.stat().st_size / 1024 / 1024:.1f} MB)")
+
+            except Exception as e:
+                logger.error(f"Failed to export image {image_tag}: {e}")
+                errors.append(f"Failed to export {image_tag}: {e}")
+
+        return exported, errors
+
+    # =========================================================================
+    # Export Size Estimation
+    # =========================================================================
+
+    def estimate_export_size(
+        self,
+        blueprint_id: UUID,
+        db: Session,
+        include_docker_images: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        Estimate the export size for a blueprint.
+
+        Args:
+            blueprint_id: UUID of the blueprint
+            db: Database session
+            include_docker_images: Whether to include Docker image sizes
+
+        Returns:
+            Dict with size estimates
+        """
+        from cyroid.models.blueprint import RangeBlueprint
+
+        blueprint = db.query(RangeBlueprint).filter(RangeBlueprint.id == blueprint_id).first()
+        if not blueprint:
+            raise ValueError(f"Blueprint {blueprint_id} not found")
+
+        config = BlueprintConfig.model_validate(blueprint.config)
+
+        result = {
+            "blueprint_id": str(blueprint_id),
+            "blueprint_name": blueprint.name,
+            "base_size_bytes": 10000,  # Estimate for JSON files
+            "docker_images": [],
+            "docker_images_total_bytes": 0,
+            "total_bytes": 10000,
+        }
+
+        if include_docker_images:
+            image_tags = self._collect_image_tags_from_config(config, db)
+
+            try:
+                client = docker.from_env()
+
+                for image_tag in image_tags:
+                    try:
+                        image = client.images.get(image_tag)
+                        size_bytes = image.attrs.get("Size", 0)
+                        result["docker_images"].append({
+                            "tag": image_tag,
+                            "size_bytes": size_bytes,
+                            "size_human": self._format_size(size_bytes),
+                        })
+                        result["docker_images_total_bytes"] += size_bytes
+                    except docker.errors.ImageNotFound:
+                        result["docker_images"].append({
+                            "tag": image_tag,
+                            "size_bytes": 0,
+                            "size_human": "Unknown (not pulled)",
+                            "missing": True,
+                        })
+                    except Exception as e:
+                        logger.warning(f"Failed to get size for {image_tag}: {e}")
+                        result["docker_images"].append({
+                            "tag": image_tag,
+                            "size_bytes": 0,
+                            "size_human": "Unknown",
+                            "error": str(e),
+                        })
+
+            except Exception as e:
+                logger.error(f"Failed to connect to Docker: {e}")
+                result["error"] = f"Failed to connect to Docker: {e}"
+
+        result["total_bytes"] = result["base_size_bytes"] + result["docker_images_total_bytes"]
+        result["total_human"] = self._format_size(result["total_bytes"])
+        result["docker_images_total_human"] = self._format_size(result["docker_images_total_bytes"])
+
+        return result
+
+    def _format_size(self, size_bytes: int) -> str:
+        """Format bytes as human-readable string."""
+        if size_bytes < 1024:
+            return f"{size_bytes} B"
+        elif size_bytes < 1024 * 1024:
+            return f"{size_bytes / 1024:.1f} KB"
+        elif size_bytes < 1024 * 1024 * 1024:
+            return f"{size_bytes / 1024 / 1024:.1f} MB"
+        else:
+            return f"{size_bytes / 1024 / 1024 / 1024:.2f} GB"
+
+    # =========================================================================
     # Export Methods
     # =========================================================================
 
@@ -590,6 +828,27 @@ class BlueprintExportService:
                     logger.info(f"Collected content '{content_data.title}' with {len(content_data.assets)} assets")
 
             # ============================================================
+            # Export Docker Images (v4.0)
+            # ============================================================
+            exported_images: List[str] = []
+            image_export_errors: List[str] = []
+
+            if options.include_docker_images:
+                # Collect all image tags from config
+                image_tags = self._collect_image_tags_from_config(config, db)
+
+                if image_tags:
+                    logger.info(f"Exporting {len(image_tags)} Docker images...")
+                    exported_images, image_export_errors = self._export_docker_images(
+                        image_tags, temp_path
+                    )
+                    if exported_images:
+                        logger.info(f"Exported {len(exported_images)} Docker images")
+                    if image_export_errors:
+                        for err in image_export_errors:
+                            logger.warning(f"Image export warning: {err}")
+
+            # ============================================================
             # Build Export Structure
             # ============================================================
 
@@ -623,7 +882,9 @@ class BlueprintExportService:
                     dockerfile_count=len(dockerfiles),
                     content_included=content_data is not None,
                     artifact_count=len(artifacts_data),
-                    docker_images_included=options.include_docker_images,
+                    docker_images_included=len(exported_images) > 0,
+                    docker_image_count=len(exported_images),
+                    docker_images=exported_images,
                     checksums={},  # Will be computed after writing files
                 ),
                 blueprint=blueprint_data,
@@ -681,7 +942,8 @@ class BlueprintExportService:
                        f"(msel={'yes' if msel_included else 'no'}, "
                        f"dockerfiles={len(dockerfiles)}, "
                        f"content={'yes' if content_data else 'no'}, "
-                       f"artifacts={len(artifacts_data)})")
+                       f"artifacts={len(artifacts_data)}, "
+                       f"docker_images={len(exported_images)})")
             return Path(archive_path), filename
 
         finally:
