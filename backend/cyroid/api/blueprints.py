@@ -87,21 +87,41 @@ def get_blueprint(blueprint_id: UUID, db: DBSession, current_user: CurrentUser):
 def update_blueprint(
     blueprint_id: UUID, data: BlueprintUpdate, db: DBSession, current_user: CurrentUser
 ):
-    """Update blueprint metadata. Increments version if config changes."""
+    """Update blueprint metadata and/or config. Increments version if config changes."""
+    from cyroid.models import User
+
     blueprint = db.query(RangeBlueprint).filter(RangeBlueprint.id == blueprint_id).first()
     if not blueprint:
         raise HTTPException(status_code=404, detail="Blueprint not found")
+
+    # Check authorization for config changes - owner or admin
+    if data.config is not None:
+        if blueprint.created_by and blueprint.created_by != current_user.id:
+            if not any(role.name == "admin" for role in current_user.roles):
+                raise HTTPException(status_code=403, detail="Not authorized to modify this blueprint")
 
     if data.name is not None:
         blueprint.name = data.name
     if data.description is not None:
         blueprint.description = data.description
+    if data.content_ids is not None:
+        blueprint.content_ids = data.content_ids
+
+    # Update config and increment version
+    if data.config is not None:
+        blueprint.config = data.config.model_dump()
+        blueprint.version += 1
 
     db.commit()
     db.refresh(blueprint)
 
     config = BlueprintConfig.model_validate(blueprint.config)
-    return _blueprint_to_detail_response(blueprint, config, current_user.username)
+
+    # Get creator username for response
+    creator = db.query(User).filter(User.id == blueprint.created_by).first()
+    username = creator.username if creator else None
+
+    return _blueprint_to_detail_response(blueprint, config, username)
 
 
 @router.put("/{blueprint_id}/update-from-range/{range_id}", response_model=BlueprintDetailResponse)

@@ -296,10 +296,17 @@ def create_range_from_blueprint(
 
         # Create VMNetwork records for multi-NIC VMs
         if vm_config.network_interfaces:
+            # Track which networks we've already added to prevent duplicates
+            seen_network_ids = set()
             for idx, iface in enumerate(vm_config.network_interfaces):
                 iface_network_id = network_lookup.get(iface.network_name)
                 if not iface_network_id:
                     continue  # Skip interfaces with missing networks
+
+                # Skip duplicate network assignments (same network can only be connected once per VM)
+                if iface_network_id in seen_network_ids:
+                    continue
+                seen_network_ids.add(iface_network_id)
 
                 # Determine if this is the primary interface
                 is_primary = iface.is_primary or (idx == 0 and not any(i.is_primary for i in vm_config.network_interfaces))

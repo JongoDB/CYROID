@@ -5,3 +5,5 @@ export { default as InstanceInfoBanner } from './InstanceInfoBanner';
 export { default as ImportBlueprintModal } from './ImportBlueprintModal';
 export { default as ExportBlueprintModal } from './ExportBlueprintModal';
 export { default as UpdateBlueprintModal } from './UpdateBlueprintModal';
+export { EditBlueprintModal } from './EditBlueprintModal';
+export { VisualBlueprintEditor } from './VisualBlueprintEditor';

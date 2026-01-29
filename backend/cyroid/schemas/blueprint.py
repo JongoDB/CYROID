@@ -78,6 +78,7 @@ class BlueprintUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=100)
     description: Optional[str] = None
     content_ids: Optional[List[str]] = None  # Linked content for training events
+    config: Optional[BlueprintConfig] = None  # Direct config update (increments version)
 
 
 class BlueprintResponse(BaseModel):
