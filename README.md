@@ -91,6 +91,7 @@ Every range deploys inside its own isolated Docker-in-Docker container:
 │   ├── MinIO: 172.30.0.13              │   └── Internal: 10.0.1.0/24 │
 │   ├── Traefik: 172.30.0.14            │       (Same IPs - isolated!)│
 │   ├── Worker: 172.30.0.15             └── ...                       │
+│   ├── Registry: 172.30.0.16                                         │
 │   └── Frontend: 172.30.0.20                                         │
 └─────────────────────────────────────────────────────────────────────┘
 ```
@@ -225,13 +226,13 @@ Every range deploys inside its own isolated Docker-in-Docker container:
 │  │           CYROID Infrastructure Services (External)                    │ │
 │  └─────────┬──────────────────┬──────────────────┬───────────────────────┘ │
 │            │                  │                  │                         │
-│       ┌────┴────┐        ┌────┴────┐        ┌────┴────┐                    │
-│       │ CYROID  │        │ Traefik │        │ Database│                    │
-│       │   API   │        │ (VNC)   │        │  Redis  │                    │
-│       │ Worker  │        │         │        │  MinIO  │                    │
-│       └────┬────┘        └────┬────┘        └─────────┘                    │
-│            │                  │                                            │
-│  ┌─────────┴──────────────────┴─────────────────────────────────────────┐ │
+│       ┌────┴────┐        ┌────┴────┐        ┌────┴────┐  ┌─────────┐       │
+│       │ CYROID  │        │ Traefik │        │ Database│  │Registry │       │
+│       │   API   │        │ (VNC)   │        │  Redis  │  │ (Local) │       │
+│       │ Worker  │        │         │        │  MinIO  │  │         │       │
+│       └────┬────┘        └────┬────┘        └─────────┘  └────┬────┘       │
+│            │                  │                               │            │
+│  ┌─────────┴──────────────────┴───────────────────────────────┴─────────┐ │
 │  │              cyroid-ranges Network (172.30.1.0/24)                    │ │
 │  │              Range DinD Containers (Isolated)                         │ │
 │  └───────────┬────────────────────────────────┬─────────────────────────┘ │
@@ -251,6 +252,29 @@ Every range deploys inside its own isolated Docker-in-Docker container:
 │   └─────────────────────┘          └─────────────────────┘               │
 └────────────────────────────────────────────────────────────────────────────┘
 ```
+
+### Local Docker Registry
+
+CYROID includes a local Docker registry (`registry:2`) for efficient image distribution to DinD containers:
+
+**Purpose:**
+- Eliminates redundant image pulls from external registries (Docker Hub, GHCR)
+- Each DinD container pulls images from the local registry instead of the internet
+- Enables layer caching for faster subsequent deployments
+
+**How It Works:**
+1. When a range is deployed, required images are pushed to the local registry
+2. DinD containers are configured to use `172.30.0.16:5000` as an insecure registry
+3. VMs inside DinD pull images from the local registry
+4. Cached layers are reused across all range deployments
+
+**Benefits:**
+| Benefit | Description |
+|---------|-------------|
+| Faster Deployments | Cached images deploy in seconds instead of minutes |
+| Reduced Bandwidth | Images are pulled once and shared across ranges |
+| Offline Support | Pre-populate registry for air-gapped environments |
+| Consistency | All ranges use identical image versions |
 
 ### Technology Stack
 
@@ -276,6 +300,7 @@ Every range deploys inside its own isolated Docker-in-Docker container:
 | | Traefik | 2.11 | Reverse Proxy |
 | | Docker | 24+ | Container Runtime |
 | | Docker DinD | 24 | Range Isolation |
+| | Registry | 2 | Local Image Distribution |
 
 ### Container Images (GHCR)
 
@@ -745,6 +770,19 @@ DIND_DOCKER_PORT=2375
 | cyroid-mgmt | 172.30.0.0/24 | CYROID infrastructure services |
 | cyroid-ranges | 172.30.1.0/24 | Range DinD containers |
 | traefik-routing | Dynamic | Traefik service routing |
+
+### Service IP Addresses (cyroid-mgmt)
+
+| Service | IP Address | Port | Purpose |
+|---------|------------|------|---------|
+| API | 172.30.0.10 | 8000 | FastAPI backend |
+| Database | 172.30.0.11 | 5432 | PostgreSQL |
+| Redis | 172.30.0.12 | 6379 | Cache & queue |
+| MinIO | 172.30.0.13 | 9000/9001 | Object storage |
+| Traefik | 172.30.0.14 | 80/443/8080 | Reverse proxy |
+| Worker | 172.30.0.15 | - | Dramatiq worker |
+| Registry | 172.30.0.16 | 5000 | Local Docker registry |
+| Frontend | 172.30.0.20 | 80 | React web UI |
 
 ### VM Resource Defaults
 
