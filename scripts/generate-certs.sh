@@ -8,6 +8,7 @@
 #   ./scripts/generate-certs.sh                    # Interactive
 #   ./scripts/generate-certs.sh example.com        # Domain
 #   ./scripts/generate-certs.sh 192.168.1.100      # IP address
+#   ./scripts/generate-certs.sh --force example.com # Force overwrite
 #
 # Output:
 #   ./certs/cert.pem  - Certificate
@@ -26,13 +27,28 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 CERTS_DIR="$PROJECT_ROOT/certs"
 
+# Parse arguments
+FORCE=false
+HOSTNAME=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --force|-f)
+            FORCE=true
+            shift
+            ;;
+        *)
+            HOSTNAME="$1"
+            shift
+            ;;
+    esac
+done
+
 echo -e "${GREEN}=== CYROID Certificate Generator ===${NC}"
 echo ""
 
 # Get hostname/IP from argument or prompt
-if [ $# -ge 1 ]; then
-    HOSTNAME="$1"
-else
+if [ -z "$HOSTNAME" ]; then
     echo -e "${YELLOW}Enter the hostname or IP address for the certificate:${NC}"
     read -p "> " HOSTNAME
 fi
@@ -49,10 +65,20 @@ mkdir -p "$CERTS_DIR"
 # Check if certificates already exist
 if [ -f "$CERTS_DIR/cert.pem" ] && [ -f "$CERTS_DIR/key.pem" ]; then
     echo -e "${YELLOW}Existing certificates found in $CERTS_DIR${NC}"
-    read -p "Overwrite? (y/N) " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        echo "Keeping existing certificates."
+    if [ "$FORCE" = true ]; then
+        echo "Force flag set, overwriting existing certificates."
+    elif [ -t 0 ]; then
+        # Interactive mode - ask user
+        read -p "Overwrite? (y/N) " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            echo "Keeping existing certificates."
+            exit 0
+        fi
+    else
+        # Non-interactive mode - keep existing certs
+        echo "Non-interactive mode, keeping existing certificates."
+        echo "Use --force to overwrite."
         exit 0
     fi
 fi

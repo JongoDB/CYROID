@@ -20,23 +20,18 @@ services:
     environment:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     restart: always
-    # Bind to localhost only in production (not externally accessible)
-    ports:
-      - "127.0.0.1:5432:5432"
+    # Inherit port bindings from base compose (internal services accessible via Docker network)
+    # Note: localhost-only bindings (127.0.0.1:port) cause issues on Docker Desktop macOS
 
   redis:
     restart: always
-    # Bind to localhost only in production
-    ports:
-      - "127.0.0.1:6379:6379"
+    # Inherit port bindings from base compose (internal services accessible via Docker network)
 
   minio:
     environment:
       MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY}
     restart: always
-    # Only expose console internally, access via Traefik if needed
-    ports:
-      - "127.0.0.1:9001:9001"
+    # Inherit port bindings from base compose (internal services accessible via Docker network)
 
   api:
     image: ghcr.io/jongodb/cyroid-api:${VERSION:-latest}
