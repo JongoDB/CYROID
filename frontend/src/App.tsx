@@ -25,6 +25,8 @@ import ContentLibrary from './pages/ContentLibrary'
 import ContentEditor from './pages/ContentEditor'
 import TrainingEvents from './pages/TrainingEvents'
 import TrainingEventDetail from './pages/TrainingEventDetail'
+import CatalogBrowser from './pages/CatalogBrowser'
+import CatalogItemDetail from './pages/CatalogItemDetail'
 import ProtectedRoute from './components/common/ProtectedRoute'
 import Layout from './components/layout/Layout'
 
@@ -148,6 +150,18 @@ function App() {
                 <Route path="/content/:id" element={
                   <ProtectedRoute requiredRoles={['admin', 'engineer', 'evaluator']}>
                     <ContentEditor />
+                  </ProtectedRoute>
+                } />
+
+                {/* Catalog - accessible to admin, engineer, evaluator */}
+                <Route path="/catalog" element={
+                  <ProtectedRoute requiredRoles={['admin', 'engineer', 'evaluator']}>
+                    <CatalogBrowser />
+                  </ProtectedRoute>
+                } />
+                <Route path="/catalog/:sourceId/:itemId" element={
+                  <ProtectedRoute requiredRoles={['admin', 'engineer', 'evaluator']}>
+                    <CatalogItemDetail />
                   </ProtectedRoute>
                 } />
 

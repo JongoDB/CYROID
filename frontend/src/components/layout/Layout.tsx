@@ -19,7 +19,8 @@ import {
   Settings,
   BookOpen,
   CalendarDays,
-  GraduationCap
+  GraduationCap,
+  Store
 } from 'lucide-react'
 import clsx from 'clsx'
 import PasswordChangeModal from '../common/PasswordChangeModal'
@@ -52,6 +53,7 @@ const navSections: NavSection[] = [
   {
     title: 'Content Development',
     items: [
+      { name: 'Catalog', href: '/catalog', icon: Store, requiredRoles: ['admin', 'engineer', 'evaluator'] },
       { name: 'Content Library', href: '/content', icon: BookOpen, requiredRoles: ['admin', 'engineer', 'evaluator'] },
       { name: 'VM Library', href: '/vm-library', icon: Server, requiredRoles: ['admin', 'engineer'] },
       { name: 'Image Cache', href: '/cache', icon: HardDrive, requiredRoles: ['admin', 'engineer'] },

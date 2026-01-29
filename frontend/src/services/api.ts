@@ -2046,4 +2046,124 @@ export const notificationsApi = {
     api.post<{ marked_read: number }>('/notifications/read-all'),
 }
 
+// ============ Catalog API ============
+
+export type CatalogSourceType = 'git' | 'http' | 'local'
+export type CatalogSyncStatus = 'idle' | 'syncing' | 'error'
+export type CatalogItemType = 'blueprint' | 'scenario' | 'image' | 'template' | 'content'
+
+export interface CatalogSource {
+  id: string
+  name: string
+  source_type: CatalogSourceType
+  url: string
+  branch: string
+  enabled: boolean
+  sync_status: CatalogSyncStatus
+  error_message?: string | null
+  item_count: number
+  last_synced?: string | null
+  created_by?: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface CatalogSourceCreate {
+  name: string
+  source_type?: CatalogSourceType
+  url: string
+  branch?: string
+  enabled?: boolean
+}
+
+export interface CatalogSourceUpdate {
+  name?: string
+  url?: string
+  branch?: string
+  enabled?: boolean
+}
+
+export interface CatalogItemSummary {
+  id: string
+  type: CatalogItemType
+  name: string
+  description: string
+  tags: string[]
+  version: string
+  path: string
+  checksum: string
+  requires_images: string[]
+  includes_msel: boolean
+  includes_content: boolean
+  arch?: string | null
+  docker_tag?: string | null
+  installed: boolean
+  installed_version?: string | null
+  update_available: boolean
+}
+
+export interface CatalogItemDetail extends CatalogItemSummary {
+  readme?: string | null
+  source_id?: string | null
+}
+
+export interface CatalogInstalledItem {
+  id: string
+  catalog_source_id: string
+  catalog_item_id: string
+  item_type: CatalogItemType
+  item_name: string
+  installed_version: string
+  installed_checksum?: string | null
+  local_resource_id?: string | null
+  installed_by?: string | null
+  installed_at: string
+  update_available: boolean
+}
+
+export interface CatalogInstallRequest {
+  source_id: string
+  build_images?: boolean
+}
+
+export const catalogApi = {
+  // Sources (admin)
+  listSources: () =>
+    api.get<CatalogSource[]>('/catalog/sources'),
+
+  createSource: (data: CatalogSourceCreate) =>
+    api.post<CatalogSource>('/catalog/sources', data),
+
+  updateSource: (sourceId: string, data: CatalogSourceUpdate) =>
+    api.put<CatalogSource>(`/catalog/sources/${sourceId}`, data),
+
+  deleteSource: (sourceId: string) =>
+    api.delete(`/catalog/sources/${sourceId}`),
+
+  syncSource: (sourceId: string) =>
+    api.post<CatalogSource>(`/catalog/sources/${sourceId}/sync`),
+
+  // Browsing
+  listItems: (params?: {
+    source_id?: string
+    item_type?: CatalogItemType
+    search?: string
+    tags?: string
+  }) =>
+    api.get<CatalogItemSummary[]>('/catalog/items', { params }),
+
+  getItemDetail: (sourceId: string, itemId: string) =>
+    api.get<CatalogItemDetail>(`/catalog/items/${sourceId}/${itemId}`),
+
+  // Installation
+  installItem: (itemId: string, data: CatalogInstallRequest) =>
+    api.post<CatalogInstalledItem>(`/catalog/items/${itemId}/install`, data),
+
+  listInstalled: () =>
+    api.get<CatalogInstalledItem[]>('/catalog/installed'),
+
+  uninstallItem: (installedId: string) =>
+    api.delete(`/catalog/installed/${installedId}`),
+}
+
 export default api
