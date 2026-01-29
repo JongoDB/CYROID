@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from cyroid.api.deps import DBSession, CurrentUser
 from cyroid.models import Range, RangeBlueprint, RangeInstance
+from cyroid.models.catalog import CatalogInstalledItem
 from cyroid.schemas.blueprint import (
     BlueprintCreate, BlueprintUpdate, BlueprintResponse, BlueprintDetailResponse,
     InstanceDeploy, InstanceResponse, BlueprintConfig
@@ -128,9 +129,18 @@ def delete_blueprint(blueprint_id: UUID, db: DBSession, current_user: CurrentUse
                 content_id = UUID(content_id_str)
                 content = db.query(Content).filter(Content.id == content_id).first()
                 if content:
+                    # Clean up catalog installed item for content before deleting
+                    db.query(CatalogInstalledItem).filter(
+                        CatalogInstalledItem.local_resource_id == content_id
+                    ).delete()
                     db.delete(content)
             except (ValueError, TypeError):
                 pass  # Skip invalid UUIDs
+
+    # Clean up catalog installed item record if this blueprint was installed from catalog
+    db.query(CatalogInstalledItem).filter(
+        CatalogInstalledItem.local_resource_id == blueprint_id
+    ).delete()
 
     db.delete(blueprint)
     db.commit()

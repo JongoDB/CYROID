@@ -25,6 +25,7 @@ from cyroid.schemas.content import (
     ContentExport,
     ContentImport,
 )
+from cyroid.models.catalog import CatalogInstalledItem
 
 logger = logging.getLogger(__name__)
 
@@ -249,6 +250,11 @@ def delete_content(
     # Check permission (owner or admin)
     if content.created_by_id != current_user.id and not current_user.is_admin:
         raise HTTPException(status_code=403, detail="Not authorized to delete this content")
+
+    # Clean up catalog installed item record if this content was installed from catalog
+    db.query(CatalogInstalledItem).filter(
+        CatalogInstalledItem.local_resource_id == content_id
+    ).delete()
 
     db.delete(content)
     db.commit()
