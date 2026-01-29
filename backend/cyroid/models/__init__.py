@@ -6,6 +6,7 @@ from cyroid.models.template import OSType, VMType, LinuxDistro
 from cyroid.models.range import Range, RangeStatus
 from cyroid.models.network import Network
 from cyroid.models.vm import VM, VMStatus, BootSource
+from cyroid.models.vm_network import VMNetwork
 from cyroid.models.artifact import Artifact, ArtifactPlacement, ArtifactType, MaliciousIndicator, PlacementStatus
 from cyroid.models.snapshot import Snapshot
 from cyroid.models.event_log import EventLog, EventType
@@ -31,7 +32,7 @@ __all__ = [
     "OSType", "VMType", "LinuxDistro",
     "Range", "RangeStatus",
     "Network",
-    "VM", "VMStatus", "BootSource",
+    "VM", "VMStatus", "BootSource", "VMNetwork",
     "Artifact", "ArtifactPlacement", "ArtifactType", "MaliciousIndicator", "PlacementStatus",
     "Snapshot",
     "EventLog", "EventType",
