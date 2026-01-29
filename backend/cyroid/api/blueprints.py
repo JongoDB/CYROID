@@ -104,6 +104,52 @@ def update_blueprint(
     return _blueprint_to_detail_response(blueprint, config, current_user.username)
 
 
+@router.put("/{blueprint_id}/update-from-range/{range_id}", response_model=BlueprintDetailResponse)
+def update_blueprint_from_range(
+    blueprint_id: UUID,
+    range_id: UUID,
+    db: DBSession,
+    current_user: CurrentUser,
+) -> BlueprintDetailResponse:
+    """Update blueprint config from a modified range instance. Increments version."""
+    from cyroid.models import User
+
+    # Verify blueprint exists
+    blueprint = db.query(RangeBlueprint).filter(RangeBlueprint.id == blueprint_id).first()
+    if not blueprint:
+        raise HTTPException(status_code=404, detail="Blueprint not found")
+
+    # Check authorization - owner or admin
+    if blueprint.created_by and blueprint.created_by != current_user.id:
+        # Check if user is admin (has admin role)
+        if not any(role.name == "admin" for role in current_user.roles):
+            raise HTTPException(status_code=403, detail="Not authorized to modify this blueprint")
+
+    # Verify range is an instance of this blueprint
+    instance = db.query(RangeInstance).filter(
+        RangeInstance.blueprint_id == blueprint_id,
+        RangeInstance.range_id == range_id,
+    ).first()
+    if not instance:
+        raise HTTPException(status_code=404, detail="Range is not an instance of this blueprint")
+
+    # Extract new config from range
+    new_config = extract_config_from_range(db, range_id)
+
+    # Update blueprint
+    blueprint.config = new_config.model_dump()
+    blueprint.version += 1
+
+    db.commit()
+    db.refresh(blueprint)
+
+    # Get creator username for response
+    creator = db.query(User).filter(User.id == blueprint.created_by).first()
+    username = creator.username if creator else None
+
+    return _blueprint_to_detail_response(blueprint, new_config, username)
+
+
 @router.delete("/{blueprint_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_blueprint(blueprint_id: UUID, db: DBSession, current_user: CurrentUser):
     """Delete a blueprint and its associated content. Fails if instances exist."""
