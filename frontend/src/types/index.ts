@@ -85,10 +85,26 @@ export interface RangeRouter {
   updated_at: string
 }
 
+// Multi-NIC Support Types
+export interface NetworkInterfaceCreate {
+  network_id: string
+  ip_address?: string | null
+}
+
+export interface NetworkInterfaceResponse {
+  network_id: string
+  network_name: string
+  ip_address: string
+  subnet: string
+  is_primary: boolean
+}
+
 export interface VM {
   id: string
   range_id: string
   network_id: string
+  // Multi-NIC support: array of network interfaces
+  networks?: NetworkInterfaceResponse[]
   // Image Library source fields (one of these will be set)
   base_image_id?: string | null
   golden_image_id?: string | null
@@ -1084,12 +1100,15 @@ export interface SyncResult {
  */
 export interface VMCreateWithImageLibrary {
   range_id: string
-  network_id: string
   hostname: string
-  ip_address: string
   cpu?: number
   ram_mb?: number
   disk_gb?: number
+  // NEW: Multiple network interfaces (first is primary)
+  networks?: NetworkInterfaceCreate[]
+  // DEPRECATED: Single network (kept for backwards compatibility)
+  network_id?: string
+  ip_address?: string
   // Image source - exactly one required
   base_image_id?: string | null
   golden_image_id?: string | null
