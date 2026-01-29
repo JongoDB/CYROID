@@ -2193,4 +2193,36 @@ export const catalogApi = {
     api.delete(`/catalog/installed/${installedId}`),
 }
 
+// ============ Local Docker Registry API ============
+
+export interface RegistryImage {
+  name: string
+  tags: string[]
+}
+
+export interface RegistryStats {
+  image_count: number
+  tag_count: number
+  healthy: boolean
+}
+
+export interface PushResponse {
+  success: boolean
+  message: string
+}
+
+export const registryApi = {
+  listImages: () =>
+    api.get<RegistryImage[]>('/registry/images'),
+
+  getStats: () =>
+    api.get<RegistryStats>('/registry/stats'),
+
+  pushImage: (imageTag: string) =>
+    api.post<PushResponse>('/registry/push', { image_tag: imageTag }),
+
+  health: () =>
+    api.get<{ healthy: boolean }>('/registry/health'),
+}
+
 export default api
