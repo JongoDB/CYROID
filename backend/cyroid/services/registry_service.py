@@ -185,6 +185,62 @@ class RegistryService:
         logger.info(f"Image {image_tag} not in registry, pushing...")
         return await self.push_image(image_tag, progress_callback)
 
+    async def list_images(self) -> List[dict]:
+        """List all images in the registry.
+
+        Returns:
+            List of dicts with 'name' and 'tags' keys
+        """
+        try:
+            client = await self._get_http_client()
+
+            # Get catalog
+            response = await client.get(f"{self.REGISTRY_URL}/v2/_catalog")
+            if response.status_code != 200:
+                logger.warning(f"Failed to get catalog: {response.status_code}")
+                return []
+
+            repositories = response.json().get('repositories', [])
+
+            # Get tags for each repository
+            images = []
+            for repo in repositories:
+                tags_response = await client.get(f"{self.REGISTRY_URL}/v2/{repo}/tags/list")
+                if tags_response.status_code == 200:
+                    tags = tags_response.json().get('tags', [])
+                    images.append({
+                        'name': repo,
+                        'tags': tags or []
+                    })
+                else:
+                    images.append({
+                        'name': repo,
+                        'tags': []
+                    })
+
+            return images
+
+        except httpx.RequestError as e:
+            logger.error(f"Failed to list registry images: {e}")
+            return []
+
+    async def get_stats(self) -> dict:
+        """Get registry statistics.
+
+        Returns:
+            Dict with image_count, tag_count, healthy status
+        """
+        images = await self.list_images()
+        healthy = await self.is_healthy()
+
+        tag_count = sum(len(img.get('tags', [])) for img in images)
+
+        return {
+            'image_count': len(images),
+            'tag_count': tag_count,
+            'healthy': healthy,
+        }
+
 
 # Singleton instance
 _registry_service: Optional[RegistryService] = None

@@ -206,6 +206,46 @@ class TestRegistryService:
                 assert result is True
                 mock_push.assert_called_once()
 
+    @pytest.mark.asyncio
+    async def test_list_images_returns_catalog(self, registry_service):
+        """Test list_images returns images from registry catalog."""
+        mock_catalog_response = MagicMock()
+        mock_catalog_response.status_code = 200
+        mock_catalog_response.json.return_value = {"repositories": ["image1", "image2"]}
+
+        mock_tags_response = MagicMock()
+        mock_tags_response.status_code = 200
+        mock_tags_response.json.return_value = {"tags": ["latest", "v1.0"]}
+
+        with patch.object(registry_service, '_get_http_client') as mock_get_client:
+            mock_client = AsyncMock()
+            mock_client.get = AsyncMock(side_effect=[mock_catalog_response, mock_tags_response, mock_tags_response])
+            mock_get_client.return_value = mock_client
+
+            result = await registry_service.list_images()
+
+            assert len(result) == 2
+            assert result[0]['name'] == 'image1'
+            assert 'tags' in result[0]
+
+    @pytest.mark.asyncio
+    async def test_get_stats_returns_summary(self, registry_service):
+        """Test get_stats returns registry statistics."""
+        with patch.object(registry_service, 'list_images', new_callable=AsyncMock) as mock_list:
+            mock_list.return_value = [
+                {'name': 'image1', 'tags': ['latest']},
+                {'name': 'image2', 'tags': ['v1', 'v2']},
+            ]
+
+            with patch.object(registry_service, 'is_healthy', new_callable=AsyncMock) as mock_healthy:
+                mock_healthy.return_value = True
+
+                result = await registry_service.get_stats()
+
+                assert result['image_count'] == 2
+                assert result['tag_count'] == 3
+                assert result['healthy'] is True
+
 
 class TestRegistryServiceSingleton:
     """Test cases for the singleton pattern."""
