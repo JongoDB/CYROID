@@ -14,10 +14,21 @@ class NetworkConfig(BaseModel):
     is_isolated: bool = False
 
 
+class NetworkInterfaceConfig(BaseModel):
+    """Network interface configuration for multi-NIC VMs in blueprints."""
+    network_name: str
+    ip_address: Optional[str] = None  # None = auto-assign on import
+    is_primary: bool = False
+
+
 class VMConfig(BaseModel):
     hostname: str
-    ip_address: str
-    network_name: str
+    # Legacy fields (kept for backward compatibility with older blueprints)
+    ip_address: Optional[str] = None
+    network_name: Optional[str] = None
+    # Multi-NIC support: list of network interfaces
+    # If present, takes precedence over legacy ip_address/network_name
+    network_interfaces: Optional[List[NetworkInterfaceConfig]] = None
     # Image Library sources - exactly one required
     base_image_id: Optional[str] = None
     golden_image_id: Optional[str] = None
