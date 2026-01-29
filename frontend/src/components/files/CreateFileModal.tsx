@@ -1,9 +1,10 @@
 // frontend/src/components/files/CreateFileModal.tsx
 import { useState } from 'react';
-import { X, FileCode, Loader2 } from 'lucide-react';
+import { FileCode, Loader2 } from 'lucide-react';
 import clsx from 'clsx';
 import { filesApi } from '../../services/api';
 import { toast } from '../../stores/toastStore';
+import { Modal, ModalBody, ModalFooter } from '../common/Modal';
 
 interface CreateFileModalProps {
   isOpen: boolean;
@@ -218,109 +219,92 @@ export function CreateFileModal({
     }
   };
 
-  if (!isOpen) return null;
-
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto">
-      {/* Backdrop */}
-      <div className="fixed inset-0 bg-gray-900 bg-opacity-50" onClick={onClose} />
-
-      {/* Modal */}
-      <div className="relative min-h-screen flex items-center justify-center p-4">
-        <div className="relative bg-white rounded-lg shadow-xl w-full max-w-lg">
-          {/* Header */}
-          <div className="flex items-center justify-between px-4 py-3 border-b">
-            <h3 className="text-lg font-semibold text-gray-900">Create New File</h3>
-            <button
-              onClick={onClose}
-              className="text-gray-400 hover:text-gray-600"
-            >
-              <X className="h-5 w-5" />
-            </button>
-          </div>
-
-          {/* Content */}
-          <div className="p-4">
-            {/* Template Selection */}
-            <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                File Template
-              </label>
-              <div className="grid grid-cols-2 gap-2">
-                {FILE_TEMPLATES.map((template, i) => (
-                  <button
-                    key={i}
-                    onClick={() => handleTemplateSelect(template)}
-                    className={clsx(
-                      'flex items-center px-3 py-2 text-sm rounded-lg border transition-colors text-left',
-                      selectedTemplate === template
-                        ? 'border-primary-500 bg-primary-50 text-primary-700'
-                        : 'border-gray-200 hover:bg-gray-50 text-gray-700'
-                    )}
-                  >
-                    <FileCode className="h-4 w-4 mr-2 flex-shrink-0" />
-                    {template.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* File Name */}
-            <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                File Name
-              </label>
-              <input
-                type="text"
-                value={fileName}
-                onChange={(e) => {
-                  setFileName(e.target.value);
-                  setError(null);
-                }}
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      title="Create New File"
+      size="lg"
+      description="Select a file template and enter a file name to create a new file"
+    >
+      <ModalBody>
+        {/* Template Selection */}
+        <div className="mb-4">
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            File Template
+          </label>
+          <div className="grid grid-cols-2 gap-2">
+            {FILE_TEMPLATES.map((template, i) => (
+              <button
+                key={i}
+                onClick={() => handleTemplateSelect(template)}
                 className={clsx(
-                  'w-full px-3 py-2 border rounded-lg text-sm',
-                  error
-                    ? 'border-red-300 focus:ring-red-500 focus:border-red-500'
-                    : 'border-gray-300 focus:ring-primary-500 focus:border-primary-500'
+                  'flex items-center px-3 py-2 text-sm rounded-lg border transition-colors text-left',
+                  selectedTemplate === template
+                    ? 'border-primary-500 bg-primary-50 text-primary-700'
+                    : 'border-gray-200 hover:bg-gray-50 text-gray-700'
                 )}
-                placeholder="filename.ext"
-              />
-              {error && <p className="mt-1 text-sm text-red-600">{error}</p>}
-            </div>
-
-            {/* Path Preview */}
-            <div className="mb-4 p-3 bg-gray-50 rounded-lg">
-              <p className="text-xs text-gray-500 mb-1">Will create:</p>
-              <code className="text-sm text-gray-700">
-                {basePath}/{fileName}
-              </code>
-            </div>
-          </div>
-
-          {/* Footer */}
-          <div className="flex items-center justify-end gap-2 px-4 py-3 border-t bg-gray-50 rounded-b-lg">
-            <button
-              onClick={onClose}
-              className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleCreate}
-              disabled={creating || !fileName.trim()}
-              className={clsx(
-                'inline-flex items-center px-4 py-2 text-sm font-medium rounded-md',
-                creating || !fileName.trim()
-                  ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                  : 'bg-primary-600 text-white hover:bg-primary-700'
-              )}
-            >
-              {creating && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-              Create File
-            </button>
+              >
+                <FileCode className="h-4 w-4 mr-2 flex-shrink-0" />
+                {template.label}
+              </button>
+            ))}
           </div>
         </div>
-      </div>
-    </div>
+
+        {/* File Name */}
+        <div className="mb-4">
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            File Name
+          </label>
+          <input
+            type="text"
+            value={fileName}
+            onChange={(e) => {
+              setFileName(e.target.value);
+              setError(null);
+            }}
+            className={clsx(
+              'w-full px-3 py-2 border rounded-lg text-sm',
+              error
+                ? 'border-red-300 focus:ring-red-500 focus:border-red-500'
+                : 'border-gray-300 focus:ring-primary-500 focus:border-primary-500'
+            )}
+            placeholder="filename.ext"
+          />
+          {error && <p className="mt-1 text-sm text-red-600">{error}</p>}
+        </div>
+
+        {/* Path Preview */}
+        <div className="p-3 bg-gray-50 rounded-lg">
+          <p className="text-xs text-gray-500 mb-1">Will create:</p>
+          <code className="text-sm text-gray-700">
+            {basePath}/{fileName}
+          </code>
+        </div>
+      </ModalBody>
+
+      <ModalFooter>
+        <button
+          onClick={onClose}
+          className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+        >
+          Cancel
+        </button>
+        <button
+          onClick={handleCreate}
+          disabled={creating || !fileName.trim()}
+          className={clsx(
+            'inline-flex items-center px-4 py-2 text-sm font-medium rounded-md',
+            creating || !fileName.trim()
+              ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+              : 'bg-primary-600 text-white hover:bg-primary-700'
+          )}
+        >
+          {creating && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+          Create File
+        </button>
+      </ModalFooter>
+    </Modal>
   );
 }
