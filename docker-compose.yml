@@ -183,6 +183,22 @@ services:
         condition: service_healthy
     command: dramatiq cyroid.tasks --processes 2 --threads 4
 
+  registry:
+    image: registry:2
+    restart: unless-stopped
+    environment:
+      REGISTRY_STORAGE_DELETE_ENABLED: "true"
+    volumes:
+      - ${CYROID_DATA_DIR:-/data/cyroid}/registry:/var/lib/registry
+    networks:
+      cyroid-mgmt:
+        ipv4_address: 172.30.0.16
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:5000/v2/"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
   frontend:
     image: ghcr.io/jongodb/cyroid-frontend:latest
     expose:
