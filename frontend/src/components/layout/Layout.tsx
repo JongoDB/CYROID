@@ -42,6 +42,7 @@ interface NavItem {
 interface NavSection {
   title: string
   items: NavItem[]
+  isStorefront?: boolean  // Special styling for marketplace/catalog section
 }
 
 // Standalone nav items (role-filtered)
@@ -53,10 +54,7 @@ const navSections: NavSection[] = [
   {
     title: 'Content Development',
     items: [
-      { name: 'Catalog', href: '/catalog', icon: Store, requiredRoles: ['admin', 'engineer', 'evaluator'] },
       { name: 'Content Library', href: '/content', icon: BookOpen, requiredRoles: ['admin', 'engineer', 'evaluator'] },
-      { name: 'VM Library', href: '/vm-library', icon: Server, requiredRoles: ['admin', 'engineer'] },
-      { name: 'Image Cache', href: '/cache', icon: HardDrive, requiredRoles: ['admin', 'engineer'] },
       { name: 'Artifacts', href: '/artifacts', icon: FileBox, requiredRoles: ['admin', 'engineer'] },
     ]
   },
@@ -66,12 +64,21 @@ const navSections: NavSection[] = [
       { name: 'Ranges', href: '/ranges', icon: Network, requiredRoles: ['admin', 'engineer', 'evaluator'] },
       { name: 'Range Blueprints', href: '/blueprints', icon: LayoutTemplate, requiredRoles: ['admin', 'engineer'] },
       { name: 'Training Scenarios', href: '/scenarios', icon: Target, requiredRoles: ['admin', 'engineer'] },
+      { name: 'VM Library', href: '/vm-library', icon: Server, requiredRoles: ['admin', 'engineer'] },
+      { name: 'Image Cache', href: '/cache', icon: HardDrive, requiredRoles: ['admin', 'engineer'] },
     ]
   },
   {
     title: 'Event Management',
     items: [
       { name: 'Training Events', href: '/events', icon: CalendarDays },  // Accessible to all
+    ]
+  },
+  {
+    title: 'Content Catalog',
+    isStorefront: true,  // Distinct styling for marketplace
+    items: [
+      { name: 'Browse Catalog', href: '/catalog', icon: Store, requiredRoles: ['admin', 'engineer', 'evaluator'] },
     ]
   },
 ]
@@ -172,9 +179,15 @@ export default function Layout({ children }: LayoutProps) {
 
           {/* Sectioned navigation */}
           {filteredSections.map((section, index) => (
-            <div key={section.title} className="pt-4">
-              {index > 0 && <div className="mx-3 mb-3 border-t border-gray-700" />}
-              <h3 className="px-3 text-xs font-semibold text-gray-400 uppercase tracking-wider">
+            <div key={section.title} className={clsx(
+              "pt-4",
+              section.isStorefront && "mt-4 mx-2 rounded-lg bg-gradient-to-r from-indigo-900/50 to-purple-900/50 p-2"
+            )}>
+              {index > 0 && !section.isStorefront && <div className="mx-3 mb-3 border-t border-gray-700" />}
+              <h3 className={clsx(
+                "px-3 text-xs font-semibold uppercase tracking-wider",
+                section.isStorefront ? "text-indigo-300" : "text-gray-400"
+              )}>
                 {section.title}
               </h3>
               <div className="mt-2 space-y-1">
@@ -185,12 +198,19 @@ export default function Layout({ children }: LayoutProps) {
                     onClick={() => setSidebarOpen(false)}
                     className={clsx(
                       "flex items-center px-3 py-2 text-sm font-medium rounded-md",
-                      location.pathname === item.href
-                        ? "bg-gray-800 text-white"
-                        : "text-gray-300 hover:bg-gray-700 hover:text-white"
+                      section.isStorefront
+                        ? location.pathname === item.href || location.pathname.startsWith(item.href + '/')
+                          ? "bg-indigo-600 text-white"
+                          : "text-indigo-200 hover:bg-indigo-800/50 hover:text-white"
+                        : location.pathname === item.href
+                          ? "bg-gray-800 text-white"
+                          : "text-gray-300 hover:bg-gray-700 hover:text-white"
                     )}
                   >
-                    <item.icon className="mr-3 h-5 w-5" />
+                    <item.icon className={clsx(
+                      "mr-3 h-5 w-5",
+                      section.isStorefront && "text-indigo-300"
+                    )} />
                     {item.name}
                   </Link>
                 ))}
@@ -282,9 +302,15 @@ export default function Layout({ children }: LayoutProps) {
 
             {/* Sectioned navigation */}
             {filteredSections.map((section, index) => (
-              <div key={section.title} className="pt-4">
-                {index > 0 && <div className="mx-3 mb-3 border-t border-gray-700" />}
-                <h3 className="px-3 text-xs font-semibold text-gray-400 uppercase tracking-wider">
+              <div key={section.title} className={clsx(
+                "pt-4",
+                section.isStorefront && "mt-4 mx-2 rounded-lg bg-gradient-to-r from-indigo-900/50 to-purple-900/50 p-2"
+              )}>
+                {index > 0 && !section.isStorefront && <div className="mx-3 mb-3 border-t border-gray-700" />}
+                <h3 className={clsx(
+                  "px-3 text-xs font-semibold uppercase tracking-wider",
+                  section.isStorefront ? "text-indigo-300" : "text-gray-400"
+                )}>
                   {section.title}
                 </h3>
                 <div className="mt-2 space-y-1">
@@ -294,12 +320,19 @@ export default function Layout({ children }: LayoutProps) {
                       to={item.href}
                       className={clsx(
                         "flex items-center px-3 py-2 text-sm font-medium rounded-md",
-                        location.pathname === item.href
-                          ? "bg-gray-800 text-white"
-                          : "text-gray-300 hover:bg-gray-700 hover:text-white"
+                        section.isStorefront
+                          ? location.pathname === item.href || location.pathname.startsWith(item.href + '/')
+                            ? "bg-indigo-600 text-white"
+                            : "text-indigo-200 hover:bg-indigo-800/50 hover:text-white"
+                          : location.pathname === item.href
+                            ? "bg-gray-800 text-white"
+                            : "text-gray-300 hover:bg-gray-700 hover:text-white"
                       )}
                     >
-                      <item.icon className="mr-3 h-5 w-5" />
+                      <item.icon className={clsx(
+                        "mr-3 h-5 w-5",
+                        section.isStorefront && "text-indigo-300"
+                      )} />
                       {item.name}
                     </Link>
                   ))}
