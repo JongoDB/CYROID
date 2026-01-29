@@ -49,15 +49,20 @@ function NetworkInterfaceEditor({ interfaces, onChange, networks, disabled }: Ne
   const [availableIpsMap, setAvailableIpsMap] = useState<Record<string, string[]>>({})
   const [loadingIps, setLoadingIps] = useState<Record<number, boolean>>({})
 
+  // Use ref to track current interfaces to avoid stale closure in async functions
+  const interfacesRef = useRef(interfaces)
+  interfacesRef.current = interfaces
+
   const fetchAvailableIps = async (networkId: string, index: number) => {
     if (!networkId) return
     setLoadingIps(prev => ({ ...prev, [index]: true }))
     try {
       const response = await vmsApi.getAvailableIps(networkId, 50)
       setAvailableIpsMap(prev => ({ ...prev, [networkId]: response.available_ips || [] }))
-      // Auto-select first available IP
+      // Auto-select first available IP using current interfaces from ref
       if (response.available_ips?.length > 0) {
-        const updated = [...interfaces]
+        const currentInterfaces = interfacesRef.current
+        const updated = [...currentInterfaces]
         updated[index] = { ...updated[index], ip_address: response.available_ips[0] }
         onChange(updated)
       }
@@ -1580,8 +1585,8 @@ export default function RangeDetail() {
                         disabled={baseImages.length === 0}
                         onChange={() => {
                           setVmSourceType('base')
-                          setVmForm({
-                            ...vmForm,
+                          setVmForm(prev => ({
+                            ...prev,
                             base_image_id: '',
                             golden_image_id: '',
                             snapshot_id: '',
@@ -1589,7 +1594,7 @@ export default function RangeDetail() {
                             cpu: 2,
                             ram_mb: 2048,
                             disk_gb: 20
-                          })
+                          }))
                           setShowWindowsOptions(false)
                           setShowLinuxISOOptions(false)
                           setShowLinuxContainerOptions(false)
@@ -1611,8 +1616,8 @@ export default function RangeDetail() {
                         disabled={goldenImages.length === 0}
                         onChange={() => {
                           setVmSourceType('golden')
-                          setVmForm({
-                            ...vmForm,
+                          setVmForm(prev => ({
+                            ...prev,
                             base_image_id: '',
                             golden_image_id: '',
                             snapshot_id: '',
@@ -1620,7 +1625,7 @@ export default function RangeDetail() {
                             cpu: 2,
                             ram_mb: 2048,
                             disk_gb: 20
-                          })
+                          }))
                           setShowWindowsOptions(false)
                           setShowLinuxISOOptions(false)
                           setShowLinuxContainerOptions(false)
@@ -1642,8 +1647,8 @@ export default function RangeDetail() {
                         disabled={availableSnapshots.length === 0}
                         onChange={() => {
                           setVmSourceType('snapshot')
-                          setVmForm({
-                            ...vmForm,
+                          setVmForm(prev => ({
+                            ...prev,
                             base_image_id: '',
                             golden_image_id: '',
                             snapshot_id: '',
@@ -1651,7 +1656,7 @@ export default function RangeDetail() {
                             cpu: 2,
                             ram_mb: 2048,
                             disk_gb: 20
-                          })
+                          }))
                           setShowWindowsOptions(false)
                           setShowLinuxISOOptions(false)
                           setShowLinuxContainerOptions(false)
@@ -1692,8 +1697,8 @@ export default function RangeDetail() {
                         setShowLinuxISOOptions(isLinuxISO)
                         setShowLinuxContainerOptions(isLinuxContainer)
                         setLinuxContainerType(isKasmVNC ? 'kasmvnc' : isLinuxServer ? 'linuxserver' : null)
-                        setVmForm({
-                          ...vmForm,
+                        setVmForm(prev => ({
+                          ...prev,
                           base_image_id: e.target.value,
                           golden_image_id: '',
                           snapshot_id: '',
@@ -1706,7 +1711,7 @@ export default function RangeDetail() {
                           linux_username: '',
                           linux_password: '',
                           linux_user_sudo: true
-                        })
+                        }))
                       }}
                       className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
                     >
@@ -1743,8 +1748,8 @@ export default function RangeDetail() {
                         // Filter display_type to only valid VMCreate values (headless not supported)
                         const displayType = goldenImage?.display_type === 'desktop' || goldenImage?.display_type === 'server'
                           ? goldenImage.display_type : 'desktop'
-                        setVmForm({
-                          ...vmForm,
+                        setVmForm(prev => ({
+                          ...prev,
                           base_image_id: '',
                           golden_image_id: e.target.value,
                           snapshot_id: '',
@@ -1754,7 +1759,7 @@ export default function RangeDetail() {
                           disk_gb: goldenImage?.default_disk_gb || 40,
                           windows_version: isWindows ? '11' : '',
                           display_type: displayType
-                        })
+                        }))
                       }}
                       className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
                     >
@@ -1789,8 +1794,8 @@ export default function RangeDetail() {
                         setShowLinuxISOOptions(snapshot?.vm_type === 'linux_vm')
                         setShowLinuxContainerOptions(snapshot?.vm_type === 'container' && !isWindows)
                         setLinuxContainerType(null)
-                        setVmForm({
-                          ...vmForm,
+                        setVmForm(prev => ({
+                          ...prev,
                           base_image_id: '',
                           golden_image_id: '',
                           snapshot_id: e.target.value,
@@ -1799,7 +1804,7 @@ export default function RangeDetail() {
                           ram_mb: snapshot?.default_ram_mb || 4096,
                           disk_gb: snapshot?.default_disk_gb || 40,
                           display_type: (snapshot?.display_type as 'desktop' | 'server') || 'desktop'
-                        })
+                        }))
                       }}
                       className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
                     >
