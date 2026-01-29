@@ -26,9 +26,9 @@ import {
   Store
 } from 'lucide-react'
 import clsx from 'clsx'
-import { InfrastructureTab, CatalogSourcesTab } from '../components/admin'
+import { InfrastructureTab, CatalogSourcesTab, RegistryTab } from '../components/admin'
 
-type TabType = 'system' | 'users' | 'infrastructure' | 'catalog'
+type TabType = 'system' | 'users' | 'infrastructure' | 'catalog' | 'registry'
 
 export default function Admin() {
   const { user: currentUser } = useAuthStore()
@@ -399,6 +399,18 @@ export default function Admin() {
           >
             <Store className="h-5 w-5" />
             Catalog
+          </button>
+          <button
+            onClick={() => setActiveTab('registry')}
+            className={clsx(
+              'flex items-center gap-2 py-4 px-1 border-b-2 font-medium text-sm',
+              activeTab === 'registry'
+                ? 'border-primary-500 text-primary-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+            )}
+          >
+            <Container className="h-5 w-5" />
+            Registry
           </button>
         </nav>
       </div>
@@ -1117,6 +1129,11 @@ export default function Admin() {
         {/* Catalog Tab */}
         {activeTab === 'catalog' && (
           <CatalogSourcesTab />
+        )}
+
+        {/* Registry Tab */}
+        {activeTab === 'registry' && (
+          <RegistryTab />
         )}
       </div>
     </div>
