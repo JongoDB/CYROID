@@ -3028,6 +3028,67 @@ local-hostname: {name}
 
         image_size = 0
 
+        # Get DinD client first - we'll need it for all paths
+        try:
+            range_client = self.get_range_client_sync(range_id, docker_url)
+        except Exception as e:
+            logger.error(f"Failed to connect to DinD at {docker_url}: {e}")
+            report_progress(0, 0, 'error')
+            return False
+
+        # Check if image already exists in DinD (early return)
+        try:
+            range_client.images.get(image)
+            logger.info(f"Image '{image}' already exists in DinD, skipping transfer")
+            report_progress(0, 0, 'already_exists')
+            return True
+        except docker.errors.ImageNotFound:
+            pass  # Need to transfer
+
+        # Try registry-first: if image is in CYROID registry, pull directly into DinD
+        # This allows deployment even when image isn't on the host Docker daemon
+        try:
+            from cyroid.services.registry_service import get_registry_service
+            registry = get_registry_service()
+
+            if await registry.is_healthy():
+                # Check if image is already in registry
+                registry_images = await registry.list_images()
+                # Parse image name (e.g., "cyroid/samba-dc:latest" -> repo="cyroid/samba-dc", tag="latest")
+                if ':' in image:
+                    img_repo, img_tag = image.rsplit(':', 1)
+                else:
+                    img_repo, img_tag = image, 'latest'
+
+                # Check if this image+tag is in registry
+                image_in_registry = False
+                for reg_img in registry_images:
+                    if reg_img.get('name') == img_repo and img_tag in reg_img.get('tags', []):
+                        image_in_registry = True
+                        break
+
+                if image_in_registry:
+                    logger.info(f"Image '{image}' found in registry, pulling directly into DinD")
+                    report_progress(0, 0, 'pulling_from_registry')
+
+                    registry_tag = registry.get_registry_tag(image)
+                    try:
+                        range_client.images.pull(registry_tag)
+
+                        # Retag to original name
+                        pulled_image = range_client.images.get(registry_tag)
+                        pulled_image.tag(img_repo, img_tag)
+
+                        logger.info(f"Successfully pulled '{image}' from registry into DinD")
+                        report_progress(0, 0, 'complete')
+                        return True
+                    except Exception as pull_err:
+                        logger.warning(f"Failed to pull from registry: {pull_err}, falling back to host transfer")
+        except ImportError:
+            logger.debug("Registry service not available")
+        except Exception as e:
+            logger.warning(f"Registry-first check failed: {e}, falling back to host transfer")
+
         # Check if image exists on host - try with and without :latest tag
         host_image = None
         image_variants = [image]
@@ -3064,19 +3125,7 @@ local-hostname: {name}
                 return False
 
         try:
-            # Get client for DinD
-            range_client = self.get_range_client_sync(range_id, docker_url)
-
-            # Check if image already exists in DinD
-            try:
-                range_client.images.get(image)
-                logger.info(f"Image '{image}' already exists in DinD, skipping transfer")
-                report_progress(image_size, image_size, 'already_exists')
-                return True
-            except docker.errors.ImageNotFound:
-                pass  # Need to transfer
-
-            # Try registry-based transfer first (much faster with layer caching)
+            # Try registry-based transfer from host (much faster with layer caching)
             try:
                 from cyroid.services.registry_service import get_registry_service
                 registry = get_registry_service()

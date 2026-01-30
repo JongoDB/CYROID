@@ -100,6 +100,8 @@ export default function ImageCache() {
   // Build state for tracking Docker image builds
   const [buildableImages, setBuildableImages] = useState<BuildableImage[]>([])
   const [dockerBuildStatus, setDockerBuildStatus] = useState<Record<string, DockerBuildStatus>>({})
+  // Registry images for checking if built images are in registry
+  const [registryImages, setRegistryImages] = useState<string[]>([])
 
   // Registry status for cached images (keyed by image tag)
   const [registryStatus, setRegistryStatus] = useState<Record<string, ImageStatusResponse>>({})
@@ -122,7 +124,7 @@ export default function ImageCache() {
     setLoading(true)
     setError(null)
     try {
-      const [statsRes, imagesRes, recommendedRes, windowsRes, linuxRes, macosRes, customISOsRes, buildableRes] = await Promise.all([
+      const [statsRes, imagesRes, recommendedRes, windowsRes, linuxRes, macosRes, customISOsRes, buildableRes, registryRes] = await Promise.all([
         cacheApi.getStats(),
         cacheApi.listImages(),
         cacheApi.getRecommendedImages(),
@@ -131,6 +133,7 @@ export default function ImageCache() {
         cacheApi.getMacOSVersions(),
         cacheApi.listCustomISOs(),
         cacheApi.listBuildableImages(),
+        registryApi.listImages(),
       ])
       setStats(statsRes.data)
       setImages(imagesRes.data)
@@ -140,6 +143,9 @@ export default function ImageCache() {
       setMacosVersions(macosRes.data)
       setCustomISOs(customISOsRes.data)
       setBuildableImages(buildableRes.data.images || [])
+      // Extract repository names from registry images for checking if built images are in registry
+      const repoNames = (registryRes.data || []).map((img: any) => img.repository || img.name || '')
+      setRegistryImages(repoNames)
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to load cache data')
     } finally {
@@ -1769,7 +1775,8 @@ export default function ImageCache() {
                   {buildableImages.map((image) => {
                     const buildKey = `${image.name}_latest`
                     const isBuilding = dockerBuildStatus[buildKey]?.status === 'building'
-                    const isCached = images.some(img => img.tags?.some(t => t.includes(`cyroid/${image.name}`)))
+                    // Check if image is in registry (what matters for deploying ranges)
+                    const inRegistry = registryImages.some(repo => repo.includes(`cyroid/${image.name}`))
 
                     return (
                       <div key={image.name} className="px-6 py-4">
@@ -1779,9 +1786,9 @@ export default function ImageCache() {
                               <Hammer className="h-5 w-5 text-gray-400 mr-3" />
                               <div>
                                 <span className="font-medium text-gray-900">cyroid/{image.name}</span>
-                                {isCached && (
+                                {inRegistry && (
                                   <span className="ml-2 px-2 py-0.5 text-xs bg-green-100 text-green-800 rounded-full">
-                                    Cached
+                                    In Registry
                                   </span>
                                 )}
                               </div>
@@ -1791,7 +1798,7 @@ export default function ImageCache() {
                             )}
                           </div>
                           <div className="flex items-center gap-2">
-                            {isCached && (
+                            {inRegistry && (
                               <button
                                 onClick={() => handleBuildImage(image.name, true)}
                                 disabled={isBuilding || actionLoading === `build-${buildKey}`}
