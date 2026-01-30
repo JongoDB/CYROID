@@ -983,9 +983,9 @@ progress_bar_init() {
 # Update bottom progress bar
 # Usage: progress_bar_update current total "Operation" "detail"
 progress_bar_update() {
-    local current="$1"
-    local total="$2"
-    local operation="$3"
+    local current="${1:-0}"
+    local total="${2:-1}"
+    local operation="${3:-Working}"
     local detail="${4:-}"
 
     if [ "$USE_TUI" != true ]; then
@@ -3044,6 +3044,37 @@ management_menu() {
                         echo ""
                     fi
 
+                    # Check for image backups - PROTECT BY DEFAULT
+                    local delete_backups=false
+                    local backup_list=""
+                    if [ -d "$BACKUP_DIR" ]; then
+                        backup_list=$(ls -1 "$BACKUP_DIR" 2>/dev/null) || true
+                    fi
+
+                    if [ -n "$backup_list" ]; then
+                        local backup_count=$(echo "$backup_list" | wc -l | tr -d ' ')
+                        local backup_size=$(du -sh "$BACKUP_DIR" 2>/dev/null | cut -f1) || backup_size="unknown"
+
+                        echo ""
+                        gum style --foreground 212 --bold "  Image Backups Found: $backup_count ($backup_size total)"
+                        echo ""
+                        echo "  Backups are stored separately at: $BACKUP_DIR"
+                        echo "  These will be ${GREEN}PRESERVED${NC} by default."
+                        echo ""
+                        echo "$backup_list" | while read -r b; do
+                            [ -n "$b" ] && echo "    • $b"
+                        done
+                        echo ""
+
+                        if gum confirm --affirmative="Delete backups too" --negative="Keep backups (recommended)" --default=false "Also delete image backups?"; then
+                            delete_backups=true
+                            tui_warn "Image backups will also be deleted!"
+                        else
+                            tui_success "Image backups will be preserved"
+                        fi
+                        echo ""
+                    fi
+
                     if gum confirm --affirmative="Yes, delete everything" --negative="Cancel" "Are you sure? This cannot be undone."; then
                         # Delete ranges first if requested
                         if [ "$delete_ranges" = true ]; then
@@ -3102,6 +3133,16 @@ management_menu() {
                         # Clean up traefik certs
                         rm -f "$PROJECT_ROOT/traefik/acme.json" 2>/dev/null || true
                         rm -rf "$PROJECT_ROOT/traefik/certs" 2>/dev/null || true
+
+                        # Delete backups only if explicitly requested
+                        if [ "$delete_backups" = true ] && [ -d "$BACKUP_DIR" ]; then
+                            tui_info "Removing image backups..."
+                            rm -rf "$BACKUP_DIR"
+                            tui_success "Image backups removed"
+                        elif [ -d "$BACKUP_DIR" ] && [ -n "$backup_list" ]; then
+                            echo ""
+                            tui_success "Image backups preserved at: $BACKUP_DIR"
+                        fi
 
                         echo ""
                         tui_success "Cleanup complete"
@@ -3231,6 +3272,31 @@ management_menu() {
                         echo ""
                     fi
 
+                    # Check for image backups - PROTECT BY DEFAULT
+                    local delete_backups=false
+                    local backup_list=""
+                    if [ -d "$BACKUP_DIR" ]; then
+                        backup_list=$(ls -1 "$BACKUP_DIR" 2>/dev/null) || true
+                    fi
+
+                    if [ -n "$backup_list" ]; then
+                        local backup_count=$(echo "$backup_list" | wc -l | tr -d ' ')
+                        local backup_size=$(du -sh "$BACKUP_DIR" 2>/dev/null | cut -f1) || backup_size="unknown"
+                        echo ""
+                        echo "  Image Backups Found: $backup_count ($backup_size total)"
+                        echo "  Location: $BACKUP_DIR"
+                        echo "  Backups will be PRESERVED by default."
+                        echo ""
+                        read -p "Also delete image backups? [y/N]: " backup_confirm
+                        if [[ "$backup_confirm" =~ ^[Yy] ]]; then
+                            delete_backups=true
+                            echo "Image backups will also be deleted."
+                        else
+                            echo "Image backups will be preserved."
+                        fi
+                        echo ""
+                    fi
+
                     read -p "Type 'DELETE' to confirm: " confirm
                     if [ "$confirm" = "DELETE" ]; then
                         # Delete ranges first if requested
@@ -3269,6 +3335,17 @@ management_menu() {
                         rm -f "$ENV_FILE" 2>/dev/null || true
                         rm -f "$PROJECT_ROOT/traefik/acme.json" 2>/dev/null || true
                         rm -rf "$PROJECT_ROOT/traefik/certs" 2>/dev/null || true
+
+                        # Delete backups only if explicitly requested
+                        if [ "$delete_backups" = true ] && [ -d "$BACKUP_DIR" ]; then
+                            echo "Removing image backups..."
+                            rm -rf "$BACKUP_DIR"
+                            echo "Image backups removed"
+                        elif [ -d "$BACKUP_DIR" ] && [ -n "$backup_list" ]; then
+                            echo ""
+                            echo "Image backups preserved at: $BACKUP_DIR"
+                        fi
+
                         echo "Cleanup complete"
                         break
                     fi
