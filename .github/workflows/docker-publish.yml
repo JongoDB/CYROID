@@ -132,6 +132,8 @@ jobs:
           GIT_REF: ${{ github.ref }}
           GIT_REF_NAME: ${{ github.ref_name }}
         run: |
+          set -euo pipefail
+
           # Determine tags based on event type
           if [[ "$GIT_REF" == refs/tags/v* ]]; then
             # Tag push - create version tags
@@ -170,13 +172,29 @@ jobs:
           GIT_REF: ${{ github.ref }}
           GIT_REF_NAME: ${{ github.ref_name }}
         run: |
+          set -euo pipefail
+
+          verify_manifest() {
+            local tag="$1"
+            echo "Verifying ${IMAGE}:${tag} is a multi-arch manifest..."
+            local inspect_output
+            inspect_output=$(docker buildx imagetools inspect "${IMAGE}:${tag}" 2>&1)
+            echo "$inspect_output"
+
+            # Check that both architectures are present
+            for arch in amd64 arm64; do
+              if ! echo "$inspect_output" | grep -q "linux/${arch}"; then
+                echo "::error::${IMAGE}:${tag} is missing linux/${arch} platform"
+                return 1
+              fi
+            done
+            echo "✓ ${IMAGE}:${tag} contains both amd64 and arm64"
+          }
+
           if [[ "$GIT_REF" == refs/heads/master ]]; then
-            echo "Inspecting ${IMAGE}:latest"
-            docker buildx imagetools inspect "${IMAGE}:latest"
+            verify_manifest "latest"
           elif [[ "$GIT_REF" == refs/tags/v* ]]; then
-            VERSION_TAG="${GIT_REF_NAME#v}"
-            echo "Inspecting ${IMAGE}:${VERSION_TAG}"
-            docker buildx imagetools inspect "${IMAGE}:${VERSION_TAG}"
+            verify_manifest "${GIT_REF_NAME#v}"
           fi
 
   # Build infrastructure image wrappers (thin layers over upstream images)
@@ -327,6 +345,8 @@ jobs:
           GIT_REF: ${{ github.ref }}
           GIT_REF_NAME: ${{ github.ref_name }}
         run: |
+          set -euo pipefail
+
           if [[ "$GIT_REF" == refs/tags/v* ]]; then
             VERSION_TAG="${GIT_REF_NAME#v}"
             MAJOR_MINOR=$(echo "$VERSION_TAG" | cut -d. -f1,2)
@@ -351,4 +371,35 @@ jobs:
             docker buildx imagetools create -t "${IMAGE}:${VERSION}" \
               "${IMAGE}:${VERSION}-amd64" \
               "${IMAGE}:${VERSION}-arm64"
+          fi
+
+      - name: Verify multi-arch manifest
+        env:
+          IMAGE: ${{ env.IMAGE_PREFIX }}/${{ matrix.image }}
+          VERSION: ${{ steps.version.outputs.VERSION }}
+          GIT_REF: ${{ github.ref }}
+          GIT_REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          verify_manifest() {
+            local tag="$1"
+            echo "Verifying ${IMAGE}:${tag} is a multi-arch manifest..."
+            local inspect_output
+            inspect_output=$(docker buildx imagetools inspect "${IMAGE}:${tag}" 2>&1)
+            echo "$inspect_output"
+
+            for arch in amd64 arm64; do
+              if ! echo "$inspect_output" | grep -q "linux/${arch}"; then
+                echo "::error::${IMAGE}:${tag} is missing linux/${arch} platform"
+                return 1
+              fi
+            done
+            echo "✓ ${IMAGE}:${tag} contains both amd64 and arm64"
+          }
+
+          if [[ "$GIT_REF" == refs/heads/master ]]; then
+            verify_manifest "latest"
+          elif [[ "$GIT_REF" == refs/tags/v* ]]; then
+            verify_manifest "${GIT_REF_NAME#v}"
           fi
