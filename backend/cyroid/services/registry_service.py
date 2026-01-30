@@ -358,6 +358,68 @@ class RegistryService:
             'healthy': healthy,
         }
 
+    async def delete_image(self, image_tag: str) -> bool:
+        """Delete image from registry.
+
+        Note: Requires registry garbage collection to reclaim space.
+
+        Args:
+            image_tag: Image tag like 'cyroid/kali:latest' or 'nginx:alpine'
+
+        Returns:
+            True if deleted successfully, False otherwise
+        """
+        name, tag = self._parse_image_tag(image_tag)
+
+        try:
+            client = await self._get_http_client()
+
+            # Get manifest digest using HEAD request
+            headers = {
+                'Accept': 'application/vnd.docker.distribution.manifest.v2+json'
+            }
+            head_response = await client.head(
+                f"{self.REGISTRY_URL}/v2/{name}/manifests/{tag}",
+                headers=headers
+            )
+
+            if head_response.status_code == 404:
+                logger.warning(f"Image {image_tag} not found in registry")
+                return False
+
+            if head_response.status_code != 200:
+                logger.error(
+                    f"Failed to get manifest for {image_tag}: {head_response.status_code}"
+                )
+                return False
+
+            # Get the digest from response header
+            digest = head_response.headers.get('Docker-Content-Digest')
+            if not digest:
+                logger.error(f"No Docker-Content-Digest header for {image_tag}")
+                return False
+
+            # Delete the manifest by digest
+            delete_response = await client.delete(
+                f"{self.REGISTRY_URL}/v2/{name}/manifests/{digest}"
+            )
+
+            if delete_response.status_code == 202:
+                logger.info(f"Successfully deleted {image_tag} from registry")
+                return True
+            else:
+                logger.error(
+                    f"Failed to delete {image_tag}: {delete_response.status_code}"
+                )
+                return False
+
+        except httpx.RequestError as e:
+            logger.error(f"Request error deleting {image_tag}: {e}")
+            return False
+        except Exception as e:
+            logger.error(f"Unexpected error deleting {image_tag}: {e}")
+            return False
+
 
 # Singleton instance
 _registry_service: Optional[RegistryService] = None

@@ -7,7 +7,7 @@ import docker
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from cyroid.api.deps import CurrentUser
+from cyroid.api.deps import CurrentUser, AdminUser
 from cyroid.services.registry_service import get_registry_service
 
 logger = logging.getLogger(__name__)
@@ -44,6 +44,12 @@ class ImageStatusResponse(BaseModel):
     in_registry: bool
     on_host: bool
     needs_push: bool
+
+
+class DeleteResponse(BaseModel):
+    """Response from delete operation."""
+    success: bool
+    message: str
 
 
 @router.get("/images", response_model=List[RegistryImage])
@@ -133,3 +139,37 @@ async def registry_health():
     registry = get_registry_service()
     healthy = await registry.is_healthy()
     return {"healthy": healthy}
+
+
+@router.delete("/images/{image_tag:path}", response_model=DeleteResponse)
+async def delete_registry_image(
+    image_tag: str,
+    current_user: AdminUser
+):
+    """Delete image from registry (admin only).
+
+    Note: Requires registry garbage collection to reclaim disk space.
+
+    Args:
+        image_tag: The image tag to delete (e.g., 'cyroid/kali:latest')
+
+    Returns:
+        DeleteResponse with success status and message
+    """
+    registry = get_registry_service()
+
+    if not await registry.is_healthy():
+        raise HTTPException(status_code=503, detail="Registry is not healthy")
+
+    success = await registry.delete_image(image_tag)
+
+    if success:
+        return DeleteResponse(
+            success=True,
+            message=f"Successfully deleted {image_tag} from registry"
+        )
+    else:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to delete {image_tag} from registry"
+        )
