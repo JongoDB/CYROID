@@ -821,11 +821,11 @@ tui_live_dashboard() {
         # Clear screen
         clear
 
-        # Draw header
+        # Draw header with prominent exit instructions
         printf "\033[48;5;24m\033[38;5;255m\033[K"
         printf " CYROID Live Dashboard"
-        printf "%*s" $((cols - 45)) ""
-        printf "Press 'q' to quit | 'r' to refresh \033[0m\n"
+        printf "%*s" $((cols - 60)) ""
+        printf "\033[48;5;214m\033[38;5;0m q=quit \033[48;5;24m\033[38;5;255m r=refresh \033[0m\n"
 
         echo ""
 
@@ -2087,10 +2087,13 @@ management_menu() {
                     tui_live_dashboard "$compose_cmd"
                     ;;
                 "View logs")
-                    echo ""
-                    tui_info "Showing logs (Ctrl+C to stop)..."
+                    clear
+                    gum style --background 214 --foreground 0 --bold --padding "0 2" " Press Ctrl+C to exit and return to menu "
                     echo ""
                     $compose_cmd -f docker-compose.yml -f docker-compose.prod.yml logs -f --tail=50 || true
+                    echo ""
+                    tui_success "Returned to menu"
+                    sleep 1
                     ;;
                 "Show status")
                     echo ""
