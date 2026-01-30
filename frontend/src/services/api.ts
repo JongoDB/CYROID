@@ -2240,6 +2240,11 @@ export interface ImageStatusResponse {
   needs_push: boolean
 }
 
+export interface DeleteResponse {
+  success: boolean
+  message: string
+}
+
 export const registryApi = {
   listImages: () =>
     api.get<RegistryImage[]>('/registry/images'),
@@ -2252,6 +2257,9 @@ export const registryApi = {
 
   pushImage: (imageTag: string) =>
     api.post<PushResponse>('/registry/push', { image_tag: imageTag }),
+
+  deleteImage: (imageTag: string) =>
+    api.delete<DeleteResponse>(`/registry/images/${encodeURIComponent(imageTag)}`),
 
   health: () =>
     api.get<{ healthy: boolean }>('/registry/health'),
