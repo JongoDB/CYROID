@@ -456,16 +456,21 @@ export const networksApi = {
 }
 
 // VMs API
+import type { NetworkInterfaceCreate } from '../types'
+
 export interface VMCreate {
   range_id: string
-  network_id: string
+  // NEW: Multiple network interfaces (first is primary)
+  networks?: NetworkInterfaceCreate[]
+  // DEPRECATED: Single network (kept for backwards compatibility)
+  network_id?: string
+  ip_address?: string
   // Image Library source fields (exactly one required)
   base_image_id?: string    // Fresh container or ISO install
   golden_image_id?: string  // Pre-configured image from snapshot or import
   snapshot_id?: string      // Point-in-time fork of a golden image
   template_id?: string      // Legacy: deprecated, use base_image_id instead
   hostname: string
-  ip_address: string
   cpu: number
   ram_mb: number
   disk_gb: number

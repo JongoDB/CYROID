@@ -1,10 +1,13 @@
 # backend/cyroid/models/network.py
-from typing import Optional, List
+from typing import Optional, List, TYPE_CHECKING
 from uuid import UUID
 from sqlalchemy import String, ForeignKey, Boolean
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from cyroid.models.base import Base, TimestampMixin, UUIDMixin
+
+if TYPE_CHECKING:
+    from cyroid.models.vm_network import VMNetwork
 
 
 class Network(Base, UUIDMixin, TimestampMixin):
@@ -41,3 +44,7 @@ class Network(Base, UUIDMixin, TimestampMixin):
     range = relationship("Range", back_populates="networks")
     vms: Mapped[List["VM"]] = relationship("VM", back_populates="network")
     event_logs: Mapped[List["EventLog"]] = relationship("EventLog", back_populates="network")
+    # Multi-NIC support: all VM interfaces connected to this network
+    vm_interfaces: Mapped[List["VMNetwork"]] = relationship(
+        "VMNetwork", back_populates="network", cascade="all, delete-orphan"
+    )
