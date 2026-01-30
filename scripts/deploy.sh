@@ -943,67 +943,141 @@ tui_live_dashboard() {
 # =============================================================================
 
 BACKUP_DIR="${CYROID_BACKUP_DIR:-$HOME/.cyroid-backups}"
+REGISTRY_URL="http://localhost:5000"
 
-backup_images() {
-    local backup_name="${1:-$(date +%Y%m%d_%H%M%S)}"
-    local backup_path="$BACKUP_DIR/$backup_name"
-
-    tui_title "Backup Docker Images"
-    echo ""
-
-    # Create backup directory
-    mkdir -p "$backup_path"
-
-    # Get list of CYROID-related images
-    tui_info "Scanning for images..."
-
-    # Get images from local Docker (built images, pulled images)
+# Get list of images from CYROID registry
+get_registry_images() {
     local images=""
 
-    # Images with cyroid in the name
-    local cyroid_images=$(docker images --format "{{.Repository}}:{{.Tag}}" 2>/dev/null | grep -i cyroid | grep -v "<none>" | sort -u) || true
+    # Query registry catalog
+    local catalog=$(curl -s "${REGISTRY_URL}/v2/_catalog" 2>/dev/null) || true
 
-    # Images from the local registry (localhost:5000)
-    local registry_images=$(docker images --format "{{.Repository}}:{{.Tag}}" 2>/dev/null | grep "localhost:5000" | grep -v "<none>" | sort -u) || true
-
-    # DinD base image
-    local dind_images=$(docker images --format "{{.Repository}}:{{.Tag}}" 2>/dev/null | grep -E "dind|docker:dind" | grep -v "<none>" | sort -u) || true
-
-    # GHCR CYROID images
-    local ghcr_images=$(docker images --format "{{.Repository}}:{{.Tag}}" 2>/dev/null | grep "ghcr.io/jongodb/cyroid" | grep -v "<none>" | sort -u) || true
-
-    # Combine all images
-    images=$(echo -e "$cyroid_images\n$registry_images\n$dind_images\n$ghcr_images" | sort -u | grep -v '^$') || true
-
-    if [ -z "$images" ]; then
-        tui_warn "No CYROID images found to backup"
+    if [ -z "$catalog" ] || echo "$catalog" | grep -q "error\|connection refused" 2>/dev/null; then
         return 1
     fi
 
-    local image_count=$(echo "$images" | wc -l | tr -d ' ')
-    tui_info "Found $image_count images to backup"
-    echo ""
+    # Parse repository names from JSON response
+    local repos=$(echo "$catalog" | grep -oE '"[^"]+/[^"]+"' | tr -d '"' | sort -u) || true
 
-    # Show images
-    echo "$images" | while read -r img; do
-        [ -n "$img" ] && echo "  • $img"
+    if [ -z "$repos" ]; then
+        # Try alternate JSON parsing
+        repos=$(echo "$catalog" | sed 's/.*"repositories":\[//;s/\].*//' | tr ',' '\n' | tr -d '"[] ' | grep -v '^$') || true
+    fi
+
+    # Get tags for each repository
+    for repo in $repos; do
+        local tags_json=$(curl -s "${REGISTRY_URL}/v2/${repo}/tags/list" 2>/dev/null) || true
+        local tags=$(echo "$tags_json" | sed 's/.*"tags":\[//;s/\].*//' | tr ',' '\n' | tr -d '"[] ' | grep -v '^$' | grep -v 'null') || true
+
+        for tag in $tags; do
+            if [ -n "$tag" ]; then
+                echo "localhost:5000/${repo}:${tag}"
+            fi
+        done
     done
+}
+
+backup_images() {
+    local backup_name="${1:-}"
+
+    tui_title "Backup Registry Images"
     echo ""
 
-    # Calculate approximate size
-    local total_size=$(docker images --format "{{.Repository}}:{{.Tag}} {{.Size}}" 2>/dev/null | grep -E "cyroid|localhost:5000|dind|ghcr.io/jongodb" | awk '{print $2}' | head -20) || true
+    tui_info "Scanning CYROID registry at ${REGISTRY_URL}..."
+    echo ""
+
+    # Get images from registry
+    local all_images=$(get_registry_images)
+
+    if [ -z "$all_images" ]; then
+        tui_error "No images found in CYROID registry"
+        tui_info "Make sure CYROID is running and the registry has images"
+        return 1
+    fi
+
+    local total_count=$(echo "$all_images" | wc -l | tr -d ' ')
+    tui_info "Found $total_count images in registry"
+    echo ""
+
+    # Let user select which images to backup
+    local selected_images=""
+
+    if [ "$USE_TUI" = true ] && command -v gum &> /dev/null; then
+        tui_info "Select images to backup (space to select, enter to confirm):"
+        echo ""
+
+        # Use gum filter with multi-select
+        selected_images=$(echo "$all_images" | gum filter --no-limit --header "Select images (space=select, enter=confirm):" --placeholder "Type to filter...") || true
+
+        if [ -z "$selected_images" ]; then
+            # If filter returned nothing, offer to select all
+            if gum confirm "No images selected. Backup all $total_count images?"; then
+                selected_images="$all_images"
+            else
+                tui_info "Backup cancelled"
+                return 0
+            fi
+        fi
+    else
+        # Non-TUI mode: show numbered list
+        echo "Available images:"
+        local i=1
+        echo "$all_images" | while read -r img; do
+            echo "  [$i] $img"
+            i=$((i + 1))
+        done
+        echo ""
+        echo "Enter image numbers to backup (comma-separated, or 'all'):"
+        read -p "> " selection
+
+        if [ "$selection" = "all" ]; then
+            selected_images="$all_images"
+        else
+            # Parse comma-separated numbers
+            for num in $(echo "$selection" | tr ',' ' '); do
+                local img=$(echo "$all_images" | sed -n "${num}p")
+                [ -n "$img" ] && selected_images="${selected_images}${img}"$'\n'
+            done
+        fi
+    fi
+
+    if [ -z "$selected_images" ]; then
+        tui_info "No images selected, backup cancelled"
+        return 0
+    fi
+
+    local image_count=$(echo "$selected_images" | grep -v '^$' | wc -l | tr -d ' ')
+    echo ""
+    tui_info "Selected $image_count images for backup"
+
+    # Get backup name if not provided
+    if [ -z "$backup_name" ]; then
+        if [ "$USE_TUI" = true ] && command -v gum &> /dev/null; then
+            backup_name=$(gum input --placeholder "Enter backup name" --value "$(date +%Y%m%d_%H%M%S)")
+        else
+            read -p "Backup name [$(date +%Y%m%d_%H%M%S)]: " backup_name
+            [ -z "$backup_name" ] && backup_name="$(date +%Y%m%d_%H%M%S)"
+        fi
+    fi
+
+    local backup_path="$BACKUP_DIR/$backup_name"
+    mkdir -p "$backup_path"
+
+    echo ""
     tui_info "Backup location: $backup_path"
     echo ""
 
     if [ "$USE_TUI" = true ] && command -v gum &> /dev/null; then
-        if ! gum confirm "Proceed with backup?"; then
+        if ! gum confirm "Proceed with backup of $image_count images?"; then
             tui_info "Backup cancelled"
+            rm -rf "$backup_path"
             return 0
         fi
     else
         read -p "Proceed with backup? [Y/n]: " confirm
         if [[ "$confirm" =~ ^[Nn] ]]; then
             echo "Backup cancelled"
+            rm -rf "$backup_path"
             return 0
         fi
     fi
@@ -1014,9 +1088,8 @@ backup_images() {
 
     local current=0
     local failed=0
-    local manifest=""
 
-    echo "$images" | while read -r img; do
+    echo "$selected_images" | grep -v '^$' | while read -r img; do
         if [ -n "$img" ]; then
             current=$((current + 1))
             local safe_name=$(echo "$img" | tr '/:' '_')
@@ -1025,6 +1098,13 @@ backup_images() {
             tui_set_status "Backing up ($current/$image_count): $img" "progress"
             echo "  [$current/$image_count] $img"
 
+            # First pull from registry to ensure we have it locally
+            if ! docker pull "$img" >/dev/null 2>&1; then
+                echo "    → Failed to pull from registry"
+                failed=$((failed + 1))
+                continue
+            fi
+
             if docker save "$img" -o "$tar_file" 2>/dev/null; then
                 # Compress with gzip
                 gzip -f "$tar_file" 2>/dev/null || true
@@ -1032,7 +1112,7 @@ backup_images() {
                 echo "    → ${safe_name}.tar.gz ($size)"
                 echo "$img|${safe_name}.tar.gz" >> "$backup_path/manifest.txt"
             else
-                echo "    → FAILED"
+                echo "    → FAILED to save"
                 failed=$((failed + 1))
             fi
         fi
@@ -1040,10 +1120,11 @@ backup_images() {
 
     # Save metadata
     cat > "$backup_path/backup_info.txt" << EOF
-CYROID Image Backup
+CYROID Registry Image Backup
 Created: $(date)
 Host: $(hostname)
 Images: $image_count
+Source: ${REGISTRY_URL}
 EOF
 
     echo ""
@@ -1063,7 +1144,7 @@ EOF
 restore_images() {
     local backup_name="$1"
 
-    tui_title "Restore Docker Images"
+    tui_title "Restore Registry Images"
     echo ""
 
     # List available backups if no name specified
@@ -1113,31 +1194,74 @@ restore_images() {
         return 1
     fi
 
-    # Count images to restore
-    local tar_files=$(ls -1 "$backup_path"/*.tar.gz 2>/dev/null) || true
-
-    if [ -z "$tar_files" ]; then
-        tui_error "No image archives found in backup"
+    # Get list of images from manifest
+    if [ ! -f "$backup_path/manifest.txt" ]; then
+        tui_error "No manifest found in backup - cannot determine image names"
         return 1
     fi
 
-    local image_count=$(echo "$tar_files" | wc -l | tr -d ' ')
+    # Read manifest into array-like format
+    local all_images=$(cat "$backup_path/manifest.txt" | cut -d'|' -f1)
+    local total_count=$(echo "$all_images" | wc -l | tr -d ' ')
 
     tui_info "Backup: $backup_name"
-    tui_info "Images to restore: $image_count"
+    tui_info "Total images in backup: $total_count"
     echo ""
 
-    # Show manifest if available
-    if [ -f "$backup_path/manifest.txt" ]; then
-        tui_info "Images:"
-        cat "$backup_path/manifest.txt" | while IFS='|' read -r img file; do
-            echo "  • $img"
-        done
-        echo ""
-    fi
+    # Let user select which images to restore
+    local selected_images=""
 
     if [ "$USE_TUI" = true ] && command -v gum &> /dev/null; then
-        if ! gum confirm "Proceed with restore?"; then
+        tui_info "Select images to restore (space to select, enter to confirm):"
+        echo ""
+
+        # Use gum filter with multi-select
+        selected_images=$(echo "$all_images" | gum filter --no-limit --header "Select images (space=select, enter=confirm):" --placeholder "Type to filter...") || true
+
+        if [ -z "$selected_images" ]; then
+            # If filter returned nothing, offer to restore all
+            if gum confirm "No images selected. Restore all $total_count images?"; then
+                selected_images="$all_images"
+            else
+                tui_info "Restore cancelled"
+                return 0
+            fi
+        fi
+    else
+        # Non-TUI mode: show numbered list
+        echo "Available images:"
+        local i=1
+        echo "$all_images" | while read -r img; do
+            echo "  [$i] $img"
+            i=$((i + 1))
+        done
+        echo ""
+        echo "Enter image numbers to restore (comma-separated, or 'all'):"
+        read -p "> " selection
+
+        if [ "$selection" = "all" ]; then
+            selected_images="$all_images"
+        else
+            # Parse comma-separated numbers
+            for num in $(echo "$selection" | tr ',' ' '); do
+                local img=$(echo "$all_images" | sed -n "${num}p")
+                [ -n "$img" ] && selected_images="${selected_images}${img}"$'\n'
+            done
+        fi
+    fi
+
+    if [ -z "$selected_images" ]; then
+        tui_info "No images selected, restore cancelled"
+        return 0
+    fi
+
+    local image_count=$(echo "$selected_images" | grep -v '^$' | wc -l | tr -d ' ')
+    echo ""
+    tui_info "Selected $image_count images for restore"
+    echo ""
+
+    if [ "$USE_TUI" = true ] && command -v gum &> /dev/null; then
+        if ! gum confirm "Proceed with restore of $image_count images?"; then
             tui_info "Restore cancelled"
             return 0
         fi
@@ -1155,19 +1279,39 @@ restore_images() {
 
     local current=0
     local failed=0
+    local restored_images=""
 
-    for tar_file in $backup_path/*.tar.gz; do
-        if [ -f "$tar_file" ]; then
+    echo "$selected_images" | grep -v '^$' | while read -r img; do
+        if [ -n "$img" ]; then
             current=$((current + 1))
-            local filename=$(basename "$tar_file")
 
-            tui_set_status "Restoring ($current/$image_count): $filename" "progress"
-            echo "  [$current/$image_count] $filename"
+            # Find the tar file for this image from manifest
+            local tar_filename=$(grep "^${img}|" "$backup_path/manifest.txt" | cut -d'|' -f2)
 
-            if gunzip -c "$tar_file" | docker load 2>/dev/null; then
-                echo "    → OK"
+            if [ -z "$tar_filename" ]; then
+                echo "  [$current/$image_count] $img"
+                echo "    → NOT FOUND in manifest"
+                failed=$((failed + 1))
+                continue
+            fi
+
+            local tar_file="$backup_path/$tar_filename"
+
+            if [ ! -f "$tar_file" ]; then
+                echo "  [$current/$image_count] $img"
+                echo "    → FILE NOT FOUND: $tar_filename"
+                failed=$((failed + 1))
+                continue
+            fi
+
+            tui_set_status "Restoring ($current/$image_count): $img" "progress"
+            echo "  [$current/$image_count] $img"
+
+            if gunzip -c "$tar_file" | docker load >/dev/null 2>&1; then
+                echo "    → Loaded"
+                echo "$img" >> /tmp/cyroid_restored_images.txt
             else
-                echo "    → FAILED"
+                echo "    → FAILED to load"
                 failed=$((failed + 1))
             fi
         fi
@@ -1183,20 +1327,26 @@ restore_images() {
 
     # Offer to push to local registry
     echo ""
+    tui_info "To use restored images in CYROID, push them to the local registry."
+    echo ""
+
     if [ "$USE_TUI" = true ] && command -v gum &> /dev/null; then
-        if gum confirm "Push restored images to local registry?"; then
-            push_to_registry
+        if gum confirm "Push restored images to CYROID registry?"; then
+            push_restored_to_registry
         fi
     else
-        read -p "Push restored images to local registry? [y/N]: " push_confirm
-        if [[ "$push_confirm" =~ ^[Yy] ]]; then
-            push_to_registry
+        read -p "Push restored images to CYROID registry? [Y/n]: " push_confirm
+        if [[ ! "$push_confirm" =~ ^[Nn] ]]; then
+            push_restored_to_registry
         fi
     fi
+
+    # Cleanup temp file
+    rm -f /tmp/cyroid_restored_images.txt
 }
 
 push_to_registry() {
-    tui_info "Pushing images to local registry..."
+    tui_info "Pushing images to CYROID registry..."
 
     # Get localhost:5000 images that need to be pushed
     local images=$(docker images --format "{{.Repository}}:{{.Tag}}" 2>/dev/null | grep "localhost:5000" | grep -v "<none>") || true
@@ -1214,6 +1364,57 @@ push_to_registry() {
     done
 
     tui_success "Push complete"
+}
+
+push_restored_to_registry() {
+    tui_info "Pushing restored images to CYROID registry..."
+
+    # Check if registry is running
+    if ! curl -s "${REGISTRY_URL}/v2/" >/dev/null 2>&1; then
+        tui_error "CYROID registry is not running"
+        tui_info "Start CYROID first with: $0 --start"
+        return 1
+    fi
+
+    # Get list of restored images from temp file or scan docker
+    local images=""
+    if [ -f /tmp/cyroid_restored_images.txt ]; then
+        images=$(cat /tmp/cyroid_restored_images.txt | sort -u)
+    else
+        # Fallback: get all localhost:5000 images
+        images=$(docker images --format "{{.Repository}}:{{.Tag}}" 2>/dev/null | grep "localhost:5000" | grep -v "<none>") || true
+    fi
+
+    if [ -z "$images" ]; then
+        tui_warn "No images to push"
+        return
+    fi
+
+    local total=$(echo "$images" | grep -v '^$' | wc -l | tr -d ' ')
+    local current=0
+    local failed=0
+
+    echo "$images" | grep -v '^$' | while read -r img; do
+        if [ -n "$img" ]; then
+            current=$((current + 1))
+            tui_set_status "Pushing ($current/$total): $img" "progress"
+            echo "  [$current/$total] $img"
+
+            if docker push "$img" >/dev/null 2>&1; then
+                echo "    → Pushed"
+            else
+                echo "    → FAILED (check if registry is running)"
+                failed=$((failed + 1))
+            fi
+        fi
+    done
+
+    echo ""
+    if [ "$failed" -gt 0 ]; then
+        tui_warn "$failed image(s) failed to push"
+    else
+        tui_success "All images pushed to registry"
+    fi
 }
 
 list_backups() {
