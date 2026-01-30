@@ -95,6 +95,9 @@ class Settings(BaseSettings):
     app_name: str = "CYROID"
     debug: bool = True
 
+    # CORS (comma-separated list of allowed origins, or "*" for all)
+    cors_origins: str = "http://localhost:5173,http://localhost:3000"
+
     # Image/ISO Cache (platform-aware defaults)
     iso_cache_dir: str = os.path.join(_get_default_data_dir(), "iso-cache")
     template_storage_dir: str = os.path.join(_get_default_data_dir(), "template-storage")
