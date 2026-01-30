@@ -92,6 +92,12 @@ ADMIN_USERNAME=""
 ADMIN_EMAIL=""
 ADMIN_PASSWORD=""
 
+# CLI flags for non-interactive mode
+NON_INTERACTIVE=false
+CLI_ADMIN_USER=""
+CLI_ADMIN_PASSWORD=""
+CLI_ADMIN_EMAIL=""
+
 # GitHub repository for downloading files
 GITHUB_REPO="JongoDB/CYROID"
 GITHUB_BRANCH="master"
@@ -2056,6 +2062,10 @@ show_help() {
     echo "  --ssl MODE         SSL mode: letsencrypt, selfsigned, manual"
     echo "  --version VER      CYROID version (default: interactive)"
     echo "  --data-dir DIR     Data directory (default: auto by OS)"
+    echo "  -y, --yes          Non-interactive mode (use defaults)"
+    echo "  --admin-user USER  Admin username (default: admin)"
+    echo "  --admin-password P Admin password (default: admin123)"
+    echo "  --admin-email E    Admin email (default: admin@cyroid.local)"
     echo "  --help             Show this help message"
     echo ""
     echo "Examples:"
@@ -2455,6 +2465,14 @@ pull_images() {
     local images
     images=$($compose_cmd -f docker-compose.yml -f docker-compose.prod.yml config 2>/dev/null | grep 'image:' | awk '{print $2}' | sort -u) || true
 
+    # Add additional images needed for range deployment (not in docker-compose)
+    local extra_images="ghcr.io/jongodb/cyroid-dind:${VERSION:-latest}"
+    if [ -n "$images" ]; then
+        images=$(echo -e "$images\n$extra_images" | sort -u)
+    else
+        images="$extra_images"
+    fi
+
     if [ -n "$images" ]; then
         local total=$(echo "$images" | wc -l | tr -d ' ')
         echo ""
@@ -2574,8 +2592,8 @@ create_initial_admin() {
 
     # Default credentials
     local default_username="admin"
-    local default_email="admin@cyroid.com"
-    local default_password="password"
+    local default_email="admin@cyroid.local"
+    local default_password="admin123"
 
     echo ""
     tui_title "Step 5: Initial Admin User"
@@ -2584,10 +2602,17 @@ create_initial_admin() {
     # TUI input with defaults pre-filled
     local admin_username admin_email admin_password
 
-    if [ "$USE_TUI" = true ] && command -v gum &> /dev/null; then
+    # Check for CLI-provided credentials first
+    if [ -n "$CLI_ADMIN_USER" ] || [ -n "$CLI_ADMIN_PASSWORD" ] || [ -n "$CLI_ADMIN_EMAIL" ] || [ "$NON_INTERACTIVE" = true ]; then
+        # Use CLI flags or defaults in non-interactive mode
+        admin_username="${CLI_ADMIN_USER:-$default_username}"
+        admin_email="${CLI_ADMIN_EMAIL:-$default_email}"
+        admin_password="${CLI_ADMIN_PASSWORD:-$default_password}"
+        tui_info "Using provided/default credentials (non-interactive mode)"
+    elif [ "$USE_TUI" = true ] && command -v gum &> /dev/null; then
         admin_username=$(gum input --placeholder "admin" --value "$default_username" --header "Admin username:")
-        admin_email=$(gum input --placeholder "admin@cyroid.com" --value "$default_email" --header "Admin email:")
-        admin_password=$(gum input --placeholder "password" --value "$default_password" --password --header "Admin password:")
+        admin_email=$(gum input --placeholder "admin@cyroid.local" --value "$default_email" --header "Admin email:")
+        admin_password=$(gum input --placeholder "admin123" --value "$default_password" --password --header "Admin password:")
     else
         read -p "Admin username [$default_username]: " admin_username
         admin_username="${admin_username:-$default_username}"
@@ -4244,6 +4269,22 @@ while [[ $# -gt 0 ]]; do
         --help|-h)
             show_help
             exit 0
+            ;;
+        -y|--yes|--non-interactive)
+            NON_INTERACTIVE=true
+            shift
+            ;;
+        --admin-user)
+            CLI_ADMIN_USER="$2"
+            shift 2
+            ;;
+        --admin-password)
+            CLI_ADMIN_PASSWORD="$2"
+            shift 2
+            ;;
+        --admin-email)
+            CLI_ADMIN_EMAIL="$2"
+            shift 2
             ;;
         *)
             log_error "Unknown option: $1"

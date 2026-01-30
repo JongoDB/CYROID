@@ -40,6 +40,7 @@ services:
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY}
       DEBUG: "false"
+      CORS_ORIGINS: "*"
       # Use production data directory
       ISO_CACHE_DIR: ${CYROID_DATA_DIR}/iso-cache
       TEMPLATE_STORAGE_DIR: ${CYROID_DATA_DIR}/template-storage
@@ -57,6 +58,12 @@ services:
       - ${CYROID_DATA_DIR}/images:/data/images
       - ./traefik/dynamic:/app/traefik/dynamic
     restart: always
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     labels:
       # Add TLS configuration for Let's Encrypt (when SSL_MODE=letsencrypt)
       - "traefik.http.routers.api-secure.tls.certresolver=${SSL_RESOLVER:-}"
@@ -85,6 +92,12 @@ services:
       - ${CYROID_DATA_DIR}/images:/data/images
       - ./traefik/dynamic:/app/traefik/dynamic
     restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f dramatiq || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
   frontend:
     image: ghcr.io/jongodb/cyroid-frontend:${VERSION:-latest}
