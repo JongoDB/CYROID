@@ -3,6 +3,7 @@
 import logging
 from typing import List
 
+import docker
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
@@ -35,6 +36,14 @@ class PushResponse(BaseModel):
     """Response from push operation."""
     success: bool
     message: str
+
+
+class ImageStatusResponse(BaseModel):
+    """Response for image status check."""
+    image_tag: str
+    in_registry: bool
+    on_host: bool
+    needs_push: bool
 
 
 @router.get("/images", response_model=List[RegistryImage])
@@ -78,6 +87,44 @@ async def push_image_to_registry(
         return PushResponse(success=True, message=f"Successfully pushed {request.image_tag}")
     else:
         raise HTTPException(status_code=500, detail=f"Failed to push {request.image_tag}")
+
+
+@router.get("/status/{image_tag:path}", response_model=ImageStatusResponse)
+async def get_image_status(
+    image_tag: str,
+    current_user: CurrentUser
+):
+    """Check if an image exists in registry, on host, or both.
+
+    Args:
+        image_tag: The image tag to check (e.g., 'cyroid/kali:latest')
+
+    Returns:
+        ImageStatusResponse with location information and needs_push flag
+    """
+    registry = get_registry_service()
+
+    # Check registry
+    in_registry = await registry.image_exists(image_tag)
+
+    # Check host Docker
+    on_host = False
+    try:
+        docker_client = docker.from_env()
+        docker_client.images.get(image_tag)
+        on_host = True
+    except docker.errors.ImageNotFound:
+        on_host = False
+
+    # needs_push: image is on host but not in registry
+    needs_push = on_host and not in_registry
+
+    return ImageStatusResponse(
+        image_tag=image_tag,
+        in_registry=in_registry,
+        on_host=on_host,
+        needs_push=needs_push
+    )
 
 
 @router.get("/health")
