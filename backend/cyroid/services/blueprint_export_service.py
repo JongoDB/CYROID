@@ -29,7 +29,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from cyroid.models.blueprint import RangeBlueprint
-from cyroid.models.template import OSType, VMType
+from cyroid.models.vm_enums import OSType, VMType
 from cyroid.models.base_image import BaseImage
 from cyroid.models.golden_image import GoldenImage
 from cyroid.models.snapshot import Snapshot

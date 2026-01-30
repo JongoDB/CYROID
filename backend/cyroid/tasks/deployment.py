@@ -13,7 +13,7 @@ from cyroid.database import get_session_local
 from cyroid.models.range import Range, RangeStatus
 from cyroid.models.network import Network
 from cyroid.models.vm import VM, VMStatus
-from cyroid.models.template import VMType
+from cyroid.models.vm_enums import VMType
 from cyroid.models.base_image import BaseImage
 from cyroid.models.golden_image import GoldenImage
 from cyroid.models.snapshot import Snapshot

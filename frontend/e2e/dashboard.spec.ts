@@ -37,7 +37,7 @@ test.describe('Dashboard', () => {
   test('should display dashboard with navigation', async ({ page }) => {
     // Check navigation elements
     await expect(page.getByRole('link', { name: /dashboard/i })).toBeVisible();
-    await expect(page.getByRole('link', { name: /templates/i })).toBeVisible();
+    await expect(page.getByRole('link', { name: /vm library/i })).toBeVisible();
     await expect(page.getByRole('link', { name: /ranges/i })).toBeVisible();
   });
 
@@ -45,13 +45,13 @@ test.describe('Dashboard', () => {
     // Dashboard should show some stats or welcome message
     const content = await page.textContent('body');
     expect(
-      content?.match(/ranges|templates|vms|welcome|dashboard/i)
+      content?.match(/ranges|vm library|vms|welcome|dashboard/i)
     ).toBeTruthy();
   });
 
-  test('should navigate to templates page', async ({ page }) => {
-    await page.getByRole('link', { name: /templates/i }).click();
-    await expect(page).toHaveURL(/templates/);
+  test('should navigate to vm library page', async ({ page }) => {
+    await page.getByRole('link', { name: /vm library/i }).click();
+    await expect(page).toHaveURL(/vm-library/);
   });
 
   test('should navigate to ranges page', async ({ page }) => {

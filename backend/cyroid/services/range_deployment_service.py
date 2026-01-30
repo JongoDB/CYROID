@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 from cyroid.config import get_settings
 from cyroid.models import Range, Network, VM, RangeStatus
 from cyroid.models.vm import VMStatus
-from cyroid.models.template import VMType
+from cyroid.models.vm_enums import VMType
 from cyroid.models.base_image import BaseImage
 from cyroid.models.golden_image import GoldenImage
 from cyroid.models.snapshot import Snapshot

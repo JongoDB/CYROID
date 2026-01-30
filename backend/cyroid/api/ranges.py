@@ -17,7 +17,7 @@ from cyroid.database import get_db
 from cyroid.models.range import Range, RangeStatus
 from cyroid.models.network import Network
 from cyroid.models.vm import VM, VMStatus
-from cyroid.models.template import OSType
+from cyroid.models.vm_enums import OSType
 from cyroid.models.base_image import BaseImage
 from cyroid.models.resource_tag import ResourceTag
 from cyroid.models.user import User

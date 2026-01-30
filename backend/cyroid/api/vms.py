@@ -13,7 +13,7 @@ from cyroid.api.deps import DBSession, CurrentUser
 from cyroid.models.vm import VM, VMStatus
 from cyroid.models.range import Range, RangeStatus
 from cyroid.models.network import Network
-from cyroid.models.template import OSType, VMType
+from cyroid.models.vm_enums import OSType, VMType
 from cyroid.models.snapshot import Snapshot
 from cyroid.models.base_image import BaseImage
 from cyroid.models.golden_image import GoldenImage

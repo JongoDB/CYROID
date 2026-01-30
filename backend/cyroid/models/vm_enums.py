@@ -1,9 +1,9 @@
-# backend/cyroid/models/template.py
+# backend/cyroid/models/vm_enums.py
 """
 VM type and OS type enums.
 
-Note: VMTemplate class has been removed. VMs are now created from:
-- BaseImage (containers or ISOs from Image Library)
+VMs are created from:
+- BaseImage (containers or ISOs from VM Library)
 - GoldenImage (pre-configured snapshots or imports)
 - Snapshot (point-in-time forks)
 """
