@@ -1,31 +1,39 @@
 #!/bin/bash
 # CYROID Deployment Script
 #
-# Deploys CYROID for production or development use with automatic environment setup.
+# Full TUI for deploying and managing CYROID in production or development mode.
+# Uses 'gum' for beautiful terminal interfaces (auto-installs on macOS).
 # Handles platform differences (macOS, Linux) automatically.
 #
 # BOOTSTRAP: This script can be run standalone to bootstrap a fresh install:
-#   curl -fsSL https://raw.githubusercontent.com/jongodb/CYROID/master/scripts/deploy.sh | bash -s -- --dev
+#   curl -fsSL https://raw.githubusercontent.com/jongodb/CYROID/master/scripts/deploy.sh -o deploy.sh
+#   chmod +x deploy.sh && ./deploy.sh --dev
 #
 # Usage:
-#   ./scripts/deploy.sh                                    # Interactive setup
+#   ./scripts/deploy.sh                                    # Interactive TUI setup
 #   ./scripts/deploy.sh --dev                              # Local development mode
 #   ./scripts/deploy.sh --domain example.com              # Domain with Let's Encrypt
 #   ./scripts/deploy.sh --ip 192.168.1.100                # IP with self-signed cert
-#   ./scripts/deploy.sh --update                          # Update existing deployment
+#   ./scripts/deploy.sh --update                          # Update (choose version)
+#   ./scripts/deploy.sh --start                           # Start stopped deployment
 #   ./scripts/deploy.sh --stop                            # Stop all services
+#   ./scripts/deploy.sh --restart                         # Restart all services
 #   ./scripts/deploy.sh --status                          # Show service status
+#   ./scripts/deploy.sh --check                           # Run environment checks only
 #
 # Options:
-#   --dev              Development mode (builds from local source)
+#   --dev              Development mode (builds from local source, hot-reload)
 #   --domain DOMAIN    Domain name for the server
 #   --ip IP            IP address for the server
 #   --email EMAIL      Email for Let's Encrypt (optional with --domain)
 #   --ssl MODE         SSL mode: letsencrypt, selfsigned, manual (default: auto)
-#   --version VER      CYROID version to deploy (default: latest)
-#   --update           Pull latest images and restart
+#   --version VER      CYROID version to deploy/update to (default: interactive)
+#   --data-dir DIR     Data directory (default: auto by OS)
+#   --update           Update deployment (interactive version selection)
+#   --start            Start a stopped deployment
 #   --stop             Stop all services
-#   --status           Show service status
+#   --restart          Stop and start all services
+#   --status           Show current status and health
 #   --check            Run environment checks only (no deployment)
 #   --help             Show this help message
 
@@ -43,6 +51,10 @@ BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 BOLD='\033[1m'
+
+# Platform detection (early, before PROJECT_ROOT)
+PLATFORM="$(uname -s)"
+ARCH="$(uname -m)"
 
 # Get script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -69,20 +81,27 @@ VERSION="latest"
 ACTION="deploy"
 DEV_MODE=false
 CHECK_ONLY=false
-CLONE_DIR=""
+DATA_DIR=""  # Set after OS detection
 
-# Platform detection
-PLATFORM="$(uname -s)"
-ARCH="$(uname -m)"
+# OS type detection
+detect_os() {
+    case "$(uname -s)" in
+        Linux*)     OS_TYPE="linux" ;;
+        Darwin*)    OS_TYPE="macos" ;;
+        *)          OS_TYPE="unknown" ;;
+    esac
+}
 
-# Set default data directory based on platform
-if [ "$PLATFORM" = "Darwin" ]; then
-    # macOS: Use project-local directory since /data is not writable
-    DATA_DIR="$PROJECT_ROOT/data"
-else
-    # Linux: Use system directory
-    DATA_DIR="/data/cyroid"
-fi
+get_default_data_dir() {
+    detect_os
+    if [ "$OS_TYPE" = "macos" ]; then
+        # macOS: use home directory since /data requires special setup
+        echo "$HOME/.cyroid/data"
+    else
+        # Linux: use /data/cyroid (standard location)
+        echo "/data/cyroid"
+    fi
+}
 
 # =============================================================================
 # Helper Functions
@@ -123,28 +142,165 @@ generate_secret() {
     openssl rand -base64 48 | tr -d '/+=' | head -c 64
 }
 
-check_docker() {
-    if ! command -v docker &> /dev/null; then
-        log_error "Docker is not installed. Please install Docker first."
-        log_info "Visit: https://docs.docker.com/get-docker/"
-        exit 1
+# =============================================================================
+# TUI Functions (using gum)
+# =============================================================================
+
+USE_TUI=true
+
+check_gum() {
+    if command -v gum &> /dev/null; then
+        return 0
     fi
 
-    if ! docker info &> /dev/null; then
-        log_error "Docker daemon is not running or you don't have permission."
-        if [ "$PLATFORM" = "Darwin" ]; then
-            log_info "Start Docker Desktop from your Applications folder"
-        else
-            log_info "Try: sudo systemctl start docker"
-            log_info "Or add your user to the docker group: sudo usermod -aG docker \$USER"
+    echo -e "${YELLOW}The TUI requires 'gum' to be installed.${NC}"
+    echo ""
+
+    detect_os
+    if [ "$OS_TYPE" = "macos" ]; then
+        echo "Install with: brew install gum"
+        read -p "Install gum now? [Y/n]: " install_choice
+        if [[ ! "$install_choice" =~ ^[Nn] ]]; then
+            if command -v brew &> /dev/null; then
+                brew install gum
+                return 0
+            else
+                echo -e "${RED}Homebrew not found. Install from: https://brew.sh${NC}"
+            fi
         fi
-        exit 1
+    else
+        echo "Install with your package manager:"
+        echo "  Ubuntu/Debian: sudo apt install gum"
+        echo "  Fedora: sudo dnf install gum"
+        echo "  Arch: sudo pacman -S gum"
+        echo "  Or: go install github.com/charmbracelet/gum@latest"
+        read -p "Continue without TUI? [Y/n]: " continue_choice
+        if [[ "$continue_choice" =~ ^[Nn] ]]; then
+            exit 1
+        fi
     fi
 
-    if ! command -v docker-compose &> /dev/null && ! docker compose version &> /dev/null; then
-        log_error "Docker Compose is not installed."
-        log_info "Visit: https://docs.docker.com/compose/install/"
-        exit 1
+    USE_TUI=false
+    return 1
+}
+
+tui_clear() {
+    if [ "$USE_TUI" = true ]; then
+        clear
+    fi
+}
+
+tui_header() {
+    if [ "$USE_TUI" = true ]; then
+        gum style \
+            --foreground 212 --border-foreground 212 --border double \
+            --align center --width 60 --margin "1 2" --padding "1 2" \
+            "$(echo -e "██████╗██╗   ██╗██████╗  ██████╗ ██╗██████╗ \n██╔════╝╚██╗ ██╔╝██╔══██╗██╔═══██╗██║██╔══██╗\n██║      ╚████╔╝ ██████╔╝██║   ██║██║██║  ██║\n██║       ╚██╔╝  ██╔══██╗██║   ██║██║██║  ██║\n╚██████╗   ██║   ██║  ██║╚██████╔╝██║██████╔╝\n ╚═════╝   ╚═╝   ╚═╝  ╚═╝ ╚═════╝ ╚═╝╚═════╝ ")"
+        echo ""
+        gum style --foreground 99 --bold "Cyber Range Orchestrator In Docker"
+        echo ""
+    else
+        print_banner
+    fi
+}
+
+tui_title() {
+    if [ "$USE_TUI" = true ]; then
+        gum style --foreground 212 --bold "$1"
+    else
+        echo -e "${BOLD}$1${NC}"
+    fi
+}
+
+tui_choose() {
+    local prompt="$1"
+    shift
+    if [ "$USE_TUI" = true ]; then
+        gum choose --header "$prompt" "$@"
+    else
+        echo "$prompt"
+        select opt in "$@"; do
+            echo "$opt"
+            break
+        done
+    fi
+}
+
+tui_input() {
+    local prompt="$1"
+    local placeholder="${2:-}"
+    local default="${3:-}"
+    if [ "$USE_TUI" = true ]; then
+        gum input --placeholder "$placeholder" --value "$default" --header "$prompt"
+    else
+        read -p "$prompt [$default]: " value
+        echo "${value:-$default}"
+    fi
+}
+
+tui_confirm() {
+    local prompt="$1"
+    if [ "$USE_TUI" = true ]; then
+        gum confirm "$prompt"
+    else
+        read -p "$prompt [Y/n]: " choice
+        [[ ! "$choice" =~ ^[Nn] ]]
+    fi
+}
+
+tui_spin() {
+    local title="$1"
+    shift
+    if [ "$USE_TUI" = true ]; then
+        gum spin --spinner dot --title "$title" -- "$@"
+    else
+        echo "$title"
+        "$@"
+    fi
+}
+
+tui_success() {
+    if [ "$USE_TUI" = true ]; then
+        gum style --foreground 82 --bold "✓ $1"
+    else
+        log_info "$1"
+    fi
+}
+
+tui_error() {
+    if [ "$USE_TUI" = true ]; then
+        gum style --foreground 196 --bold "✗ $1"
+    else
+        log_error "$1"
+    fi
+}
+
+tui_warn() {
+    if [ "$USE_TUI" = true ]; then
+        gum style --foreground 214 "⚠ $1"
+    else
+        log_warn "$1"
+    fi
+}
+
+tui_info() {
+    if [ "$USE_TUI" = true ]; then
+        gum style --foreground 39 "→ $1"
+    else
+        log_info "$1"
+    fi
+}
+
+tui_summary_box() {
+    if [ "$USE_TUI" = true ]; then
+        gum style \
+            --border rounded --border-foreground 39 \
+            --padding "1 2" --margin "1 0" \
+            "$1"
+    else
+        echo ""
+        echo "$1"
+        echo ""
     fi
 }
 
@@ -194,41 +350,40 @@ check_and_install_docker() {
     fi
 
     if ! command -v docker &> /dev/null; then
-        log_warn "Docker is not installed"
+        tui_error "Docker is not installed"
     else
-        log_warn "Docker is installed but not running or accessible"
+        tui_error "Docker is installed but not running or accessible"
     fi
 
-    case "$PLATFORM" in
-        Darwin)
+    detect_os
+    case "$OS_TYPE" in
+        macos)
             echo ""
-            log_info "Docker Desktop is required for macOS"
-            log_info "Download from: https://www.docker.com/products/docker-desktop/"
+            tui_info "Docker Desktop is required for macOS"
+            tui_info "Download from: https://www.docker.com/products/docker-desktop/"
             echo ""
             if command -v brew &> /dev/null; then
-                read -p "Install Docker Desktop via Homebrew? [y/N]: " install_docker
-                if [[ "$install_docker" =~ ^[Yy] ]]; then
+                if tui_confirm "Install Docker Desktop via Homebrew?"; then
                     brew install --cask docker
-                    log_info "Docker Desktop installed. Please start it from Applications and run this script again."
+                    tui_info "Docker Desktop installed. Please start it from Applications and run this script again."
                     exit 0
                 fi
             fi
-            log_info "Please install Docker Desktop and run this script again"
+            tui_info "Please install Docker Desktop and run this script again"
             exit 1
             ;;
-        Linux)
+        linux)
             echo ""
-            read -p "Install Docker automatically? [y/N]: " install_docker
-            if [[ "$install_docker" =~ ^[Yy] ]]; then
-                log_info "Installing Docker via official install script..."
+            if tui_confirm "Install Docker automatically?"; then
+                tui_info "Installing Docker via official install script..."
                 curl -fsSL https://get.docker.com | sh
                 sudo usermod -aG docker "$USER"
-                log_info "Docker installed! You may need to log out and back in for group changes."
-                log_info "Then run this script again."
+                tui_info "Docker installed! You may need to log out and back in for group changes."
+                tui_info "Then run this script again."
                 exit 0
             fi
-            log_info "Please install Docker and run this script again"
-            log_info "Visit: https://docs.docker.com/engine/install/"
+            tui_info "Please install Docker and run this script again"
+            tui_info "Visit: https://docs.docker.com/engine/install/"
             exit 1
             ;;
         *)
@@ -299,11 +454,6 @@ bootstrap_repository() {
     SCRIPT_DIR="$PROJECT_ROOT/scripts"
     ENV_FILE="$PROJECT_ROOT/.env.prod"
 
-    # Update DATA_DIR based on platform
-    if [ "$PLATFORM" = "Darwin" ]; then
-        DATA_DIR="$PROJECT_ROOT/data"
-    fi
-
     log_info "Repository cloned to: $PROJECT_ROOT"
 }
 
@@ -315,29 +465,188 @@ ensure_in_repository() {
 }
 
 # =============================================================================
-# Environment Checks
+# Check Functions
 # =============================================================================
 
-check_platform() {
-    log_step "Detecting platform"
-    log_info "Platform: $PLATFORM ($ARCH)"
+check_docker() {
+    detect_os
 
-    case "$PLATFORM" in
-        Darwin)
-            log_info "macOS detected - using local data directory"
-            ;;
-        Linux)
-            # Check if running in WSL
-            if grep -qi microsoft /proc/version 2>/dev/null; then
-                log_info "WSL detected"
+    if ! command -v docker &> /dev/null; then
+        check_and_install_docker
+        return
+    fi
+
+    if ! docker info &> /dev/null; then
+        tui_error "Docker daemon is not running or permission denied"
+        echo ""
+
+        if [ "$OS_TYPE" = "macos" ]; then
+            tui_info "Docker Desktop needs to be running"
+            echo ""
+            if tui_confirm "Try to start Docker Desktop?"; then
+                open -a Docker 2>/dev/null || open /Applications/Docker.app 2>/dev/null
+                tui_info "Waiting for Docker to start..."
+                local attempts=0
+                while [ $attempts -lt 30 ]; do
+                    if docker info &> /dev/null 2>&1; then
+                        tui_success "Docker is now running!"
+                        return 0
+                    fi
+                    sleep 2
+                    attempts=$((attempts + 1))
+                    echo -n "."
+                done
+                echo ""
+                tui_error "Docker didn't start in time. Please start Docker Desktop manually and try again."
+                exit 1
             else
-                log_info "Linux detected"
+                tui_info "Please start Docker Desktop and run this script again"
+                exit 1
             fi
-            ;;
-        *)
-            log_warn "Unknown platform: $PLATFORM - assuming Linux-like"
-            ;;
-    esac
+        else
+            # Linux - offer to start Docker
+            if [ "$USE_TUI" = true ] && command -v gum &> /dev/null; then
+                local choice
+                choice=$(gum choose --header "Docker is not running. What would you like to do?" \
+                    "Start Docker now (requires sudo)" \
+                    "Show manual fix steps" \
+                    "Cancel")
+
+                case "$choice" in
+                    "Start Docker"*)
+                        tui_info "Starting Docker..."
+                        if sudo systemctl start docker 2>/dev/null; then
+                            sleep 2
+                            if docker info &> /dev/null; then
+                                tui_success "Docker started successfully!"
+                                return 0
+                            fi
+                        fi
+                        tui_error "Failed to start Docker"
+                        exit 1
+                        ;;
+                    "Show"*)
+                        echo ""
+                        gum style --foreground 214 "Manual fix steps:"
+                        gum style --foreground 245 "  1. Start Docker:    sudo systemctl start docker"
+                        gum style --foreground 245 "  2. Enable on boot:  sudo systemctl enable docker"
+                        gum style --foreground 245 "  3. Fix permissions: sudo usermod -aG docker \$USER"
+                        gum style --foreground 245 "     (requires logout/login to take effect)"
+                        exit 1
+                        ;;
+                    *)
+                        exit 1
+                        ;;
+                esac
+            else
+                echo "How to fix:"
+                echo "  Start Docker:    sudo systemctl start docker"
+                echo "  Enable on boot:  sudo systemctl enable docker"
+                echo "  Fix permissions: sudo usermod -aG docker \$USER"
+                echo "                   (then log out and back in)"
+                exit 1
+            fi
+        fi
+    fi
+
+    if ! command -v docker-compose &> /dev/null && ! docker compose version &> /dev/null; then
+        tui_error "Docker Compose is not available"
+        echo ""
+        detect_os
+        if [ "$OS_TYPE" = "macos" ]; then
+            tui_info "Docker Compose is included with Docker Desktop."
+            tui_info "Please update Docker Desktop to the latest version."
+        else
+            tui_info "Install the plugin: sudo apt install docker-compose-plugin"
+        fi
+        exit 1
+    fi
+}
+
+check_ports() {
+    local ports_in_use=""
+    local port80_proc=""
+    local port443_proc=""
+
+    # Check if port 80 is in use (skip if we're updating an existing deployment)
+    if [ "$ACTION" != "update" ] && [ "$ACTION" != "start" ]; then
+        # Try to identify what's using the ports
+        if command -v lsof &> /dev/null; then
+            port80_proc=$(lsof -i :80 -t 2>/dev/null | head -1)
+            port443_proc=$(lsof -i :443 -t 2>/dev/null | head -1)
+            [ -n "$port80_proc" ] && ports_in_use="80 $ports_in_use"
+            [ -n "$port443_proc" ] && ports_in_use="443 $ports_in_use"
+        elif command -v ss &> /dev/null; then
+            ss -tuln | grep -q ':80 ' && ports_in_use="80 $ports_in_use"
+            ss -tuln | grep -q ':443 ' && ports_in_use="443 $ports_in_use"
+        elif command -v netstat &> /dev/null; then
+            netstat -tuln 2>/dev/null | grep -q ':80 ' && ports_in_use="80 $ports_in_use"
+            netstat -tuln 2>/dev/null | grep -q ':443 ' && ports_in_use="443 $ports_in_use"
+        fi
+
+        if [ -n "$ports_in_use" ]; then
+            tui_warn "Ports in use: $ports_in_use"
+            echo ""
+
+            # Try to identify the process
+            if [ -n "$port80_proc" ] && command -v ps &> /dev/null; then
+                local proc_info=$(ps -p "$port80_proc" -o comm= 2>/dev/null || echo "unknown")
+                tui_info "Port 80 is used by: $proc_info (PID: $port80_proc)"
+            fi
+            if [ -n "$port443_proc" ] && command -v ps &> /dev/null; then
+                local proc_info=$(ps -p "$port443_proc" -o comm= 2>/dev/null || echo "unknown")
+                tui_info "Port 443 is used by: $proc_info (PID: $port443_proc)"
+            fi
+
+            echo ""
+
+            # Check if it's a previous CYROID deployment
+            if docker ps 2>/dev/null | grep -q "cyroid\|traefik"; then
+                tui_info "This looks like a previous CYROID deployment."
+                echo ""
+                if tui_confirm "Stop existing CYROID deployment and continue?"; then
+                    tui_info "Stopping existing deployment..."
+                    docker_compose_cmd -f docker-compose.yml -f docker-compose.prod.yml down 2>/dev/null || true
+                    sleep 2
+                    tui_success "Previous deployment stopped"
+                else
+                    tui_info "Deployment cancelled"
+                    exit 1
+                fi
+            else
+                if ! tui_confirm "Continue anyway? (may fail if ports are blocked)"; then
+                    tui_info "Deployment cancelled. Free up ports 80 and 443 first."
+                    exit 1
+                fi
+            fi
+        else
+            tui_success "Ports 80 and 443 are available"
+        fi
+    fi
+}
+
+check_data_dir_writable() {
+    local parent_dir=$(dirname "$DATA_DIR")
+
+    if [ -d "$DATA_DIR" ]; then
+        if [ ! -w "$DATA_DIR" ]; then
+            tui_error "Data directory $DATA_DIR exists but is not writable"
+            tui_info "Try: sudo chown -R \$(id -u):\$(id -g) $DATA_DIR"
+            exit 1
+        fi
+    elif [ -d "$parent_dir" ]; then
+        if [ ! -w "$parent_dir" ]; then
+            tui_warn "Cannot write to $parent_dir - will need sudo to create data directory"
+        fi
+    fi
+}
+
+backup_env_file() {
+    if [ -f "$ENV_FILE" ]; then
+        local backup="${ENV_FILE}.backup.$(date +%Y%m%d_%H%M%S)"
+        cp "$ENV_FILE" "$backup"
+        tui_info "Backed up existing config to $backup"
+    fi
 }
 
 check_disk_space() {
@@ -347,149 +656,47 @@ check_disk_space() {
     local required_gb=10
     local available_gb
 
-    if [ "$PLATFORM" = "Darwin" ]; then
+    detect_os
+    if [ "$OS_TYPE" = "macos" ]; then
         available_gb=$(df -g "$target_dir" | awk 'NR==2 {print $4}')
     else
         available_gb=$(df -BG "$target_dir" | awk 'NR==2 {print $4}' | tr -d 'G')
     fi
 
     if [ "$available_gb" -lt "$required_gb" ]; then
-        log_warn "Low disk space: ${available_gb}GB available, ${required_gb}GB recommended"
+        tui_warn "Low disk space: ${available_gb}GB available, ${required_gb}GB recommended"
     else
-        log_info "Disk space: ${available_gb}GB available"
-    fi
-}
-
-check_conflicting_files() {
-    log_step "Checking for conflicting configuration files"
-
-    local has_conflicts=false
-
-    # Check for docker-compose.override.yml when using explicit compose files
-    if [ -f "$PROJECT_ROOT/docker-compose.override.yml" ]; then
-        if [ "$DEV_MODE" = true ]; then
-            log_warn "Found docker-compose.override.yml - this may conflict with dev mode"
-            log_info "The override file will be loaded automatically by Docker Compose"
-            log_info "Consider removing or renaming it: mv docker-compose.override.yml docker-compose.override.yml.bak"
-            has_conflicts=true
-        else
-            log_info "Found docker-compose.override.yml (will be ignored in production mode)"
-        fi
-    fi
-
-    # Check for .env file with potentially conflicting settings
-    if [ -f "$PROJECT_ROOT/.env" ]; then
-        local env_data_dir=$(grep "^CYROID_DATA_DIR=" "$PROJECT_ROOT/.env" 2>/dev/null | cut -d'=' -f2)
-        if [ -n "$env_data_dir" ] && [ "$env_data_dir" != "$DATA_DIR" ]; then
-            log_warn "Found .env with CYROID_DATA_DIR=$env_data_dir"
-            log_info "This deployment will use DATA_DIR=$DATA_DIR"
-            if [ "$DEV_MODE" = true ]; then
-                log_info "Updating .env to match..."
-            fi
-        fi
-    fi
-
-    return 0
-}
-
-check_data_directory() {
-    log_step "Checking data directory: $DATA_DIR"
-
-    # Check if we can create/write to the data directory
-    if [ -d "$DATA_DIR" ]; then
-        if [ -w "$DATA_DIR" ]; then
-            log_info "Data directory exists and is writable"
-        else
-            log_error "Data directory exists but is not writable: $DATA_DIR"
-            log_info "Try: sudo chown -R $(id -u):$(id -g) $DATA_DIR"
-            exit 1
-        fi
-    else
-        # Try to create it
-        local parent_dir=$(dirname "$DATA_DIR")
-        if [ "$PLATFORM" = "Darwin" ]; then
-            # On macOS, we should be able to create in project directory
-            mkdir -p "$DATA_DIR" 2>/dev/null || {
-                log_error "Cannot create data directory: $DATA_DIR"
-                exit 1
-            }
-            log_info "Created data directory: $DATA_DIR"
-        else
-            # On Linux, might need sudo for /data
-            if [ -w "$parent_dir" ] || mkdir -p "$DATA_DIR" 2>/dev/null; then
-                log_info "Created data directory: $DATA_DIR"
-            else
-                log_info "Creating data directory with sudo..."
-                sudo mkdir -p "$DATA_DIR"
-                sudo chown -R "$(id -u):$(id -g)" "$DATA_DIR"
-                log_info "Created data directory: $DATA_DIR"
-            fi
-        fi
-    fi
-
-    # Create subdirectories
-    local subdirs="iso-cache template-storage vm-storage shared catalogs scenarios images"
-    for subdir in $subdirs; do
-        mkdir -p "$DATA_DIR/$subdir" 2>/dev/null || sudo mkdir -p "$DATA_DIR/$subdir" 2>/dev/null || true
-    done
-}
-
-check_ports() {
-    log_step "Checking port availability"
-
-    local ports="80 443 8000 3000 5432 6379 9000"
-    local blocked_ports=""
-
-    for port in $ports; do
-        if [ "$PLATFORM" = "Darwin" ]; then
-            if lsof -i ":$port" -sTCP:LISTEN &>/dev/null; then
-                blocked_ports="$blocked_ports $port"
-            fi
-        else
-            if ss -tuln 2>/dev/null | grep -q ":$port " || netstat -tuln 2>/dev/null | grep -q ":$port "; then
-                blocked_ports="$blocked_ports $port"
-            fi
-        fi
-    done
-
-    if [ -n "$blocked_ports" ]; then
-        log_warn "Ports in use:$blocked_ports"
-        log_info "These may be from a previous CYROID deployment (that's OK)"
-        log_info "Or another service - check with: lsof -i :PORT"
-    else
-        log_info "All required ports are available"
+        tui_success "Disk space: ${available_gb}GB available"
     fi
 }
 
 check_docker_resources() {
     log_step "Checking Docker resources"
 
-    if [ "$PLATFORM" = "Darwin" ]; then
-        # On macOS, check Docker Desktop resource allocation
+    detect_os
+    if [ "$OS_TYPE" = "macos" ]; then
         local docker_info=$(docker info 2>/dev/null)
         local mem_total=$(echo "$docker_info" | grep "Total Memory:" | awk '{print $3}')
         local cpus=$(echo "$docker_info" | grep "CPUs:" | awk '{print $2}')
 
-        log_info "Docker Desktop resources: ${cpus:-?} CPUs, ${mem_total:-?} memory"
+        tui_info "Docker Desktop resources: ${cpus:-?} CPUs, ${mem_total:-?} memory"
 
-        # Check if memory seems low (rough check)
         if [ -n "$mem_total" ]; then
             local mem_gb=$(echo "$mem_total" | grep -o '[0-9]*' | head -1)
             if [ -n "$mem_gb" ] && [ "$mem_gb" -lt 4 ]; then
-                log_warn "Docker Desktop memory is low (${mem_total})"
-                log_info "Recommend at least 4GB for CYROID. Adjust in Docker Desktop settings."
+                tui_warn "Docker Desktop memory is low (${mem_total})"
+                tui_info "Recommend at least 4GB for CYROID. Adjust in Docker Desktop settings."
             fi
         fi
     else
-        # On Linux, Docker uses host resources directly
         local mem_total=$(free -g 2>/dev/null | awk '/Mem:/ {print $2}')
         local cpus=$(nproc 2>/dev/null)
 
-        log_info "System resources: ${cpus:-?} CPUs, ${mem_total:-?}GB memory"
+        tui_info "System resources: ${cpus:-?} CPUs, ${mem_total:-?}GB memory"
 
         if [ -n "$mem_total" ] && [ "$mem_total" -lt 4 ]; then
-            log_warn "System memory is low (${mem_total}GB)"
-            log_info "Recommend at least 4GB for CYROID"
+            tui_warn "System memory is low (${mem_total}GB)"
+            tui_info "Recommend at least 4GB for CYROID"
         fi
     fi
 }
@@ -498,16 +705,19 @@ run_all_checks() {
     log_step "Running environment checks"
     echo ""
 
-    check_platform
+    detect_os
+    tui_info "Platform: $PLATFORM ($ARCH)"
+    tui_info "OS Type: $OS_TYPE"
+    echo ""
+
     check_docker
     check_docker_resources
     check_disk_space
     check_ports
-    check_conflicting_files
-    check_data_directory
+    check_data_dir_writable
 
     echo ""
-    log_info "All checks passed!"
+    tui_success "All checks passed!"
 }
 
 docker_compose_cmd() {
@@ -521,42 +731,44 @@ docker_compose_cmd() {
 show_help() {
     echo "CYROID Deployment Script"
     echo ""
-    echo "This script handles complete setup including Docker installation,"
-    echo "repository cloning, and service deployment."
+    echo "A full TUI for deploying and managing CYROID in production or development mode."
+    echo "Uses 'gum' for beautiful terminal interfaces (auto-installs on macOS)."
+    echo "Can bootstrap a fresh install from a standalone script."
     echo ""
     echo "Usage:"
-    echo "  $0                                    Interactive setup (production)"
+    echo "  $0                                    Interactive TUI setup"
     echo "  $0 --dev                              Development mode (local build)"
     echo "  $0 --domain example.com              Domain with Let's Encrypt"
     echo "  $0 --ip 192.168.1.100                IP with self-signed cert"
-    echo "  $0 --update                          Update existing deployment"
+    echo "  $0 --update                          Update (interactive version)"
+    echo "  $0 --start                           Start stopped deployment"
     echo "  $0 --stop                            Stop all services"
+    echo "  $0 --restart                         Restart all services"
     echo "  $0 --status                          Show service status"
     echo "  $0 --check                           Run environment checks only"
     echo ""
-    echo "Options:"
+    echo "Lifecycle Commands:"
+    echo "  --start            Start a stopped CYROID deployment"
+    echo "  --stop             Stop all running services"
+    echo "  --restart          Stop then start all services"
+    echo "  --update           Update to new version (interactive selection)"
+    echo "  --status           Show current status and health"
+    echo "  --check            Run environment checks without deploying"
+    echo ""
+    echo "Deploy Options:"
     echo "  --dev              Development mode (builds from local source, hot-reload)"
     echo "  --domain DOMAIN    Domain name for the server"
     echo "  --ip IP            IP address for the server"
     echo "  --email EMAIL      Email for Let's Encrypt notifications"
     echo "  --ssl MODE         SSL mode: letsencrypt, selfsigned, manual"
-    echo "  --version VER      CYROID version to deploy (default: latest)"
-    echo "  --data-dir DIR     Data directory (default: auto-detected)"
-    echo "  --clone-dir DIR    Directory to clone repository into (if not in repo)"
-    echo "  --update           Pull latest images and restart"
-    echo "  --stop             Stop all services"
-    echo "  --status           Show service status"
-    echo "  --check            Run environment checks without deploying"
+    echo "  --version VER      CYROID version (default: interactive)"
+    echo "  --data-dir DIR     Data directory (default: auto by OS)"
     echo "  --help             Show this help message"
     echo ""
     echo "Bootstrap (fresh install on new machine):"
     echo "  # One-liner to download and run:"
     echo "  curl -fsSL https://raw.githubusercontent.com/jongodb/CYROID/master/scripts/deploy.sh -o deploy.sh"
     echo "  chmod +x deploy.sh && ./deploy.sh --dev"
-    echo ""
-    echo "  # Or clone first, then run:"
-    echo "  git clone https://github.com/jongodb/CYROID.git && cd CYROID"
-    echo "  ./scripts/deploy.sh --dev"
     echo ""
     echo "Examples:"
     echo "  # Local development (macOS or Linux)"
@@ -565,22 +777,15 @@ show_help() {
     echo "  # Deploy with domain and Let's Encrypt"
     echo "  $0 --domain cyroid.example.com --email admin@example.com"
     echo ""
-    echo "  # Deploy with IP and self-signed certificate"
-    echo "  $0 --ip 10.0.0.50"
+    echo "  # Update to specific version"
+    echo "  $0 --update --version v0.30.0"
     echo ""
     echo "  # Check environment before deploying"
     echo "  $0 --check"
     echo ""
     echo "Platform notes:"
-    echo "  macOS:  Uses ./data for storage (Docker Desktop limitation)"
+    echo "  macOS:  Uses ~/.cyroid/data for storage"
     echo "  Linux:  Uses /data/cyroid for storage by default"
-    echo ""
-    echo "The script will automatically:"
-    echo "  - Check for and help install Docker if missing"
-    echo "  - Clone the repository if run from outside it"
-    echo "  - Detect platform (macOS/Linux) and configure appropriately"
-    echo "  - Set up data directories with correct permissions"
-    echo "  - Handle Docker Compose configuration conflicts"
 }
 
 # =============================================================================
@@ -590,39 +795,45 @@ show_help() {
 create_data_directories() {
     log_step "Creating data directories"
 
-    # Convert relative path to absolute if needed
-    if [[ "$DATA_DIR" != /* ]]; then
-        # Remove leading ./ if present and convert to absolute path
-        DATA_DIR="${DATA_DIR#./}"
-        DATA_DIR="$(cd "$PROJECT_ROOT" && pwd)/$DATA_DIR"
-        log_info "Using absolute path: $DATA_DIR"
-    fi
+    detect_os
 
-    # Try creating directories without sudo first
-    if mkdir -p "$DATA_DIR"/{iso-cache,template-storage,vm-storage,shared,catalogs,scenarios,images} 2>/dev/null; then
-        log_info "Data directory created: $DATA_DIR"
-    else
-        # Fall back to sudo if regular mkdir fails
-        log_warn "Need elevated permissions for $DATA_DIR"
-        if command -v sudo &> /dev/null; then
-            sudo mkdir -p "$DATA_DIR"/{iso-cache,template-storage,vm-storage,shared,catalogs,scenarios,images}
-            sudo chown -R "$(id -u):$(id -g)" "$DATA_DIR" 2>/dev/null || true
-            log_info "Data directory created with sudo: $DATA_DIR"
-        else
-            log_error "Cannot create $DATA_DIR - permission denied and sudo not available"
-            log_info "Please create the directory manually or choose a different location"
-            exit 1
+    # Check if we need sudo (can't write to parent directory)
+    local parent_dir=$(dirname "$DATA_DIR")
+    local need_sudo=false
+
+    if [ ! -d "$DATA_DIR" ]; then
+        if [ -d "$parent_dir" ] && [ ! -w "$parent_dir" ]; then
+            need_sudo=true
+        elif [ ! -d "$parent_dir" ]; then
+            local grandparent=$(dirname "$parent_dir")
+            if [ ! -w "$grandparent" ]; then
+                need_sudo=true
+            fi
         fi
     fi
+
+    # All directories needed by CYROID
+    local dirs="iso-cache template-storage vm-storage shared catalogs scenarios images registry"
+
+    if [ "$need_sudo" = true ]; then
+        tui_info "Need elevated permissions to create $DATA_DIR"
+        sudo mkdir -p "$DATA_DIR"/{iso-cache,template-storage,vm-storage,shared,catalogs,scenarios,images,registry}
+        sudo chown -R "$(id -u):$(id -g)" "$DATA_DIR"
+    else
+        mkdir -p "$DATA_DIR"/{iso-cache,template-storage,vm-storage,shared,catalogs,scenarios,images,registry}
+    fi
+
+    # Ensure certs directory exists for docker-compose mount
+    mkdir -p "$PROJECT_ROOT/certs"
+
+    tui_info "Data directory: $DATA_DIR"
 }
 
 create_env_file() {
     log_step "Configuring environment"
 
-    # Determine address to use
     local address="${DOMAIN:-$IP}"
 
-    # Determine SSL mode
     if [ -z "$SSL_MODE" ]; then
         if [ -n "$DOMAIN" ]; then
             SSL_MODE="letsencrypt"
@@ -637,34 +848,30 @@ create_env_file() {
     local minio_password=""
 
     if [ -f "$ENV_FILE" ]; then
-        # Load existing secrets
         source "$ENV_FILE" 2>/dev/null || true
         jwt_secret="${JWT_SECRET_KEY:-}"
         pg_password="${POSTGRES_PASSWORD:-}"
         minio_password="${MINIO_SECRET_KEY:-}"
     fi
 
-    # Generate any missing secrets
     if [ -z "$jwt_secret" ]; then
         jwt_secret=$(generate_secret)
-        log_info "Generated JWT secret"
+        tui_info "Generated JWT secret"
     fi
     if [ -z "$pg_password" ]; then
         pg_password=$(generate_secret | head -c 32)
-        log_info "Generated PostgreSQL password"
+        tui_info "Generated PostgreSQL password"
     fi
     if [ -z "$minio_password" ]; then
         minio_password=$(generate_secret | head -c 32)
-        log_info "Generated MinIO password"
+        tui_info "Generated MinIO password"
     fi
 
-    # Set SSL resolver for Let's Encrypt
     local ssl_resolver=""
     if [ "$SSL_MODE" = "letsencrypt" ]; then
         ssl_resolver="letsencrypt"
     fi
 
-    # Write environment file
     cat > "$ENV_FILE" << EOF
 # CYROID Production Environment
 # Generated by deploy.sh on $(date)
@@ -698,41 +905,39 @@ CYROID_RANGES_SUBNET=172.30.1.0/24
 EOF
 
     chmod 600 "$ENV_FILE"
-    log_info "Environment file: $ENV_FILE"
-    log_info "SSL Mode: $SSL_MODE"
+    tui_info "Environment file: $ENV_FILE"
+    tui_info "SSL Mode: $SSL_MODE"
 }
 
 setup_ssl() {
     log_step "Setting up SSL certificates"
 
-    # Generate production Traefik config with correct email
     generate_traefik_config
+
+    mkdir -p "$PROJECT_ROOT/certs"
 
     case "$SSL_MODE" in
         letsencrypt)
-            log_info "Using Let's Encrypt for automatic certificates"
-            log_info "Certificates will be obtained on first request"
-
-            # Create acme directory and file if it doesn't exist
+            tui_info "Using Let's Encrypt for automatic certificates"
             mkdir -p "$PROJECT_ROOT/acme"
             touch "$PROJECT_ROOT/acme/acme.json"
             chmod 600 "$PROJECT_ROOT/acme/acme.json"
             ;;
 
         selfsigned)
-            log_info "Generating self-signed certificate"
+            tui_info "Generating self-signed certificate"
             "$SCRIPT_DIR/generate-certs.sh" "${DOMAIN:-$IP}"
             ;;
 
         manual)
             if [ ! -f "$PROJECT_ROOT/certs/cert.pem" ] || [ ! -f "$PROJECT_ROOT/certs/key.pem" ]; then
-                log_error "Manual SSL mode requires certificates in ./certs/"
-                log_info "Please place your certificate files:"
-                log_info "  - ./certs/cert.pem"
-                log_info "  - ./certs/key.pem"
+                tui_error "Manual SSL mode requires certificates in ./certs/"
+                tui_info "Please place your certificate files:"
+                tui_info "  - ./certs/cert.pem"
+                tui_info "  - ./certs/key.pem"
                 exit 1
             fi
-            log_info "Using manually provided certificates"
+            tui_info "Using manually provided certificates"
             ;;
     esac
 }
@@ -741,16 +946,10 @@ generate_traefik_config() {
     local acme_email="${EMAIL:-admin@${DOMAIN:-$IP}}"
     local traefik_config="$PROJECT_ROOT/traefik-prod.yml"
 
-    log_info "Generating Traefik production config"
+    tui_info "Generating Traefik production config"
 
     cat > "$traefik_config" << EOF
 # Traefik Production Configuration (Generated by deploy.sh)
-#
-# Features:
-# - ACME (Let's Encrypt) automatic certificate management
-# - HTTP to HTTPS redirect
-# - Dashboard disabled for security
-
 api:
   insecure: false
   dashboard: false
@@ -786,8 +985,6 @@ log:
   level: WARN
   format: common
 EOF
-
-    log_info "Traefik config generated with email: $acme_email"
 }
 
 init_networks() {
@@ -796,52 +993,44 @@ init_networks() {
 }
 
 pull_images() {
-    log_step "Pulling Docker images"
-
     cd "$PROJECT_ROOT"
-
-    # Export env vars for docker-compose
     export $(grep -v '^#' "$ENV_FILE" | xargs)
 
-    docker_compose_cmd -f docker-compose.yml -f docker-compose.prod.yml pull
-
-    log_info "Images pulled successfully"
+    if [ "$USE_TUI" = true ] && command -v gum &> /dev/null; then
+        gum spin --spinner dot --title "Pulling Docker images..." -- \
+            docker_compose_cmd -f docker-compose.yml -f docker-compose.prod.yml pull -q
+    else
+        docker_compose_cmd -f docker-compose.yml -f docker-compose.prod.yml pull
+    fi
 }
 
 start_services() {
-    log_step "Starting CYROID services"
-
     cd "$PROJECT_ROOT"
 
-    # Export env vars for docker-compose
     set -a
     source "$ENV_FILE"
     set +a
 
-    docker_compose_cmd -f docker-compose.yml -f docker-compose.prod.yml up -d
-
-    log_info "Services starting..."
+    if [ "$USE_TUI" = true ] && command -v gum &> /dev/null; then
+        gum spin --spinner dot --title "Starting services..." -- \
+            docker_compose_cmd -f docker-compose.yml -f docker-compose.prod.yml up -d
+    else
+        docker_compose_cmd -f docker-compose.yml -f docker-compose.prod.yml up -d
+    fi
 }
 
 wait_for_health() {
-    log_step "Waiting for services to be healthy"
+    tui_info "Waiting for services to be healthy..."
 
     local max_attempts=60
     local attempt=0
-    local address="${DOMAIN:-$IP:-localhost}"
 
     while [ $attempt -lt $max_attempts ]; do
-        # Check Docker health status
         if docker_compose_cmd -f docker-compose.yml -f docker-compose.prod.yml ps 2>/dev/null | grep -q "(healthy)"; then
             local healthy_count=$(docker_compose_cmd -f docker-compose.yml -f docker-compose.prod.yml ps 2>/dev/null | grep -c "(healthy)" || echo "0")
             if [ "$healthy_count" -ge 3 ]; then
-                # Also verify API is responding
-                if curl -sk "https://${address}/api/v1/version" 2>/dev/null | grep -q "version" || \
-                   curl -s "http://${address}/api/v1/version" 2>/dev/null | grep -q "version"; then
-                    echo ""
-                    log_info "All core services are healthy!"
-                    return 0
-                fi
+                tui_success "All services are healthy!"
+                return 0
             fi
         fi
 
@@ -851,8 +1040,8 @@ wait_for_health() {
     done
 
     echo ""
-    log_warn "Some services may not be fully healthy yet"
-    log_info "Check status with: $0 --status"
+    tui_warn "Some services may not be fully healthy yet"
+    tui_info "Check status with: $0 --status"
 }
 
 show_access_info() {
@@ -886,128 +1075,54 @@ show_access_info() {
 }
 
 do_deploy() {
-    print_banner
+    if [ -n "$DOMAIN" ] || [ -n "$IP" ]; then
+        tui_clear
+        tui_header
+    fi
 
-    # Bootstrap: ensure we have the repository and dependencies
-    log_step "Checking prerequisites"
-    check_and_install_curl
-    check_and_install_docker
-    ensure_in_repository
-
-    # Run comprehensive environment checks
-    check_platform
+    tui_info "Checking Docker installation..."
     check_docker
-    check_docker_resources
-    check_disk_space
+    tui_success "Docker is available"
+
     check_ports
 
-    # If no domain/IP specified, run interactive setup
     if [ -z "$DOMAIN" ] && [ -z "$IP" ]; then
         interactive_setup
     fi
 
-    # Check data directory (after interactive setup may have changed DATA_DIR)
-    check_data_directory
+    tui_header
+    tui_title "Deploying CYROID"
+    echo ""
 
-    # Create directories and config
+    check_data_dir_writable
+    backup_env_file
+
+    tui_info "Creating data directories..."
     create_data_directories
+    tui_success "Data directories ready"
+
+    tui_info "Generating configuration..."
     create_env_file
+    tui_success "Configuration saved"
+
+    tui_info "Setting up SSL certificates..."
     setup_ssl
+    tui_success "SSL configured"
+
+    tui_info "Initializing Docker networks..."
     init_networks
+    tui_success "Networks ready"
+
+    tui_info "Pulling Docker images (this may take a while)..."
     pull_images
+    tui_success "Images pulled"
+
+    tui_info "Starting services..."
     start_services
+    tui_success "Services started"
+
     wait_for_health
     show_access_info
-}
-
-do_update() {
-    print_banner
-    log_step "Updating CYROID deployment"
-
-    check_docker
-
-    # Check for env file (prod or dev)
-    local found_env=false
-    if [ -f "$ENV_FILE" ]; then
-        found_env=true
-        set -a
-        source "$ENV_FILE"
-        set +a
-    elif [ -f "$PROJECT_ROOT/.env" ]; then
-        found_env=true
-        set -a
-        source "$PROJECT_ROOT/.env"
-        set +a
-    fi
-
-    if [ "$found_env" = false ]; then
-        log_error "No existing deployment found. Run without --update for initial setup."
-        exit 1
-    fi
-
-    cd "$PROJECT_ROOT"
-
-    # Pull latest images
-    log_info "Pulling latest images..."
-    docker_compose_cmd -f docker-compose.yml -f docker-compose.prod.yml pull
-
-    # Restart services
-    log_info "Restarting services..."
-    docker_compose_cmd -f docker-compose.yml -f docker-compose.prod.yml up -d
-
-    wait_for_health
-
-    log_info "Update complete!"
-    echo ""
-}
-
-do_stop() {
-    print_banner
-    log_step "Stopping CYROID services"
-
-    cd "$PROJECT_ROOT"
-
-    if [ -f "$ENV_FILE" ]; then
-        set -a
-        source "$ENV_FILE"
-        set +a
-    fi
-
-    docker_compose_cmd -f docker-compose.yml -f docker-compose.prod.yml down
-
-    log_info "All services stopped"
-    echo ""
-}
-
-do_status() {
-    print_banner
-    log_step "CYROID Service Status"
-
-    cd "$PROJECT_ROOT"
-
-    # Try to load env file (prod or dev)
-    if [ -f "$ENV_FILE" ]; then
-        set -a
-        source "$ENV_FILE"
-        set +a
-    elif [ -f "$PROJECT_ROOT/.env" ]; then
-        set -a
-        source "$PROJECT_ROOT/.env"
-        set +a
-    fi
-
-    # Determine which compose files to use
-    if [ "$DEV_MODE" = true ] || [ -f "$PROJECT_ROOT/.env" ]; then
-        docker_compose_cmd -f docker-compose.yml -f docker-compose.dev.yml ps
-    else
-        docker_compose_cmd -f docker-compose.yml -f docker-compose.prod.yml ps
-    fi
-    echo ""
-}
-
-do_check() {
-    print_banner
-    run_all_checks
 }
 
 # =============================================================================
@@ -1019,15 +1134,6 @@ setup_dev_env() {
 
     local env_file="$PROJECT_ROOT/.env"
 
-    # Backup existing .env if it exists and differs
-    if [ -f "$env_file" ]; then
-        local existing_data_dir=$(grep "^CYROID_DATA_DIR=" "$env_file" 2>/dev/null | cut -d'=' -f2)
-        if [ "$existing_data_dir" != "$DATA_DIR" ]; then
-            log_info "Updating .env with correct DATA_DIR"
-        fi
-    fi
-
-    # Create/update .env file for development
     cat > "$env_file" << EOF
 # CYROID Development Environment
 # Generated by deploy.sh --dev on $(date)
@@ -1052,7 +1158,7 @@ DEBUG=true
 EOF
 
     chmod 600 "$env_file"
-    log_info "Created .env file"
+    tui_info "Created .env file"
 }
 
 handle_override_file() {
@@ -1061,15 +1167,12 @@ handle_override_file() {
     local override_file="$PROJECT_ROOT/docker-compose.override.yml"
 
     if [ -f "$override_file" ]; then
-        log_warn "Found docker-compose.override.yml"
-        log_info "This file gets auto-loaded by Docker Compose and may conflict"
-        log_info "The deploy script manages environment configuration directly"
+        tui_warn "Found docker-compose.override.yml"
+        tui_info "This file gets auto-loaded by Docker Compose and may conflict"
 
-        # Back it up to prevent conflicts
         local backup_file="${override_file}.bak.$(date +%Y%m%d%H%M%S)"
         mv "$override_file" "$backup_file"
-        log_info "Backed up to: $(basename "$backup_file")"
-        log_info "To restore: mv $(basename "$backup_file") docker-compose.override.yml"
+        tui_info "Backed up to: $(basename "$backup_file")"
     fi
 }
 
@@ -1078,58 +1181,14 @@ create_traefik_dirs() {
 
     mkdir -p "$PROJECT_ROOT/traefik/dynamic"
     mkdir -p "$PROJECT_ROOT/acme"
+    mkdir -p "$PROJECT_ROOT/certs"
 
-    # Create empty acme.json if needed
     if [ ! -f "$PROJECT_ROOT/acme/acme.json" ]; then
         touch "$PROJECT_ROOT/acme/acme.json"
         chmod 600 "$PROJECT_ROOT/acme/acme.json"
     fi
 
-    log_info "Traefik directories ready"
-}
-
-do_dev_deploy() {
-    print_banner
-    log_info "Development Mode"
-    echo ""
-
-    # Bootstrap: ensure we have the repository and dependencies
-    log_step "Checking prerequisites"
-    check_and_install_curl
-    check_and_install_docker
-    ensure_in_repository
-
-    # Run all environment checks
-    run_all_checks
-
-    # Handle conflicting override file
-    handle_override_file
-
-    # Setup environment
-    setup_dev_env
-    create_traefik_dirs
-
-    # Initialize networks
-    log_step "Initializing Docker networks"
-    "$SCRIPT_DIR/init-networks.sh" || true
-
-    # Build and start services
-    log_step "Building and starting services"
-    cd "$PROJECT_ROOT"
-
-    # Load the environment
-    set -a
-    source "$PROJECT_ROOT/.env"
-    set +a
-
-    # Build and start with dev compose file
-    docker_compose_cmd -f docker-compose.yml -f docker-compose.dev.yml up -d --build
-
-    # Wait for services
-    wait_for_health_dev
-
-    # Show access info
-    show_dev_access_info
+    tui_info "Traefik directories ready"
 }
 
 wait_for_health_dev() {
@@ -1141,10 +1200,9 @@ wait_for_health_dev() {
     cd "$PROJECT_ROOT"
 
     while [ $attempt -lt $max_attempts ]; do
-        # Check if API is responding (through Traefik)
         if curl -s http://localhost/api/v1/version 2>/dev/null | grep -q "version"; then
             echo ""
-            log_info "API is ready!"
+            tui_success "API is ready!"
             return 0
         fi
 
@@ -1154,8 +1212,8 @@ wait_for_health_dev() {
     done
 
     echo ""
-    log_warn "Services may not be fully ready yet"
-    log_info "Check logs with: docker compose -f docker-compose.yml -f docker-compose.dev.yml logs"
+    tui_warn "Services may not be fully ready yet"
+    tui_info "Check logs with: docker compose -f docker-compose.yml -f docker-compose.dev.yml logs"
 }
 
 show_dev_access_info() {
@@ -1183,80 +1241,421 @@ show_dev_access_info() {
     echo ""
 }
 
-interactive_setup() {
-    echo -e "${BOLD}Production Deployment Setup${NC}"
-    echo ""
-    echo "This wizard will configure CYROID for production use."
+do_dev_deploy() {
+    print_banner
+    tui_info "Development Mode"
     echo ""
 
-    # Ask for domain or IP
-    echo -e "${CYAN}How will users access CYROID?${NC}"
-    echo "  1) Domain name (e.g., cyroid.example.com)"
-    echo "  2) IP address (e.g., 192.168.1.100)"
+    log_step "Checking prerequisites"
+    check_and_install_curl
+    check_and_install_docker
+    ensure_in_repository
+
+    run_all_checks
+
+    handle_override_file
+    setup_dev_env
+    create_traefik_dirs
+    create_data_directories
+
+    log_step "Initializing Docker networks"
+    "$SCRIPT_DIR/init-networks.sh" || true
+
+    log_step "Building and starting services"
+    cd "$PROJECT_ROOT"
+
+    set -a
+    source "$PROJECT_ROOT/.env"
+    set +a
+
+    docker_compose_cmd -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+
+    wait_for_health_dev
+    show_dev_access_info
+}
+
+# =============================================================================
+# Lifecycle Functions
+# =============================================================================
+
+get_current_version() {
+    if [ -f "$ENV_FILE" ]; then
+        grep "^VERSION=" "$ENV_FILE" 2>/dev/null | cut -d= -f2 || echo "unknown"
+    else
+        echo "unknown"
+    fi
+}
+
+get_available_releases() {
+    if command -v curl &> /dev/null; then
+        curl -s "https://api.github.com/repos/JongoDB/CYROID/releases?per_page=10" 2>/dev/null | \
+            grep '"tag_name"' | sed 's/.*"tag_name": "\(.*\)".*/\1/' | head -10
+    fi
+}
+
+get_available_tags() {
+    if command -v curl &> /dev/null; then
+        curl -s "https://api.github.com/repos/JongoDB/CYROID/tags?per_page=15" 2>/dev/null | \
+            grep '"name"' | sed 's/.*"name": "\(.*\)".*/\1/' | head -15
+    fi
+}
+
+do_update() {
+    check_gum
+    tui_clear
+    tui_header
+
+    tui_title "Update CYROID"
     echo ""
-    read -p "Enter choice [1-2]: " access_choice
+
+    check_docker
+
+    if [ ! -f "$ENV_FILE" ]; then
+        tui_error "No existing deployment found"
+        tui_info "Run without --update for initial setup"
+        exit 1
+    fi
+
+    cd "$PROJECT_ROOT"
+
+    set -a
+    source "$ENV_FILE"
+    set +a
+
+    local current_version=$(get_current_version)
+    tui_info "Current version: $current_version"
+    echo ""
+
+    local target_version="$VERSION"
+
+    if [ -z "$target_version" ] || [ "$target_version" = "latest" ]; then
+        if [ "$USE_TUI" = true ] && command -v gum &> /dev/null; then
+            tui_info "Fetching available versions..."
+
+            local releases=$(get_available_releases)
+            local tags=$(get_available_tags)
+
+            if [ -n "$releases" ] || [ -n "$tags" ]; then
+                local version_choice
+                version_choice=$(gum choose --header "Select version to install:" \
+                    "Latest (newest release)" \
+                    "Choose from releases" \
+                    "Choose from tags" \
+                    "Enter version manually")
+
+                case "$version_choice" in
+                    "Latest"*)
+                        target_version="latest"
+                        ;;
+                    "Choose from releases"*)
+                        if [ -n "$releases" ]; then
+                            target_version=$(echo "$releases" | gum choose --header "Select release:")
+                        else
+                            target_version="latest"
+                        fi
+                        ;;
+                    "Choose from tags"*)
+                        if [ -n "$tags" ]; then
+                            target_version=$(echo "$tags" | gum choose --header "Select tag:")
+                        else
+                            target_version="latest"
+                        fi
+                        ;;
+                    "Enter"*)
+                        target_version=$(gum input --placeholder "v0.30.0" --header "Enter version:")
+                        ;;
+                    *)
+                        target_version="latest"
+                        ;;
+                esac
+            else
+                target_version="latest"
+            fi
+        else
+            target_version="latest"
+        fi
+    fi
+
+    echo ""
+    tui_info "Target version: $target_version"
+    echo ""
+
+    if ! tui_confirm "Proceed with update?"; then
+        tui_info "Update cancelled"
+        exit 0
+    fi
+
+    echo ""
+
+    if [ "$target_version" != "latest" ]; then
+        sed -i.bak "s/^VERSION=.*/VERSION=$target_version/" "$ENV_FILE" 2>/dev/null || \
+            sed -i '' "s/^VERSION=.*/VERSION=$target_version/" "$ENV_FILE"
+        export VERSION="$target_version"
+    fi
+
+    tui_info "Pulling Docker images..."
+    if [ "$USE_TUI" = true ] && command -v gum &> /dev/null; then
+        gum spin --spinner dot --title "Pulling images for $target_version..." -- \
+            docker_compose_cmd -f docker-compose.yml -f docker-compose.prod.yml pull -q
+    else
+        docker_compose_cmd -f docker-compose.yml -f docker-compose.prod.yml pull
+    fi
+    tui_success "Images pulled"
+
+    tui_info "Restarting services..."
+    if [ "$USE_TUI" = true ] && command -v gum &> /dev/null; then
+        gum spin --spinner dot --title "Restarting services..." -- \
+            docker_compose_cmd -f docker-compose.yml -f docker-compose.prod.yml up -d
+    else
+        docker_compose_cmd -f docker-compose.yml -f docker-compose.prod.yml up -d
+    fi
+    tui_success "Services restarted"
+
+    wait_for_health
+
+    echo ""
+    tui_success "Update complete! Now running: $target_version"
+    echo ""
+}
+
+do_start() {
+    check_gum
+    tui_clear
+    tui_header
+
+    tui_title "Start CYROID"
+    echo ""
+
+    check_docker
+
+    if [ ! -f "$ENV_FILE" ]; then
+        tui_error "No existing deployment found"
+        tui_info "Run without --start for initial setup"
+        exit 1
+    fi
+
+    cd "$PROJECT_ROOT"
+
+    set -a
+    source "$ENV_FILE"
+    set +a
+
+    tui_info "Starting CYROID services..."
+
+    if [ "$USE_TUI" = true ] && command -v gum &> /dev/null; then
+        gum spin --spinner dot --title "Starting services..." -- \
+            docker_compose_cmd -f docker-compose.yml -f docker-compose.prod.yml up -d
+    else
+        docker_compose_cmd -f docker-compose.yml -f docker-compose.prod.yml up -d
+    fi
+
+    wait_for_health
+
+    local address=$(grep "^DOMAIN=" "$ENV_FILE" | cut -d= -f2)
+
+    echo ""
+    tui_success "CYROID is running!"
+    tui_info "Access at: https://$address"
+    echo ""
+}
+
+do_stop() {
+    check_gum
+    tui_clear
+    tui_header
+
+    tui_title "Stop CYROID"
+    echo ""
+
+    cd "$PROJECT_ROOT"
+
+    if [ -f "$ENV_FILE" ]; then
+        set -a
+        source "$ENV_FILE"
+        set +a
+    fi
+
+    local running=$(docker_compose_cmd -f docker-compose.yml -f docker-compose.prod.yml ps -q 2>/dev/null | wc -l | tr -d ' ')
+
+    if [ "$running" = "0" ]; then
+        tui_info "CYROID is not currently running"
+        exit 0
+    fi
+
+    tui_info "Found $running running containers"
+    echo ""
+
+    if ! tui_confirm "Stop all CYROID services?"; then
+        tui_info "Cancelled"
+        exit 0
+    fi
+
+    echo ""
+    tui_info "Stopping services..."
+
+    if [ "$USE_TUI" = true ] && command -v gum &> /dev/null; then
+        gum spin --spinner dot --title "Stopping CYROID..." -- \
+            docker_compose_cmd -f docker-compose.yml -f docker-compose.prod.yml down
+    else
+        docker_compose_cmd -f docker-compose.yml -f docker-compose.prod.yml down
+    fi
+
+    tui_success "All services stopped"
+    echo ""
+}
+
+do_status() {
+    check_gum
+    tui_clear
+    tui_header
+
+    tui_title "CYROID Status"
+    echo ""
+
+    cd "$PROJECT_ROOT"
+
+    if [ -f "$ENV_FILE" ]; then
+        set -a
+        source "$ENV_FILE"
+        set +a
+
+        local current_version=$(get_current_version)
+        local address=$(grep "^DOMAIN=" "$ENV_FILE" | cut -d= -f2)
+
+        tui_info "Version: $current_version"
+        tui_info "Address: https://$address"
+        echo ""
+    fi
+
+    tui_title "Services"
+    echo ""
+
+    docker_compose_cmd -f docker-compose.yml -f docker-compose.prod.yml ps
+
+    echo ""
+
+    local total=$(docker_compose_cmd -f docker-compose.yml -f docker-compose.prod.yml ps -q 2>/dev/null | wc -l | tr -d ' ')
+    local healthy=$(docker_compose_cmd -f docker-compose.yml -f docker-compose.prod.yml ps 2>/dev/null | grep -c "(healthy)" || echo "0")
+    local running=$(docker_compose_cmd -f docker-compose.yml -f docker-compose.prod.yml ps 2>/dev/null | grep -c "Up" || echo "0")
+
+    if [ "$total" = "0" ]; then
+        tui_warn "CYROID is not running"
+        tui_info "Start with: $0 --start"
+    elif [ "$healthy" -ge 3 ]; then
+        tui_success "All core services healthy ($healthy/$total)"
+    else
+        tui_warn "Some services may have issues ($healthy healthy, $running running of $total)"
+        tui_info "View logs: docker compose -f docker-compose.yml -f docker-compose.prod.yml logs -f"
+    fi
+    echo ""
+}
+
+do_check() {
+    print_banner
+    run_all_checks
+}
+
+interactive_setup() {
+    check_gum
+
+    tui_clear
+    tui_header
+
+    if [ "$USE_TUI" = true ]; then
+        gum style --foreground 245 "This wizard will configure CYROID for production use."
+        echo ""
+    else
+        echo "This wizard will configure CYROID for production use."
+        echo ""
+    fi
+
+    tui_title "Step 1: Server Access"
+    echo ""
+
+    local access_choice
+    access_choice=$(tui_choose "How will users access CYROID?" \
+        "Domain name (e.g., cyroid.example.com)" \
+        "IP address (e.g., 192.168.1.100)")
 
     case "$access_choice" in
-        1)
-            read -p "Enter domain name: " DOMAIN
+        "Domain name"*)
+            echo ""
+            DOMAIN=$(tui_input "Enter your domain name:" "cyroid.example.com" "")
             if [ -z "$DOMAIN" ]; then
-                log_error "Domain name cannot be empty"
+                tui_error "Domain name cannot be empty"
                 exit 1
             fi
 
             echo ""
-            echo -e "${CYAN}SSL Certificate:${NC}"
-            echo "  1) Let's Encrypt (automatic, free, requires domain to be publicly accessible)"
-            echo "  2) Self-signed (works immediately, shows browser warning)"
+            tui_title "Step 2: SSL Certificate"
             echo ""
-            read -p "Enter choice [1-2]: " ssl_choice
+
+            local ssl_choice
+            ssl_choice=$(tui_choose "Choose SSL certificate type:" \
+                "Let's Encrypt (automatic, free, requires public domain)" \
+                "Self-signed (works immediately, browser warning)")
 
             case "$ssl_choice" in
-                1)
+                "Let's Encrypt"*)
                     SSL_MODE="letsencrypt"
-                    read -p "Enter email for Let's Encrypt notifications: " EMAIL
-                    ;;
-                2)
-                    SSL_MODE="selfsigned"
+                    echo ""
+                    EMAIL=$(tui_input "Email for Let's Encrypt notifications:" "admin@$DOMAIN" "admin@$DOMAIN")
                     ;;
                 *)
                     SSL_MODE="selfsigned"
                     ;;
             esac
             ;;
-        2)
-            read -p "Enter IP address: " IP
+        "IP address"*)
+            echo ""
+            IP=$(tui_input "Enter server IP address:" "192.168.1.100" "")
             if [ -z "$IP" ]; then
-                log_error "IP address cannot be empty"
+                tui_error "IP address cannot be empty"
                 exit 1
             fi
             SSL_MODE="selfsigned"
             ;;
         *)
-            log_error "Invalid choice"
+            tui_error "Invalid choice"
             exit 1
             ;;
     esac
 
-    # Data directory
     echo ""
-    read -p "Data directory [$DATA_DIR]: " input_data_dir
+    tui_title "Step 3: Data Storage"
+    echo ""
+
+    if [ -z "$DATA_DIR" ]; then
+        DATA_DIR=$(get_default_data_dir)
+    fi
+
+    local input_data_dir
+    input_data_dir=$(tui_input "Data directory for CYROID storage:" "$DATA_DIR" "$DATA_DIR")
     if [ -n "$input_data_dir" ]; then
         DATA_DIR="$input_data_dir"
     fi
 
     echo ""
-    echo -e "${GREEN}Configuration Summary:${NC}"
-    echo "  Address:    ${DOMAIN:-$IP}"
-    echo "  SSL Mode:   $SSL_MODE"
-    echo "  Data Dir:   $DATA_DIR"
-    echo ""
-    read -p "Proceed with deployment? [Y/n]: " confirm
+    tui_title "Configuration Summary"
 
-    if [[ "$confirm" =~ ^[Nn] ]]; then
-        log_info "Deployment cancelled"
+    local summary="Address:     ${DOMAIN:-$IP}
+SSL Mode:    $SSL_MODE
+Data Dir:    $DATA_DIR"
+
+    if [ -n "$EMAIL" ]; then
+        summary="$summary
+Email:       $EMAIL"
+    fi
+
+    tui_summary_box "$summary"
+
+    echo ""
+    if ! tui_confirm "Proceed with deployment?"; then
+        tui_info "Deployment cancelled"
         exit 0
     fi
+
+    tui_clear
 }
 
 # =============================================================================
@@ -1294,16 +1693,20 @@ while [[ $# -gt 0 ]]; do
             DATA_DIR="$2"
             shift 2
             ;;
-        --clone-dir)
-            CLONE_DIR="$2"
-            shift 2
-            ;;
         --update)
             ACTION="update"
             shift
             ;;
+        --start)
+            ACTION="start"
+            shift
+            ;;
         --stop)
             ACTION="stop"
+            shift
+            ;;
+        --restart)
+            ACTION="restart"
             shift
             ;;
         --status)
@@ -1326,6 +1729,11 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# Set OS-specific default for DATA_DIR if not specified
+if [ -z "$DATA_DIR" ]; then
+    DATA_DIR=$(get_default_data_dir)
+fi
+
 # Change to project root
 cd "$PROJECT_ROOT"
 
@@ -1340,9 +1748,26 @@ case "$ACTION" in
         ;;
     update)
         if [ "$DEV_MODE" = true ]; then
-            do_dev_deploy  # Dev mode update is the same as deploy (rebuild)
+            do_dev_deploy
         else
             do_update
+        fi
+        ;;
+    start)
+        if [ "$DEV_MODE" = true ]; then
+            print_banner
+            log_step "Starting development services"
+            cd "$PROJECT_ROOT"
+            if [ -f "$PROJECT_ROOT/.env" ]; then
+                set -a
+                source "$PROJECT_ROOT/.env"
+                set +a
+            fi
+            docker_compose_cmd -f docker-compose.yml -f docker-compose.dev.yml up -d
+            wait_for_health_dev
+            show_dev_access_info
+        else
+            do_start
         fi
         ;;
     stop)
@@ -1356,13 +1781,44 @@ case "$ACTION" in
                 set +a
             fi
             docker_compose_cmd -f docker-compose.yml -f docker-compose.dev.yml down
-            log_info "All services stopped"
+            tui_success "All services stopped"
         else
             do_stop
         fi
         ;;
+    restart)
+        if [ "$DEV_MODE" = true ]; then
+            print_banner
+            log_step "Restarting development services"
+            cd "$PROJECT_ROOT"
+            if [ -f "$PROJECT_ROOT/.env" ]; then
+                set -a
+                source "$PROJECT_ROOT/.env"
+                set +a
+            fi
+            docker_compose_cmd -f docker-compose.yml -f docker-compose.dev.yml down
+            docker_compose_cmd -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+            wait_for_health_dev
+            show_dev_access_info
+        else
+            do_stop
+            do_start
+        fi
+        ;;
     status)
-        do_status
+        if [ "$DEV_MODE" = true ]; then
+            print_banner
+            log_step "Development Service Status"
+            cd "$PROJECT_ROOT"
+            if [ -f "$PROJECT_ROOT/.env" ]; then
+                set -a
+                source "$PROJECT_ROOT/.env"
+                set +a
+            fi
+            docker_compose_cmd -f docker-compose.yml -f docker-compose.dev.yml ps
+        else
+            do_status
+        fi
         ;;
     check)
         do_check
