@@ -2150,16 +2150,35 @@ management_menu() {
 
                     # Detect deployed ranges (DinD containers and range networks)
                     local range_containers=$(docker ps -a --filter "label=cyroid.type=dind" --format "{{.Names}}" 2>/dev/null) || true
+                    local dind_containers=$(docker ps -a --filter "name=dind-" --format "{{.Names}}" 2>/dev/null) || true
                     local range_networks=$(docker network ls --filter "name=range-" --format "{{.Name}}" 2>/dev/null) || true
                     local cyroid_networks=$(docker network ls --filter "name=cyroid-" --format "{{.Name}}" 2>/dev/null) || true
 
+                    # Combine range containers (labeled + dind- prefixed)
+                    local all_range_containers=""
+                    if [ -n "$range_containers" ]; then
+                        all_range_containers="$range_containers"
+                    fi
+                    if [ -n "$dind_containers" ]; then
+                        if [ -n "$all_range_containers" ]; then
+                            all_range_containers="$all_range_containers"$'\n'"$dind_containers"
+                        else
+                            all_range_containers="$dind_containers"
+                        fi
+                    fi
+                    # Deduplicate
+                    all_range_containers=$(echo "$all_range_containers" | sort -u | grep -v '^$') || true
+
                     local has_ranges=false
-                    if [ -n "$range_containers" ] || [ -n "$range_networks" ]; then
+                    if [ -n "$all_range_containers" ] || [ -n "$range_networks" ]; then
                         has_ranges=true
                         echo "  Deployed Ranges detected:"
-                        if [ -n "$range_containers" ]; then
-                            local range_count=$(echo "$range_containers" | wc -l | tr -d ' ')
+                        if [ -n "$all_range_containers" ]; then
+                            local range_count=$(echo "$all_range_containers" | wc -l | tr -d ' ')
                             echo "    - $range_count range container(s)"
+                            echo "$all_range_containers" | while read -r c; do
+                                [ -n "$c" ] && echo "      • $c"
+                            done
                         fi
                         if [ -n "$range_networks" ]; then
                             local net_count=$(echo "$range_networks" | wc -l | tr -d ' ')
@@ -2207,23 +2226,11 @@ management_menu() {
                         if [ "$delete_ranges" = true ]; then
                             tui_info "Stopping and removing deployed ranges..."
 
-                            # Stop and remove range containers (DinD)
-                            if [ -n "$range_containers" ]; then
-                                echo "$range_containers" | while read -r container; do
+                            # Stop and remove all range containers
+                            if [ -n "$all_range_containers" ]; then
+                                echo "$all_range_containers" | while read -r container; do
                                     if [ -n "$container" ]; then
-                                        tui_info "  Removing range: $container"
-                                        docker stop "$container" 2>/dev/null || true
-                                        docker rm -f "$container" 2>/dev/null || true
-                                    fi
-                                done
-                            fi
-
-                            # Also catch any dind- prefixed containers
-                            local dind_containers=$(docker ps -a --filter "name=dind-" --format "{{.Names}}" 2>/dev/null) || true
-                            if [ -n "$dind_containers" ]; then
-                                echo "$dind_containers" | while read -r container; do
-                                    if [ -n "$container" ]; then
-                                        tui_info "  Removing DinD container: $container"
+                                        tui_info "  Removing: $container"
                                         docker stop "$container" 2>/dev/null || true
                                         docker rm -f "$container" 2>/dev/null || true
                                     fi
@@ -2348,15 +2355,24 @@ management_menu() {
 
                     # Detect deployed ranges
                     local range_containers=$(docker ps -a --filter "label=cyroid.type=dind" --format "{{.Names}}" 2>/dev/null) || true
+                    local dind_containers=$(docker ps -a --filter "name=dind-" --format "{{.Names}}" 2>/dev/null) || true
                     local range_networks=$(docker network ls --filter "name=range-" --format "{{.Name}}" 2>/dev/null) || true
                     local cyroid_networks=$(docker network ls --filter "name=cyroid-" --format "{{.Name}}" 2>/dev/null) || true
 
+                    # Combine and deduplicate range containers
+                    local all_range_containers=""
+                    [ -n "$range_containers" ] && all_range_containers="$range_containers"
+                    if [ -n "$dind_containers" ]; then
+                        [ -n "$all_range_containers" ] && all_range_containers="$all_range_containers"$'\n'"$dind_containers" || all_range_containers="$dind_containers"
+                    fi
+                    all_range_containers=$(echo "$all_range_containers" | sort -u | grep -v '^$') || true
+
                     local has_ranges=false
-                    if [ -n "$range_containers" ] || [ -n "$range_networks" ]; then
+                    if [ -n "$all_range_containers" ] || [ -n "$range_networks" ]; then
                         has_ranges=true
                         echo "  Deployed Ranges detected:"
-                        if [ -n "$range_containers" ]; then
-                            local range_count=$(echo "$range_containers" | wc -l | tr -d ' ')
+                        if [ -n "$all_range_containers" ]; then
+                            local range_count=$(echo "$all_range_containers" | wc -l | tr -d ' ')
                             echo "    - $range_count range container(s)"
                         fi
                         if [ -n "$range_networks" ]; then
@@ -2398,18 +2414,10 @@ management_menu() {
                         if [ "$delete_ranges" = true ]; then
                             echo "Removing deployed ranges..."
 
-                            # Stop and remove range containers
-                            if [ -n "$range_containers" ]; then
-                                echo "$range_containers" | while read -r container; do
-                                    [ -n "$container" ] && docker rm -f "$container" 2>/dev/null || true
-                                done
-                            fi
-
-                            # Also catch dind- prefixed containers
-                            local dind_containers=$(docker ps -a --filter "name=dind-" --format "{{.Names}}" 2>/dev/null) || true
-                            if [ -n "$dind_containers" ]; then
-                                echo "$dind_containers" | while read -r container; do
-                                    [ -n "$container" ] && docker rm -f "$container" 2>/dev/null || true
+                            # Stop and remove all range containers
+                            if [ -n "$all_range_containers" ]; then
+                                echo "$all_range_containers" | while read -r container; do
+                                    [ -n "$container" ] && echo "  Removing: $container" && docker rm -f "$container" 2>/dev/null || true
                                 done
                             fi
 
