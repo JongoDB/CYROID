@@ -224,6 +224,10 @@ def deploy_instance(
 
     config = BlueprintConfig.model_validate(blueprint.config)
 
+    # Include linked content from blueprint model (saved separately from config JSON)
+    if blueprint.content_ids:
+        config.content_ids = blueprint.content_ids
+
     # Get next offset and increment
     offset = blueprint.next_offset
     blueprint.next_offset += 1
