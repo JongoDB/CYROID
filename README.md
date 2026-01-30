@@ -1,7 +1,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Status-Active%20Development-brightgreen" alt="Status">
   <img src="https://img.shields.io/badge/Phase-5%20of%207-blue" alt="Phase">
-  <img src="https://img.shields.io/badge/Version-0.26.0-orange" alt="Version">
+  <img src="https://img.shields.io/badge/Version-0.35.5-orange" alt="Version">
   <img src="https://img.shields.io/badge/License-Proprietary-red" alt="License">
   <img src="https://github.com/JongoDB/CYROID/actions/workflows/docker-publish.yml/badge.svg" alt="Docker Build">
 </p>
@@ -39,33 +39,31 @@
 
 ---
 
-## What's New in v0.23.x
+## What's New in v0.35.x
 
-### Content Library & Student Labs (v0.22.0 - v0.23.x)
+### Production Deployment (v0.34.0 - v0.35.5)
 
-- **Content Library**: Create and manage educational content with markdown walkthroughs
-- **Student Lab Mode**: Guided lab experiences with step-by-step instructions
-- **Walkthrough-Range Integration**: Link walkthroughs directly to range blueprints
-- **Clipboard Sync**: Copy commands from walkthrough directly to VNC console
+- **Self-Contained Deploy Script**: Full TUI-based deployment with version selection
+- **Non-Interactive Mode**: Deploy with `-y` flag for CI/CD pipelines
+- **Admin CLI Flags**: Create admin user via `--admin-user`, `--admin-password`, `--admin-email`
+- **Multi-Architecture Support**: Platform detection and proper image pulls for x86_64/ARM64
+- **Image Backup/Restore**: Backup all CYROID Docker images to disk for offline deployment
+- **Live Dashboard**: K9s-style TUI with real-time service status during deployment
 
-### Blueprint Export/Import v3.0 (v0.23.1)
+### Registry & Catalog (v0.30.0 - v0.33.x)
 
-- **Dockerfile Export**: Blueprints now include Dockerfiles from `data/images/`
-- **Reproducible Environments**: Share complete range definitions with all dependencies
-- **Image Project Tracking**: BaseImages track their source Dockerfile project
-
-### Global Notifications (v0.23.0)
-
-- **Toast Notifications**: Real-time feedback for actions and errors
-- **Notification Bell**: Dropdown history of all notifications with filtering
-- **Deployment Progress**: Visual progress tracking during range deployments
+- **Content Catalog**: Browse and install training scenarios from remote registries
+- **Storefront UI**: Professional catalog browsing with categories and search
+- **Registry Management**: Admin interface for managing catalog sources
+- **Scenario Installation**: One-click install of scenarios with all dependencies
 
 ### Previous Highlights
 
 - **DinD Isolation**: Each range runs in isolated Docker-in-Docker container
+- **Content Library**: Student Lab walkthroughs with markdown support
+- **Blueprint Export/Import v3.0**: Dockerfiles included for reproducible environments
+- **Global Notifications**: Toast notifications + bell dropdown history
 - **Cross-Platform Support**: Linux and macOS (Docker Desktop)
-- **Container Registry**: Pre-built images on GHCR for instant deployment
-- **macOS VM Support**: macOS ISOs and container creation
 
 ---
 
@@ -368,6 +366,20 @@ Each range runs inside a DinD container with iptables-based routing (VyOS option
 
 ## Quick Start
 
+### One-Line Deployment
+
+**Interactive (recommended for first-time setup):**
+```bash
+curl -fsSL https://raw.githubusercontent.com/JongoDB/CYROID/master/scripts/deploy.sh | bash
+```
+
+**Fully Automated (for CI/CD or scripted deployments):**
+```bash
+curl -fsSL https://raw.githubusercontent.com/JongoDB/CYROID/master/scripts/deploy.sh | bash -s -- \
+  -y --ip $(hostname -I | awk '{print $1}') --ssl selfsigned \
+  --admin-user admin --admin-password YourSecurePassword123 --admin-email admin@example.com
+```
+
 ### Prerequisites
 
 - Docker Engine 24.0+ (or Docker Desktop on macOS)
@@ -375,7 +387,39 @@ Each range runs inside a DinD container with iptables-based routing (VyOS option
 - KVM support (for Windows VMs on Linux): `lsmod | grep kvm`
 - Minimum resources: 16 CPU cores, 32GB RAM, 500GB disk
 
-### Installation
+### Installation Options
+
+#### Option 1: Deploy Script (Recommended)
+
+The deploy script handles everything automatically:
+
+```bash
+# Download and run the deploy script
+curl -fsSL https://raw.githubusercontent.com/JongoDB/CYROID/master/scripts/deploy.sh -o deploy.sh
+chmod +x deploy.sh
+
+# Interactive deployment with TUI
+./deploy.sh
+
+# Or non-interactive with all options
+./deploy.sh -y --ip 192.168.1.100 --ssl selfsigned --admin-user admin --admin-password admin123
+```
+
+**Deploy Script Options:**
+| Flag | Description |
+|------|-------------|
+| `-y`, `--yes` | Non-interactive mode (use defaults) |
+| `--ip IP` | Server IP address |
+| `--domain DOMAIN` | Domain name (for Let's Encrypt) |
+| `--ssl MODE` | SSL mode: `letsencrypt`, `selfsigned`, `manual` |
+| `--admin-user USER` | Admin username (default: admin) |
+| `--admin-password PASS` | Admin password (default: admin123) |
+| `--admin-email EMAIL` | Admin email (default: admin@cyroid.local) |
+| `--version VER` | CYROID version to deploy |
+| `--backup [NAME]` | Backup Docker images to disk |
+| `--restore [NAME]` | Restore Docker images from backup |
+
+#### Option 2: Manual Installation
 
 ```bash
 # Clone the repository
@@ -1027,20 +1071,25 @@ Proprietary - All Rights Reserved
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| 0.35.5 | 2026-01-30 | Non-interactive mode, admin CLI flags, service healthchecks |
+| 0.35.4 | 2026-01-30 | API health endpoints, OpenAPI docs config, registry bootstrap |
+| 0.35.3 | 2026-01-30 | Linux amd64 deployment fixes (frontend healthcheck, traefik routing) |
+| 0.35.2 | 2026-01-30 | Image backup/restore feature |
+| 0.35.1 | 2026-01-30 | Multi-arch platform detection in deploy script |
+| 0.34.8 | 2026-01-29 | CI fix for cyroid-dind insecure-registries |
+| 0.34.7 | 2026-01-29 | Full-screen TUI with live dashboard |
+| 0.34.6 | 2026-01-29 | TUI version selection, admin user creation, back navigation |
+| 0.34.5 | 2026-01-29 | Self-contained deploy.sh TUI |
+| 0.34.0 | 2026-01-28 | Registry refactor, catalog storefront UI |
+| 0.30.0 | 2026-01-27 | Content catalog, scenario installation |
 | 0.23.5 | 2026-01-25 | Notification dropdown positioning fix |
-| 0.23.3 | 2026-01-25 | Moved docker-images to data/images |
 | 0.23.1 | 2026-01-24 | Blueprint export/import v3.0 with Dockerfiles |
-| 0.23.0 | 2026-01-24 | Feature consolidation (notifications, clipboard, deployment progress) |
-| 0.22.0 | 2026-01-23 | Content Library integration for Student Lab walkthroughs |
-| 0.21.x | 2026-01-22 | VNC fixes, DinD container config, ISO VM support in DinD |
-| 0.20.3 | 2026-01-21 | GHCR publishing, GitHub Actions CI/CD, pre-built container images |
-| 0.20.0 | 2026-01-21 | Major refactor: consolidated Image Cache, improved UX |
-| 0.11.0 | 2026-01-19 | DinD isolation for all ranges, simplified deployment |
+| 0.23.0 | 2026-01-24 | Global notifications, clipboard sync, deployment progress |
+| 0.22.0 | 2026-01-23 | Content Library for Student Lab walkthroughs |
+| 0.21.x | 2026-01-22 | VNC fixes, DinD container config, ISO VM support |
+| 0.20.0 | 2026-01-21 | Image Cache consolidation, GHCR publishing |
+| 0.11.0 | 2026-01-19 | DinD isolation for all ranges |
 | 0.10.0 | 2026-01-16 | Multi-architecture support (x86_64 + ARM64) |
-| 0.9.0 | 2026-01-15 | Version display, console pop-out default |
-| 0.8.0 | 2026-01-15 | Comprehensive range export with Docker images |
-| 0.7.0 | 2026-01-14 | Execution console, MSEL, monitoring |
-| 0.4.0 | 2026-01-11 | Initial auth, templates, basic ranges |
 
 ---
 
