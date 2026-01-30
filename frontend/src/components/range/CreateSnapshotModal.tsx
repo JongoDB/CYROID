@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { X, Camera, Loader2, AlertCircle } from 'lucide-react'
+import { Camera, Loader2, AlertCircle } from 'lucide-react'
+import { Modal, ModalBody, ModalFooter } from '../common/Modal'
 import { snapshotsApi } from '../../services/api'
 import { toast } from '../../stores/toastStore'
 
@@ -19,8 +20,6 @@ export function CreateSnapshotModal({ vmId, hostname, isOpen, onClose, onSuccess
   const [description, setDescription] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-
-  if (!isOpen) return null
 
   const handleCreate = async () => {
     if (!name.trim()) {
@@ -51,123 +50,102 @@ export function CreateSnapshotModal({ vmId, hostname, isOpen, onClose, onSuccess
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Escape') {
-      onClose()
-    } else if (e.key === 'Enter' && !loading) {
+    if (e.key === 'Enter' && !loading) {
       handleCreate()
     }
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-      onClick={onClose}
-      onKeyDown={handleKeyDown}
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      title="Create Snapshot"
+      description={`Create a snapshot of ${hostname} that can be restored later`}
+      size="md"
     >
-      <div
-        className="bg-white rounded-lg shadow-xl w-full max-w-md mx-4"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
-          <div className="flex items-center gap-3">
-            <Camera className="w-5 h-5 text-indigo-600" />
-            <h2 className="text-lg font-semibold text-gray-900">Create Snapshot</h2>
-          </div>
-          <button
-            onClick={onClose}
-            className="text-gray-400 hover:text-gray-600"
-            disabled={loading}
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
+      <ModalBody className="space-y-4">
+        <p className="text-sm text-gray-600">
+          Create a snapshot of <span className="font-medium text-gray-900">{hostname}</span> that can be restored later.
+        </p>
 
-        {/* Body */}
-        <div className="px-6 py-4 space-y-4">
-          <p className="text-sm text-gray-600">
-            Create a snapshot of <span className="font-medium text-gray-900">{hostname}</span> that can be restored later.
+        {/* Error message */}
+        {error && (
+          <div className="flex items-center gap-2 text-sm text-red-600 bg-red-50 px-3 py-2 rounded-lg">
+            <AlertCircle className="w-4 h-4 flex-shrink-0" />
+            <span>{error}</span>
+          </div>
+        )}
+
+        {/* Name input */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Snapshot Name <span className="text-red-500">*</span>
+          </label>
+          <input
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="e.g., kali-configured-2026-01-17"
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+            disabled={loading}
+            autoFocus
+          />
+          <p className="mt-1 text-xs text-gray-500">
+            Use a descriptive name to identify this snapshot later.
           </p>
-
-          {/* Error message */}
-          {error && (
-            <div className="flex items-center gap-2 text-sm text-red-600 bg-red-50 px-3 py-2 rounded-lg">
-              <AlertCircle className="w-4 h-4 flex-shrink-0" />
-              <span>{error}</span>
-            </div>
-          )}
-
-          {/* Name input */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Snapshot Name <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="e.g., kali-configured-2026-01-17"
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-              disabled={loading}
-              autoFocus
-            />
-            <p className="mt-1 text-xs text-gray-500">
-              Use a descriptive name to identify this snapshot later.
-            </p>
-          </div>
-
-          {/* Description input */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Description <span className="text-gray-400">(optional)</span>
-            </label>
-            <textarea
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="e.g., Kali with all tools installed and configured for AD testing"
-              rows={3}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 resize-none"
-              disabled={loading}
-            />
-          </div>
-
-          {/* Info box */}
-          <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3">
-            <p className="text-sm text-blue-800">
-              Snapshots capture the current state of the VM including all installed software and configurations.
-              View and restore snapshots from the Image Cache page.
-            </p>
-          </div>
         </div>
 
-        {/* Footer */}
-        <div className="flex justify-end gap-3 px-6 py-4 border-t border-gray-200 bg-gray-50 rounded-b-lg">
-          <button
-            onClick={onClose}
+        {/* Description input */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Description <span className="text-gray-400">(optional)</span>
+          </label>
+          <textarea
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="e.g., Kali with all tools installed and configured for AD testing"
+            rows={3}
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 resize-none"
             disabled={loading}
-            className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleCreate}
-            disabled={loading || !name.trim()}
-            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {loading ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin" />
-                Creating...
-              </>
-            ) : (
-              <>
-                <Camera className="w-4 h-4" />
-                Create Snapshot
-              </>
-            )}
-          </button>
+          />
         </div>
-      </div>
-    </div>
+
+        {/* Info box */}
+        <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3">
+          <p className="text-sm text-blue-800">
+            Snapshots capture the current state of the VM including all installed software and configurations.
+            View and restore snapshots from the Image Cache page.
+          </p>
+        </div>
+      </ModalBody>
+
+      <ModalFooter>
+        <button
+          onClick={onClose}
+          disabled={loading}
+          className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+        >
+          Cancel
+        </button>
+        <button
+          onClick={handleCreate}
+          disabled={loading || !name.trim()}
+          className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {loading ? (
+            <>
+              <Loader2 className="w-4 h-4 animate-spin" />
+              Creating...
+            </>
+          ) : (
+            <>
+              <Camera className="w-4 h-4" />
+              Create Snapshot
+            </>
+          )}
+        </button>
+      </ModalFooter>
+    </Modal>
   )
 }

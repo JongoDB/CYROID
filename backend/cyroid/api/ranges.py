@@ -27,11 +27,12 @@ from cyroid.models.msel import MSEL
 from cyroid.models.content import Content, ContentType
 from cyroid.services.scenario_filesystem import get_scenario
 from cyroid.models.inject import Inject, InjectStatus
-from cyroid.models.blueprint import RangeInstance
+from cyroid.models.blueprint import RangeInstance, RangeBlueprint
 from cyroid.services.event_service import EventService
 from cyroid.schemas.range import (
     RangeCreate, RangeUpdate, RangeResponse, RangeDetailResponse,
     RangeTemplateExport, RangeTemplateImport, NetworkTemplateData, VMTemplateData,
+    BlueprintInstanceInfo,
 )
 from cyroid.schemas.deployment_status import (
     DeploymentStatusResponse, DeploymentSummary, ResourceStatus, NetworkStatus, VMStatus as VMStatusSchema
@@ -294,6 +295,20 @@ def get_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
             detail="Range not found",
         )
 
+    # Check if this range was deployed from a blueprint
+    blueprint_instance = None
+    instance = db.query(RangeInstance).options(
+        joinedload(RangeInstance.blueprint)
+    ).filter(RangeInstance.range_id == range_id).first()
+    if instance and instance.blueprint:
+        blueprint_instance = BlueprintInstanceInfo(
+            instance_id=instance.id,
+            blueprint_id=instance.blueprint.id,
+            blueprint_name=instance.blueprint.name,
+            blueprint_version=instance.blueprint_version,
+            current_blueprint_version=instance.blueprint.version,
+        )
+
     return RangeDetailResponse(
         id=range_obj.id,
         name=range_obj.name,
@@ -312,6 +327,7 @@ def get_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
         networks=range_obj.networks,
         vms=range_obj.vms,
         router=range_obj.router,
+        blueprint_instance=blueprint_instance,
     )
 
 

@@ -22,11 +22,12 @@ import {
   ExternalLink,
   Download,
   BookOpen,
+  Pencil,
 } from 'lucide-react';
 import clsx from 'clsx';
 import { toast } from '../stores/toastStore';
 import { ConfirmDialog } from '../components/common/ConfirmDialog';
-import { DeployInstanceModal, ExportBlueprintModal } from '../components/blueprints';
+import { DeployInstanceModal, ExportBlueprintModal, VisualBlueprintEditor } from '../components/blueprints';
 
 const statusColors: Record<string, string> = {
   draft: 'bg-gray-100 text-gray-800',
@@ -48,6 +49,7 @@ export default function BlueprintDetail() {
     isLoading: boolean;
   }>({ instance: null, isLoading: false });
   const [showExportModal, setShowExportModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
   const [contentItems, setContentItems] = useState<ContentListItem[]>([]);
   const [linkedContentIds, setLinkedContentIds] = useState<string[]>([]);
   const [savingContent, setSavingContent] = useState(false);
@@ -164,6 +166,13 @@ export default function BlueprintDetail() {
             </div>
           </div>
           <div className="flex space-x-3">
+            <button
+              onClick={() => setShowEditModal(true)}
+              className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+            >
+              <Pencil className="h-4 w-4 mr-2" />
+              Edit
+            </button>
             <button
               onClick={() => setShowExportModal(true)}
               className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
@@ -413,6 +422,16 @@ export default function BlueprintDetail() {
         <ExportBlueprintModal
           blueprint={blueprint}
           onClose={() => setShowExportModal(false)}
+        />
+      )}
+
+      {/* Visual Blueprint Editor */}
+      {showEditModal && (
+        <VisualBlueprintEditor
+          blueprint={blueprint}
+          isOpen={true}
+          onClose={() => setShowEditModal(false)}
+          onSaved={fetchData}
         />
       )}
     </div>

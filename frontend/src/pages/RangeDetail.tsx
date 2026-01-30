@@ -4,7 +4,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom'
 import { rangesApi, networksApi, vmsApi, imagesApi, NetworkCreate, VMCreate } from '../services/api'
 import type { Range, Network, VM, RealtimeEvent, BaseImage, GoldenImageLibrary, SnapshotWithLineage, NetworkInterfaceCreate } from '../types'
 import {
-  ArrowLeft, Plus, Loader2, X, Play, Square, RotateCw, Camera,
+  ArrowLeft, Plus, Loader2, X, Play, Square, RotateCw, Camera, RefreshCw,
   Network as NetworkIcon, Server, Trash2, Rocket, Activity, Monitor, Shield, Pencil, Globe, Router, Wifi, Radio, Wrench, BookOpen, LayoutTemplate, Terminal, Layers
 } from 'lucide-react'
 import clsx from 'clsx'
@@ -22,7 +22,7 @@ import { DiagnosticsTab } from '../components/diagnostics'
 import { ActivityTab } from '../components/range/ActivityTab'
 import { TrainingTab } from '../components/range/TrainingTab'
 import { ConfirmDialog } from '../components/common/ConfirmDialog'
-import { SaveBlueprintModal } from '../components/blueprints'
+import { SaveBlueprintModal, UpdateBlueprintModal } from '../components/blueprints'
 import { CreateSnapshotModal } from '../components/range/CreateSnapshotModal'
 import { ScenarioPickerModal, VMMappingModal } from '../components/scenarios'
 import type { Scenario } from '../types'
@@ -285,6 +285,9 @@ export default function RangeDetail() {
 
   // Save Blueprint modal state
   const [showSaveBlueprintModal, setShowSaveBlueprintModal] = useState(false)
+
+  // Update Blueprint modal state (for ranges created from blueprints)
+  const [showUpdateBlueprintModal, setShowUpdateBlueprintModal] = useState(false)
 
   // Edit range modal state
   const [showEditRangeModal, setShowEditRangeModal] = useState(false)
@@ -1112,6 +1115,17 @@ export default function RangeDetail() {
               <LayoutTemplate className="h-4 w-4 mr-2" />
               Save as Blueprint
             </button>
+            {/* Update Blueprint button - only shown for ranges created from blueprints */}
+            {range.blueprint_instance && (
+              <button
+                onClick={() => setShowUpdateBlueprintModal(true)}
+                className="inline-flex items-center px-3 py-1.5 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+                title="Update source blueprint with changes from this range"
+              >
+                <RefreshCw className="h-4 w-4 mr-1.5" />
+                Update Blueprint
+              </button>
+            )}
             {/* Delete Range button */}
             <button
               onClick={handleDeleteRange}
@@ -2668,6 +2682,18 @@ export default function RangeDetail() {
           rangeName={range.name}
           onClose={() => setShowSaveBlueprintModal(false)}
           onSuccess={() => {}}
+        />
+      )}
+
+      {/* Update Blueprint Modal */}
+      {showUpdateBlueprintModal && range && range.blueprint_instance && (
+        <UpdateBlueprintModal
+          blueprintId={range.blueprint_instance.blueprint_id}
+          blueprintName={range.blueprint_instance.blueprint_name}
+          currentVersion={range.blueprint_instance.current_blueprint_version}
+          rangeId={range.id}
+          onClose={() => setShowUpdateBlueprintModal(false)}
+          onSuccess={() => fetchData()}
         />
       )}
 

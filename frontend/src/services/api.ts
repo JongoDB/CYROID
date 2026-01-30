@@ -1062,11 +1062,24 @@ export interface NetworkConfig {
   is_isolated: boolean;
 }
 
+export interface NetworkInterfaceConfig {
+  network_name: string;
+  ip_address?: string;
+  is_primary: boolean;
+}
+
 export interface VMConfig {
   hostname: string;
-  ip_address: string;
-  network_name: string;
-  // Image source (new format - Docker image tag)
+  // Legacy fields (kept for backward compatibility)
+  ip_address?: string;
+  network_name?: string;
+  // Multi-NIC support
+  network_interfaces?: NetworkInterfaceConfig[];
+  // Image sources
+  base_image_id?: string;
+  golden_image_id?: string;
+  snapshot_id?: string;
+  base_image_name?: string;
   base_image_tag?: string;
   // Deprecated: kept for backward compatibility with older blueprints
   template_name?: string;
@@ -1212,7 +1225,7 @@ export const blueprintsApi = {
   list: () => api.get<Blueprint[]>('/blueprints'),
   get: (id: string) => api.get<BlueprintDetail>(`/blueprints/${id}`),
   create: (data: BlueprintCreate) => api.post<BlueprintDetail>('/blueprints', data),
-  update: (id: string, data: { name?: string; description?: string; content_ids?: string[] }) =>
+  update: (id: string, data: { name?: string; description?: string; content_ids?: string[]; config?: unknown }) =>
     api.put<BlueprintDetail>(`/blueprints/${id}`, data),
   delete: (id: string) => api.delete(`/blueprints/${id}`),
   deploy: (id: string, data: InstanceDeploy) =>
@@ -1288,6 +1301,10 @@ export const blueprintsApi = {
     });
     return response.data;
   },
+
+  // Update blueprint from a modified range
+  updateFromRange: (blueprintId: string, rangeId: string) =>
+    api.put(`/blueprints/${blueprintId}/update-from-range/${rangeId}`),
 };
 
 export const instancesApi = {

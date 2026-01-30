@@ -36,6 +36,15 @@ export interface VMTemplate {
   os_version?: string  // e.g., "2022", "22.04"
 }
 
+// Blueprint instance info for ranges created from blueprints
+export interface BlueprintInstanceInfo {
+  instance_id: string
+  blueprint_id: string
+  blueprint_name: string
+  blueprint_version: number
+  current_blueprint_version: number
+}
+
 export interface Range {
   id: string
   name: string
@@ -55,6 +64,8 @@ export interface Range {
   router?: RangeRouter | null
   // Training content link (from Content Library)
   student_guide_id?: string | null
+  // Blueprint instance info (populated if range was created from a blueprint)
+  blueprint_instance?: BlueprintInstanceInfo | null
 }
 
 export interface Network {
