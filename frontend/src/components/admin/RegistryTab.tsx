@@ -18,6 +18,8 @@ import {
   Server,
   Tag,
   Database,
+  Trash2,
+  UploadCloud,
 } from 'lucide-react'
 import clsx from 'clsx'
 
@@ -37,6 +39,13 @@ export default function RegistryTab() {
   // Push state
   const [selectedImage, setSelectedImage] = useState<string>('')
   const [pushing, setPushing] = useState(false)
+
+  // Delete state
+  const [deleting, setDeleting] = useState<string | null>(null)
+
+  // Bulk push state
+  const [pushingAll, setPushingAll] = useState(false)
+  const [pushProgress, setPushProgress] = useState<{ current: number; total: number } | null>(null)
 
   // Refresh state
   const [refreshing, setRefreshing] = useState(false)
@@ -124,6 +133,98 @@ export default function RegistryTab() {
 
   const handleRefresh = () => {
     fetchAll(false)
+  }
+
+  const handleDeleteImage = async (imageName: string, tag: string) => {
+    const imageTag = `${imageName}:${tag}`
+    if (!confirm(`Delete ${imageTag} from registry? This cannot be undone.`)) {
+      return
+    }
+    setDeleting(imageTag)
+    try {
+      const res = await registryApi.deleteImage(imageTag)
+      if (res.data.success) {
+        toast.success(res.data.message || `Deleted ${imageTag} from registry`)
+        await fetchAll(false)
+      } else {
+        toast.error(res.data.message || 'Failed to delete image')
+      }
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || 'Failed to delete image from registry')
+    } finally {
+      setDeleting(null)
+    }
+  }
+
+  const handlePushAllMissing = async () => {
+    if (hostImages.length === 0) {
+      toast.warning('No host images available to push')
+      return
+    }
+
+    setPushingAll(true)
+    setPushProgress({ current: 0, total: 0 })
+
+    try {
+      // Check status of each host image to find ones that need pushing
+      const imagesToPush: string[] = []
+
+      for (const img of hostImages) {
+        const imageTag = img.tags?.[0] || img.id
+        if (!imageTag) continue
+
+        try {
+          const statusRes = await registryApi.getImageStatus(imageTag)
+          if (statusRes.data.needs_push) {
+            imagesToPush.push(imageTag)
+          }
+        } catch (err) {
+          // If status check fails, assume it might need push
+          console.warn(`Could not check status for ${imageTag}, skipping`)
+        }
+      }
+
+      if (imagesToPush.length === 0) {
+        toast.info('All host images are already in the registry')
+        return
+      }
+
+      setPushProgress({ current: 0, total: imagesToPush.length })
+      let successCount = 0
+      let failCount = 0
+
+      for (let i = 0; i < imagesToPush.length; i++) {
+        const imageTag = imagesToPush[i]
+        setPushProgress({ current: i + 1, total: imagesToPush.length })
+
+        try {
+          const res = await registryApi.pushImage(imageTag)
+          if (res.data.success) {
+            successCount++
+          } else {
+            failCount++
+          }
+        } catch (err) {
+          failCount++
+          console.error(`Failed to push ${imageTag}:`, err)
+        }
+      }
+
+      if (failCount === 0) {
+        toast.success(`Successfully pushed ${successCount} images to registry`)
+      } else if (successCount > 0) {
+        toast.warning(`Pushed ${successCount} images, ${failCount} failed`)
+      } else {
+        toast.error(`Failed to push all ${failCount} images`)
+      }
+
+      await fetchAll(false)
+    } catch (err: any) {
+      toast.error('Failed to push images to registry')
+    } finally {
+      setPushingAll(false)
+      setPushProgress(null)
+    }
   }
 
   const isLoading = statsLoading && imagesLoading && hostImagesLoading
@@ -264,6 +365,37 @@ export default function RegistryTab() {
             )}
           </button>
         </div>
+
+        {/* Push All Missing Button */}
+        <div className="mt-4 pt-4 border-t border-gray-200">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-gray-700">Bulk Push</p>
+              <p className="text-xs text-gray-500">
+                Push all host images that are not yet in the registry.
+              </p>
+            </div>
+            <button
+              onClick={handlePushAllMissing}
+              disabled={pushingAll || hostImages.length === 0}
+              className="inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {pushingAll ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  {pushProgress
+                    ? `Pushing ${pushProgress.current}/${pushProgress.total}...`
+                    : 'Checking...'}
+                </>
+              ) : (
+                <>
+                  <UploadCloud className="h-4 w-4 mr-2" />
+                  Push All Missing
+                </>
+              )}
+            </button>
+          </div>
+        </div>
       </div>
 
       {/* Registry Images Table */}
@@ -299,6 +431,9 @@ export default function RegistryTab() {
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Tags
                 </th>
+                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Actions
+                </th>
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
@@ -324,6 +459,33 @@ export default function RegistryTab() {
                       ))}
                       {image.tags.length === 0 && (
                         <span className="text-xs text-gray-400">No tags</span>
+                      )}
+                    </div>
+                  </td>
+                  <td className="px-6 py-4 text-right">
+                    <div className="flex justify-end gap-2">
+                      {image.tags.length > 0 ? (
+                        image.tags.map((tag) => {
+                          const imageTag = `${image.name}:${tag}`
+                          const isDeleting = deleting === imageTag
+                          return (
+                            <button
+                              key={tag}
+                              onClick={() => handleDeleteImage(image.name, tag)}
+                              disabled={isDeleting}
+                              title={`Delete ${imageTag}`}
+                              className="inline-flex items-center p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              {isDeleting ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <Trash2 className="h-4 w-4" />
+                              )}
+                            </button>
+                          )
+                        })
+                      ) : (
+                        <span className="text-xs text-gray-400">-</span>
                       )}
                     </div>
                   </td>

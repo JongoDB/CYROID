@@ -98,6 +98,34 @@ GITHUB_BRANCH="master"
 GITHUB_RAW_BASE="https://raw.githubusercontent.com/${GITHUB_REPO}/${GITHUB_BRANCH}"
 
 # =============================================================================
+# Platform Detection (for multi-arch image pulls)
+# =============================================================================
+
+detect_platform() {
+    local arch
+    arch=$(uname -m)
+
+    case "$arch" in
+        x86_64|amd64)
+            DOCKER_PLATFORM="linux/amd64"
+            ;;
+        arm64|aarch64)
+            DOCKER_PLATFORM="linux/arm64"
+            ;;
+        *)
+            echo -e "${YELLOW}[WARN]${NC} Unknown architecture: $arch - defaulting to linux/amd64"
+            DOCKER_PLATFORM="linux/amd64"
+            ;;
+    esac
+
+    # Export for docker compose and docker pull
+    export DOCKER_DEFAULT_PLATFORM="$DOCKER_PLATFORM"
+}
+
+# Detect platform immediately
+detect_platform
+
+# =============================================================================
 # Bootstrap Functions (for standalone script mode)
 # =============================================================================
 
@@ -2386,6 +2414,10 @@ pull_images() {
     # Export env vars for docker-compose
     export $(grep -v '^#' "$ENV_FILE" | xargs) 2>/dev/null || true
 
+    # Ensure platform is set for multi-arch pulls
+    detect_platform
+    log_info "Pulling images for platform: $DOCKER_PLATFORM"
+
     # Determine docker compose command
     local compose_cmd="docker compose"
     if ! docker compose version &> /dev/null 2>&1; then
@@ -2399,7 +2431,7 @@ pull_images() {
     if [ -n "$images" ]; then
         local total=$(echo "$images" | wc -l | tr -d ' ')
         echo ""
-        tui_info "Pulling $total images:"
+        tui_info "Pulling $total images for $DOCKER_PLATFORM:"
 
         local current=0
         # Store images to temp file for reliable iteration
@@ -2419,7 +2451,7 @@ pull_images() {
 
             echo "  [$current/$total] $name"
 
-            # Pull individual image
+            # Pull individual image (DOCKER_DEFAULT_PLATFORM is exported by detect_platform)
             if docker pull "$img" >/dev/null 2>&1; then
                 echo -e "    ${GREEN}✓${NC} Pulled"
             else
@@ -3558,6 +3590,13 @@ do_update() {
         export VERSION="$target_version"
     fi
 
+    # Ensure platform is set for correct image architecture
+    detect_platform
+    tui_info "Platform: $DOCKER_PLATFORM"
+
+    # Ensure networks exist
+    init_networks
+
     # Determine docker compose command
     local compose_cmd="docker compose"
     if ! docker compose version &> /dev/null 2>&1; then
@@ -3565,7 +3604,7 @@ do_update() {
     fi
 
     # Pull images
-    tui_info "Pulling Docker images..."
+    tui_info "Pulling Docker images for $DOCKER_PLATFORM..."
     $compose_cmd -f docker-compose.yml -f docker-compose.prod.yml pull 2>&1 || true
     tui_success "Images pulled"
 
@@ -3603,6 +3642,13 @@ do_start() {
     set -a
     source "$ENV_FILE"
     set +a
+
+    # Ensure platform is set for correct image architecture
+    detect_platform
+    tui_info "Platform: $DOCKER_PLATFORM"
+
+    # Ensure networks exist (in case they were removed)
+    init_networks
 
     # Determine docker compose command
     local compose_cmd="docker compose"

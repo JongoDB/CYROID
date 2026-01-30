@@ -522,6 +522,9 @@ def start_event(
         # Convert stored config dict to BlueprintConfig model
         try:
             blueprint_config = BlueprintConfig.model_validate(blueprint.config)
+            # Include linked content from blueprint model (saved separately from config JSON)
+            if blueprint.content_ids:
+                blueprint_config.content_ids = blueprint.content_ids
         except Exception as e:
             logger.error(f"Failed to parse blueprint config: {e}")
             raise HTTPException(status_code=400, detail=f"Invalid blueprint configuration: {str(e)}")
@@ -839,6 +842,9 @@ def add_participant(
         if blueprint:
             try:
                 blueprint_config = BlueprintConfig.model_validate(blueprint.config)
+                # Include linked content from blueprint model (saved separately from config JSON)
+                if blueprint.content_ids:
+                    blueprint_config.content_ids = blueprint.content_ids
 
                 # Create range for this student
                 range_name = f"{event.name} - {user.username}"

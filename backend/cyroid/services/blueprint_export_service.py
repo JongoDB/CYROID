@@ -10,6 +10,7 @@ Version History:
 - 2.0: Image Library IDs (templates deprecated)
 - 3.0: Includes Dockerfiles and Content Library items
 """
+import asyncio
 import hashlib
 import io
 import json
@@ -21,12 +22,14 @@ import tempfile
 import zipfile
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Dict, List, Tuple, Set, Any
+from typing import Optional, Dict, List, Tuple, Set, Any, Callable
 from uuid import UUID
 
 import docker
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+
+from .registry_service import get_registry_service, RegistryPushError
 
 from cyroid.models.blueprint import RangeBlueprint
 from cyroid.models.vm_enums import OSType, VMType
@@ -618,6 +621,153 @@ class BlueprintExportService:
                 errors.append(f"Failed to export {image_tag}: {e}")
 
         return exported, errors
+
+    # =========================================================================
+    # Docker Image Import Methods (v4.0)
+    # =========================================================================
+
+    async def _load_image_to_registry(
+        self,
+        tar_path: Path,
+        progress_callback: Optional[Callable[[str, int], None]] = None
+    ) -> List[str]:
+        """Load image from tar file and push to registry.
+
+        Args:
+            tar_path: Path to the image tar file
+            progress_callback: Optional progress callback
+
+        Returns:
+            List of image tags that were loaded and pushed
+
+        Raises:
+            RegistryPushError: If registry is not healthy or push fails
+        """
+        registry = get_registry_service()
+
+        # Check registry health first
+        if not await registry.is_healthy():
+            raise RegistryPushError("Registry is not healthy, cannot push imported images")
+
+        # Load image to host Docker temporarily
+        try:
+            docker_client = docker.from_env()
+        except Exception as e:
+            raise RegistryPushError(f"Failed to connect to Docker: {e}")
+
+        if progress_callback:
+            progress_callback("Loading image from tar...", 10)
+
+        # Load the image
+        loaded_tags: List[str] = []
+        try:
+            with open(tar_path, "rb") as f:
+                images = docker_client.images.load(f)
+                for img in images:
+                    loaded_tags.extend(img.tags)
+        except Exception as e:
+            raise RegistryPushError(f"Failed to load image from {tar_path}: {e}")
+
+        if not loaded_tags:
+            logger.warning(f"No tags found in image tar: {tar_path}")
+            return []
+
+        if progress_callback:
+            progress_callback(f"Loaded {len(loaded_tags)} tags, pushing to registry...", 30)
+
+        # Push each tag to registry
+        pushed_tags: List[str] = []
+        for i, tag in enumerate(loaded_tags):
+            try:
+                if progress_callback:
+                    percent = 30 + int((i / len(loaded_tags)) * 60)
+                    progress_callback(f"Pushing {tag}...", percent)
+
+                # Push to registry and cleanup host
+                await registry.push_and_cleanup(tag, progress_callback=None)
+                pushed_tags.append(tag)
+                logger.info(f"Pushed imported image to registry: {tag}")
+
+            except RegistryPushError:
+                raise
+            except Exception as e:
+                logger.error(f"Failed to push {tag} to registry: {e}")
+                raise RegistryPushError(f"Failed to push {tag} to registry: {e}")
+
+        if progress_callback:
+            progress_callback("Push complete", 100)
+
+        return pushed_tags
+
+    def _extract_docker_images(
+        self,
+        archive_dir: Path,
+        docker_images: List[str],
+        progress_callback: Optional[Callable[[str, int], None]] = None,
+    ) -> Tuple[List[str], List[str], List[str]]:
+        """
+        Extract Docker images from tar files in archive and push to registry.
+
+        Args:
+            archive_dir: Path to extracted archive directory
+            docker_images: List of image tags from manifest
+            progress_callback: Optional progress callback
+
+        Returns:
+            Tuple of (loaded_tags, skipped_tags, errors)
+        """
+        loaded: List[str] = []
+        skipped: List[str] = []
+        errors: List[str] = []
+
+        images_dir = archive_dir / "images"
+        if not images_dir.exists():
+            logger.debug("No images directory in archive")
+            return loaded, skipped, errors
+
+        registry = get_registry_service()
+
+        for i, image_tag in enumerate(docker_images):
+            # Build the tar file path from the image tag
+            safe_name = self._safe_image_name(image_tag)
+            tar_path = images_dir / f"{safe_name}.tar"
+
+            if not tar_path.exists():
+                logger.warning(f"Image tar not found for {image_tag}: {tar_path}")
+                errors.append(f"Image tar not found: {image_tag}")
+                continue
+
+            # Check if image already exists in registry
+            loop = asyncio.new_event_loop()
+            try:
+                already_exists = loop.run_until_complete(registry.image_exists(image_tag))
+            finally:
+                loop.close()
+
+            if already_exists:
+                logger.info(f"Skipping Docker image (already in registry): {image_tag}")
+                skipped.append(image_tag)
+                continue
+
+            # Load and push to registry
+            logger.info(f"Loading Docker image from tar: {image_tag}")
+
+            loop = asyncio.new_event_loop()
+            try:
+                tags = loop.run_until_complete(
+                    self._load_image_to_registry(tar_path, progress_callback)
+                )
+                loaded.extend(tags)
+            except RegistryPushError as e:
+                logger.error(f"Failed to push image to registry: {e}")
+                errors.append(str(e))
+            except Exception as e:
+                logger.error(f"Failed to load/push image {image_tag}: {e}")
+                errors.append(f"Failed to load/push {image_tag}: {e}")
+            finally:
+                loop.close()
+
+        return loaded, skipped, errors
 
     # =========================================================================
     # Export Size Estimation
@@ -1481,13 +1631,14 @@ class BlueprintExportService:
         db: Session,
     ) -> BlueprintImportResult:
         """
-        Import a blueprint from an archive (v3.0 with Dockerfiles and Content).
+        Import a blueprint from an archive (v3.0/v4.0 with Dockerfiles, Content, and Docker Images).
 
         Automatically:
         1. Extracts Dockerfiles to /data/images/
-        2. Builds missing Docker images
-        3. Creates BaseImage records
-        4. Imports Content Library items
+        2. Builds missing Docker images from Dockerfiles
+        3. Loads Docker image tarballs and pushes to registry (v4.0)
+        4. Creates BaseImage records
+        5. Imports Content Library items
 
         Returns:
             BlueprintImportResult with success status and created resources
@@ -1497,6 +1648,8 @@ class BlueprintExportService:
         templates_created: List[str] = []
         templates_skipped: List[str] = []
         images_built: List[str] = []
+        images_loaded: List[str] = []  # Images loaded from tar and pushed to registry
+        images_skipped: List[str] = []  # Images already in registry
         dockerfiles_extracted: List[str] = []
         dockerfiles_skipped: List[str] = []
         content_imported: bool = False
@@ -1568,6 +1721,32 @@ class BlueprintExportService:
                         warnings.append(err)  # Build failures are warnings, not errors
 
             # ============================================================
+            # Load Docker Images from Tarballs (v4.0)
+            # ============================================================
+            if (hasattr(export_data.manifest, 'docker_images_included') and
+                export_data.manifest.docker_images_included and
+                hasattr(export_data.manifest, 'docker_images') and
+                export_data.manifest.docker_images):
+
+                logger.info(f"Loading {len(export_data.manifest.docker_images)} Docker images from archive...")
+                loaded, skipped, load_errors = self._extract_docker_images(
+                    temp_dir,
+                    export_data.manifest.docker_images,
+                )
+                images_loaded.extend(loaded)
+                images_skipped.extend(skipped)
+
+                if load_errors:
+                    # Image load failures are warnings, not fatal errors
+                    for err in load_errors:
+                        warnings.append(err)
+
+                if images_loaded:
+                    logger.info(f"Loaded and pushed {len(images_loaded)} images to registry")
+                if images_skipped:
+                    logger.info(f"Skipped {len(images_skipped)} images (already in registry)")
+
+            # ============================================================
             # Import Content (v3.0)
             # ============================================================
             if hasattr(export_data, 'content') and export_data.content:
@@ -1613,6 +1792,7 @@ class BlueprintExportService:
                 f"Imported blueprint: {blueprint.name} (id={blueprint.id}) "
                 f"dockerfiles={len(dockerfiles_extracted)}, "
                 f"images_built={len(images_built)}, "
+                f"images_loaded={len(images_loaded)}, "
                 f"content={'yes' if content_imported else 'no'}"
             )
 
@@ -1623,6 +1803,8 @@ class BlueprintExportService:
                 templates_created=templates_created,
                 templates_skipped=templates_skipped,
                 images_built=images_built,
+                images_loaded=images_loaded,
+                images_skipped=images_skipped,
                 dockerfiles_extracted=dockerfiles_extracted,
                 dockerfiles_skipped=dockerfiles_skipped,
                 content_imported=content_imported,
@@ -1638,6 +1820,8 @@ class BlueprintExportService:
                 errors=[f"Import failed: {str(e)}"],
                 warnings=warnings,
                 images_built=images_built,
+                images_loaded=images_loaded,
+                images_skipped=images_skipped,
                 dockerfiles_extracted=dockerfiles_extracted,
                 dockerfiles_skipped=dockerfiles_skipped,
             )

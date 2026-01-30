@@ -10,6 +10,7 @@ from cyroid.models.base import Base, TimestampMixin, UUIDMixin
 if TYPE_CHECKING:
     from cyroid.models.base_image import BaseImage
     from cyroid.models.golden_image import GoldenImage
+    from cyroid.models.vm_network import VMNetwork
 
 
 class VMStatus(str, Enum):
@@ -148,4 +149,8 @@ class VM(Base, UUIDMixin, TimestampMixin):
     )
     incoming_connections: Mapped[List["Connection"]] = relationship(
         "Connection", foreign_keys="Connection.dst_vm_id", back_populates="dst_vm"
+    )
+    # Multi-NIC support: all network interfaces for this VM
+    network_interfaces: Mapped[List["VMNetwork"]] = relationship(
+        "VMNetwork", back_populates="vm", cascade="all, delete-orphan"
     )

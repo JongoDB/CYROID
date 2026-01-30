@@ -8,6 +8,11 @@ import docker.errors
 logger = logging.getLogger(__name__)
 
 
+class RegistryPushError(Exception):
+    """Raised when pushing to registry fails."""
+    pass
+
+
 class RegistryService:
     """Service for interacting with the local Docker registry."""
 
@@ -198,6 +203,105 @@ class RegistryService:
         logger.info(f"Image {image_tag} not in registry, pushing...")
         return await self.push_image(image_tag, progress_callback)
 
+    async def push_and_cleanup(
+        self,
+        image_tag: str,
+        progress_callback: Optional[Callable[[str, int], None]] = None
+    ) -> bool:
+        """Push image to registry and remove from host Docker.
+
+        This method pushes the image to the local registry, verifies it exists
+        in the registry, then removes it from the host Docker daemon to free
+        disk space.
+
+        Args:
+            image_tag: Image tag like 'myimage:v1.0'
+            progress_callback: Optional callback(status, percent) for progress updates
+
+        Returns:
+            True if image is in registry (push succeeded or already there)
+
+        Raises:
+            RegistryPushError: If push to registry fails
+        """
+        if progress_callback:
+            progress_callback("Pushing to registry...", 10)
+
+        # Push to registry
+        push_result = await self.push_image(image_tag, progress_callback)
+        if not push_result:
+            raise RegistryPushError(f"Failed to push image {image_tag} to registry")
+
+        if progress_callback:
+            progress_callback("Verifying in registry...", 70)
+
+        # Verify image is in registry
+        if not await self.image_exists(image_tag):
+            raise RegistryPushError(
+                f"Image {image_tag} not found in registry after push"
+            )
+
+        if progress_callback:
+            progress_callback("Cleaning up host...", 85)
+
+        # Remove from host Docker - the registry tag we created
+        try:
+            docker_client = self._get_docker_client()
+            push_tag = self.get_registry_tag(image_tag, for_host=True)
+
+            # Remove the registry-tagged version first (localhost:5000/...)
+            try:
+                docker_client.images.remove(push_tag, force=False)
+                logger.info(f"Removed registry tag {push_tag} from host")
+            except docker.errors.ImageNotFound:
+                logger.debug(f"Registry tag {push_tag} not found on host (already removed)")
+            except docker.errors.APIError as e:
+                logger.warning(f"Could not remove registry tag {push_tag}: {e}")
+
+            # Remove the original image tag
+            try:
+                docker_client.images.remove(image_tag, force=False)
+                logger.info(f"Removed original image {image_tag} from host")
+            except docker.errors.ImageNotFound:
+                logger.debug(f"Image {image_tag} not found on host (already removed)")
+            except docker.errors.APIError as e:
+                # Image might be in use or have other tags - log warning but don't fail
+                logger.warning(f"Could not remove image {image_tag} from host: {e}")
+
+        except Exception as e:
+            # Cleanup failure is not critical - image is already in registry
+            logger.warning(f"Host cleanup failed for {image_tag}, but image is in registry: {e}")
+
+        if progress_callback:
+            progress_callback("Push and cleanup complete", 100)
+
+        return True
+
+    async def image_needs_push(self, image_tag: str) -> bool:
+        """Check if image exists on host but not in registry.
+
+        Args:
+            image_tag: Image tag like 'myimage:v1.0'
+
+        Returns:
+            True if image exists on host but not in registry, False otherwise
+        """
+        # Check if image exists in registry
+        in_registry = await self.image_exists(image_tag)
+        if in_registry:
+            return False
+
+        # Check if image exists on host
+        try:
+            docker_client = self._get_docker_client()
+            docker_client.images.get(image_tag)
+            return True
+        except docker.errors.ImageNotFound:
+            return False
+        except docker.errors.APIError as e:
+            logger.warning(f"Error checking host for image {image_tag}: {e}")
+            return False
+
     async def list_images(self) -> List[dict]:
         """List all images in the registry.
 
@@ -253,6 +357,68 @@ class RegistryService:
             'tag_count': tag_count,
             'healthy': healthy,
         }
+
+    async def delete_image(self, image_tag: str) -> bool:
+        """Delete image from registry.
+
+        Note: Requires registry garbage collection to reclaim space.
+
+        Args:
+            image_tag: Image tag like 'cyroid/kali:latest' or 'nginx:alpine'
+
+        Returns:
+            True if deleted successfully, False otherwise
+        """
+        name, tag = self._parse_image_tag(image_tag)
+
+        try:
+            client = await self._get_http_client()
+
+            # Get manifest digest using HEAD request
+            headers = {
+                'Accept': 'application/vnd.docker.distribution.manifest.v2+json'
+            }
+            head_response = await client.head(
+                f"{self.REGISTRY_URL}/v2/{name}/manifests/{tag}",
+                headers=headers
+            )
+
+            if head_response.status_code == 404:
+                logger.warning(f"Image {image_tag} not found in registry")
+                return False
+
+            if head_response.status_code != 200:
+                logger.error(
+                    f"Failed to get manifest for {image_tag}: {head_response.status_code}"
+                )
+                return False
+
+            # Get the digest from response header
+            digest = head_response.headers.get('Docker-Content-Digest')
+            if not digest:
+                logger.error(f"No Docker-Content-Digest header for {image_tag}")
+                return False
+
+            # Delete the manifest by digest
+            delete_response = await client.delete(
+                f"{self.REGISTRY_URL}/v2/{name}/manifests/{digest}"
+            )
+
+            if delete_response.status_code == 202:
+                logger.info(f"Successfully deleted {image_tag} from registry")
+                return True
+            else:
+                logger.error(
+                    f"Failed to delete {image_tag}: {delete_response.status_code}"
+                )
+                return False
+
+        except httpx.RequestError as e:
+            logger.error(f"Request error deleting {image_tag}: {e}")
+            return False
+        except Exception as e:
+            logger.error(f"Unexpected error deleting {image_tag}: {e}")
+            return False
 
 
 # Singleton instance

@@ -1,10 +1,32 @@
 # backend/cyroid/schemas/vm.py
 from datetime import datetime
-from typing import Optional, Literal
+from typing import Optional, Literal, List
 from uuid import UUID
 from pydantic import BaseModel, Field, computed_field, field_serializer, model_validator
 
 from cyroid.models.vm import VMStatus
+
+
+class NetworkInterfaceCreate(BaseModel):
+    """Schema for specifying a network interface during VM creation."""
+    network_id: UUID
+    ip_address: Optional[str] = Field(
+        None,
+        pattern=r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$",
+        description="IP address in the network's subnet. Auto-assigned if not provided."
+    )
+
+
+class NetworkInterfaceResponse(BaseModel):
+    """Schema for network interface in API responses."""
+    network_id: UUID
+    network_name: str
+    ip_address: str
+    subnet: str
+    is_primary: bool
+
+    class Config:
+        from_attributes = True
 
 
 class VMBase(BaseModel):
@@ -20,7 +42,11 @@ class VMBase(BaseModel):
 class VMCreate(BaseModel):
     """Schema for creating a new VM. ip_address is optional and auto-filled if not provided."""
     hostname: str = Field(..., min_length=1, max_length=63)
-    ip_address: Optional[str] = Field(None, pattern=r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$")  # Auto-filled from network subnet
+    ip_address: Optional[str] = Field(
+        None,
+        pattern=r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$",
+        description="DEPRECATED: Use networks[0].ip_address instead. IP for primary network."
+    )
     cpu: int = Field(ge=1, le=32, default=2)
     ram_mb: int = Field(ge=512, le=131072, default=4096)
     disk_gb: int = Field(ge=10, le=1000, default=40)
@@ -28,7 +54,16 @@ class VMCreate(BaseModel):
     position_y: int = Field(default=0)
 
     range_id: UUID
-    network_id: UUID
+    network_id: Optional[UUID] = Field(
+        None,
+        description="DEPRECATED: Use networks field instead. Primary network ID."
+    )
+
+    # Multi-NIC support - list of network interfaces
+    networks: Optional[List[NetworkInterfaceCreate]] = Field(
+        None,
+        description="Network interfaces for the VM. First is primary. Use this instead of network_id."
+    )
 
     # Image Library sources - exactly one required
     base_image_id: Optional[UUID] = None
@@ -36,7 +71,7 @@ class VMCreate(BaseModel):
     snapshot_id: Optional[UUID] = None
 
     @model_validator(mode='after')
-    def check_source(self) -> 'VMCreate':
+    def check_image_source(self) -> 'VMCreate':
         """Ensure exactly one image source is provided."""
         sources = [
             self.base_image_id,
@@ -56,6 +91,36 @@ class VMCreate(BaseModel):
             )
 
         return self
+
+    @model_validator(mode='after')
+    def check_networks(self) -> 'VMCreate':
+        """Validate network configuration and handle legacy format."""
+        # If networks is provided, validate it
+        if self.networks is not None:
+            if len(self.networks) == 0:
+                raise ValueError("networks array cannot be empty")
+
+            # Check for duplicate network_ids
+            network_ids = [n.network_id for n in self.networks]
+            if len(network_ids) != len(set(network_ids)):
+                raise ValueError("Duplicate network_id in networks array")
+
+            return self
+
+        # Legacy format: convert network_id to networks array
+        if self.network_id is not None:
+            self.networks = [
+                NetworkInterfaceCreate(
+                    network_id=self.network_id,
+                    ip_address=self.ip_address
+                )
+            ]
+            return self
+
+        # Neither provided
+        raise ValueError(
+            "Must provide either 'networks' array or legacy 'network_id' field"
+        )
 
     # Windows-specific settings (for dockur/windows VMs)
     # Version codes: 11, 11l, 11e, 10, 10l, 10e, 8e, 7u, vu, xp, 2k, 2025, 2022, 2019, 2016, 2012, 2008, 2003
@@ -155,7 +220,9 @@ class VMUpdate(BaseModel):
 class VMResponse(VMBase):
     id: UUID
     range_id: UUID
-    network_id: UUID
+    network_id: UUID  # Primary network ID (for backwards compatibility)
+    # Multi-NIC support - all network interfaces
+    networks: List[NetworkInterfaceResponse] = Field(default_factory=list)
     # Image Library sources
     base_image_id: Optional[UUID] = None
     golden_image_id: Optional[UUID] = None

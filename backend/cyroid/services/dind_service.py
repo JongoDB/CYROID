@@ -227,17 +227,22 @@ class DinDService:
         }
 
         # Optional bind mounts - auto-create directories if they don't exist
+        # On macOS with Docker Desktop, we need to use the actual host paths (from DIND_HOST_* env vars)
+        # because DinD containers mount from the Docker host, not from inside this container
         optional_mounts = [
-            # (host_path, mode, description)
-            (settings.iso_cache_dir, "ro", "ISO cache"),
-            (settings.vm_storage_dir, "rw", "VM storage"),
-            (settings.template_storage_dir, "ro", "Template storage"),
-            (settings.global_shared_dir, "rw", "Global shared folder"),
+            # (host_path, container_path, mode, description, env_override)
+            (settings.iso_cache_dir, settings.iso_cache_dir, "ro", "ISO cache", "DIND_HOST_ISO_CACHE"),
+            (settings.vm_storage_dir, settings.vm_storage_dir, "rw", "VM storage", "DIND_HOST_VM_STORAGE"),
+            (settings.template_storage_dir, settings.template_storage_dir, "ro", "Template storage", "DIND_HOST_TEMPLATE_STORAGE"),
+            (settings.global_shared_dir, settings.global_shared_dir, "rw", "Global shared folder", "DIND_HOST_SHARED"),
         ]
 
-        for host_path, mode, description in optional_mounts:
-            # Auto-create directory if it doesn't exist (cross-platform support)
-            if not os.path.exists(host_path):
+        for default_host_path, container_path, mode, description, env_var in optional_mounts:
+            # Check for override from environment (used on macOS to specify actual host paths)
+            host_path = os.environ.get(env_var, default_host_path)
+
+            # Auto-create directory if it doesn't exist (only works for paths accessible from this container)
+            if not os.path.exists(host_path) and host_path == default_host_path:
                 try:
                     os.makedirs(host_path, exist_ok=True)
                     logger.info(f"Created {description} directory: {host_path}")
@@ -245,9 +250,10 @@ class DinDService:
                     logger.warning(f"Cannot create {description} directory {host_path}: {e}")
                     continue
 
-            if os.path.exists(host_path):
-                volumes_config[host_path] = {"bind": host_path, "mode": mode}
-                logger.debug(f"Mounting {description}: {host_path} ({mode})")
+            # For overridden paths (macOS), we trust they exist on the Docker host
+            if os.path.exists(host_path) or host_path != default_host_path:
+                volumes_config[host_path] = {"bind": container_path, "mode": mode}
+                logger.debug(f"Mounting {description}: {host_path} -> {container_path} ({mode})")
             else:
                 logger.warning(f"Skipping {description} mount - path does not exist: {host_path}")
 

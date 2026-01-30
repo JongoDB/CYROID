@@ -1,6 +1,7 @@
 // frontend/src/components/common/ConfirmDialog.tsx
-import { AlertTriangle, Trash2, X } from 'lucide-react'
+import { AlertTriangle, Trash2 } from 'lucide-react'
 import clsx from 'clsx'
+import { Modal, ModalBody, ModalFooter } from './Modal'
 
 export interface ConfirmDialogProps {
   isOpen: boolean
@@ -25,8 +26,6 @@ export function ConfirmDialog({
   onCancel,
   isLoading = false
 }: ConfirmDialogProps) {
-  if (!isOpen) return null
-
   const iconColors = {
     danger: 'bg-red-100 text-red-600',
     warning: 'bg-yellow-100 text-yellow-600',
@@ -42,69 +41,51 @@ export function ConfirmDialog({
   const Icon = variant === 'danger' ? Trash2 : AlertTriangle
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto">
-      <div className="flex min-h-screen items-center justify-center px-4 py-12">
-        {/* Backdrop */}
-        <div
-          className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity"
-          onClick={onCancel}
-        />
-
-        {/* Modal */}
-        <div className="relative bg-white rounded-lg shadow-xl max-w-md w-full">
-          {/* Close button */}
-          <button
-            onClick={onCancel}
-            className="absolute top-4 right-4 text-gray-400 hover:text-gray-500"
-          >
-            <X className="h-5 w-5" />
-          </button>
-
-          <div className="p-6">
-            {/* Icon and content */}
-            <div className="flex items-start gap-4">
-              <div className={clsx(
-                "flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center",
-                iconColors[variant]
-              )}>
-                <Icon className="h-5 w-5" />
-              </div>
-              <div className="flex-1">
-                <h3 className="text-lg font-semibold text-gray-900">
-                  {title}
-                </h3>
-                <p className="mt-2 text-sm text-gray-500">
-                  {message}
-                </p>
-              </div>
-            </div>
-
-            {/* Actions */}
-            <div className="mt-6 flex justify-end gap-3">
-              <button
-                type="button"
-                onClick={onCancel}
-                disabled={isLoading}
-                className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 disabled:opacity-50"
-              >
-                {cancelLabel}
-              </button>
-              <button
-                type="button"
-                onClick={onConfirm}
-                disabled={isLoading}
-                className={clsx(
-                  "px-4 py-2 text-sm font-medium text-white border border-transparent rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50",
-                  buttonColors[variant]
-                )}
-              >
-                {isLoading ? 'Please wait...' : confirmLabel}
-              </button>
-            </div>
+    <Modal
+      isOpen={isOpen}
+      onClose={onCancel}
+      title={title}
+      description={message}
+      size="sm"
+      showCloseButton={false}
+    >
+      <ModalBody>
+        <div className="flex items-start gap-4">
+          <div className={clsx(
+            "flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center",
+            iconColors[variant]
+          )}>
+            <Icon className="h-5 w-5" />
+          </div>
+          <div className="flex-1">
+            <p className="text-sm text-gray-500">
+              {message}
+            </p>
           </div>
         </div>
-      </div>
-    </div>
+      </ModalBody>
+      <ModalFooter className="border-t-0 bg-white">
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={isLoading}
+          className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 disabled:opacity-50"
+        >
+          {cancelLabel}
+        </button>
+        <button
+          type="button"
+          onClick={onConfirm}
+          disabled={isLoading}
+          className={clsx(
+            "px-4 py-2 text-sm font-medium text-white border border-transparent rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50",
+            buttonColors[variant]
+          )}
+        >
+          {isLoading ? 'Please wait...' : confirmLabel}
+        </button>
+      </ModalFooter>
+    </Modal>
   )
 }
 

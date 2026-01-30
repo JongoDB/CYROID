@@ -3028,6 +3028,67 @@ local-hostname: {name}
 
         image_size = 0
 
+        # Get DinD client first - we'll need it for all paths
+        try:
+            range_client = self.get_range_client_sync(range_id, docker_url)
+        except Exception as e:
+            logger.error(f"Failed to connect to DinD at {docker_url}: {e}")
+            report_progress(0, 0, 'error')
+            return False
+
+        # Check if image already exists in DinD (early return)
+        try:
+            range_client.images.get(image)
+            logger.info(f"Image '{image}' already exists in DinD, skipping transfer")
+            report_progress(0, 0, 'already_exists')
+            return True
+        except docker.errors.ImageNotFound:
+            pass  # Need to transfer
+
+        # Try registry-first: if image is in CYROID registry, pull directly into DinD
+        # This allows deployment even when image isn't on the host Docker daemon
+        try:
+            from cyroid.services.registry_service import get_registry_service
+            registry = get_registry_service()
+
+            if await registry.is_healthy():
+                # Check if image is already in registry
+                registry_images = await registry.list_images()
+                # Parse image name (e.g., "cyroid/samba-dc:latest" -> repo="cyroid/samba-dc", tag="latest")
+                if ':' in image:
+                    img_repo, img_tag = image.rsplit(':', 1)
+                else:
+                    img_repo, img_tag = image, 'latest'
+
+                # Check if this image+tag is in registry
+                image_in_registry = False
+                for reg_img in registry_images:
+                    if reg_img.get('name') == img_repo and img_tag in reg_img.get('tags', []):
+                        image_in_registry = True
+                        break
+
+                if image_in_registry:
+                    logger.info(f"Image '{image}' found in registry, pulling directly into DinD")
+                    report_progress(0, 0, 'pulling_from_registry')
+
+                    registry_tag = registry.get_registry_tag(image)
+                    try:
+                        range_client.images.pull(registry_tag)
+
+                        # Retag to original name
+                        pulled_image = range_client.images.get(registry_tag)
+                        pulled_image.tag(img_repo, img_tag)
+
+                        logger.info(f"Successfully pulled '{image}' from registry into DinD")
+                        report_progress(0, 0, 'complete')
+                        return True
+                    except Exception as pull_err:
+                        logger.warning(f"Failed to pull from registry: {pull_err}, falling back to host transfer")
+        except ImportError:
+            logger.debug("Registry service not available")
+        except Exception as e:
+            logger.warning(f"Registry-first check failed: {e}, falling back to host transfer")
+
         # Check if image exists on host - try with and without :latest tag
         host_image = None
         image_variants = [image]
@@ -3064,19 +3125,7 @@ local-hostname: {name}
                 return False
 
         try:
-            # Get client for DinD
-            range_client = self.get_range_client_sync(range_id, docker_url)
-
-            # Check if image already exists in DinD
-            try:
-                range_client.images.get(image)
-                logger.info(f"Image '{image}' already exists in DinD, skipping transfer")
-                report_progress(image_size, image_size, 'already_exists')
-                return True
-            except docker.errors.ImageNotFound:
-                pass  # Need to transfer
-
-            # Try registry-based transfer first (much faster with layer caching)
+            # Try registry-based transfer from host (much faster with layer caching)
             try:
                 from cyroid.services.registry_service import get_registry_service
                 registry = get_registry_service()
@@ -3197,20 +3246,40 @@ local-hostname: {name}
         docker_url: str,
         image: str,
         progress_callback: Optional[Callable[[int, int, str], None]] = None,
-    ) -> None:
+    ) -> Dict[str, Any]:
         """
-        Pull/transfer a Docker image into a range's DinD container.
+        Pull/transfer a Docker image into a range's DinD container, tracking source.
 
-        First attempts to transfer from host, falls back to pulling directly
-        into DinD if transfer fails.
+        First attempts to transfer from host/registry, falls back to pulling directly
+        into DinD if transfer fails. When pulling from internet, automatically caches
+        the image to the local registry for future deployments.
 
         Args:
+            range_id: Range identifier
+            docker_url: DinD Docker URL (tcp://ip:port)
+            image: Image name/tag to transfer
             progress_callback: Optional callback for progress reporting.
                 Signature: (transferred: int, total: int, status: str) -> None
+
+        Returns:
+            Dict with:
+                - success: bool - whether the image was made available in DinD
+                - source: 'registry' | 'internet' | 'error' - where image came from
+                - cached_to_registry: bool - if pulled from internet, whether it was cached
+                - image: str - the image name
         """
-        # Try host-to-DinD transfer first (handles local images and snapshots)
+        result = {
+            "success": False,
+            "source": "error",
+            "cached_to_registry": False,
+            "image": image,
+        }
+
+        # Try host-to-DinD transfer first (handles local images, snapshots, and registry)
         if await self.transfer_image_to_dind(range_id, docker_url, image, progress_callback=progress_callback):
-            return
+            result["success"] = True
+            result["source"] = "registry"
+            return result
 
         # Check if this is a local-only image (no registry prefix like docker.io/, ghcr.io/, etc.)
         # Local images like "cyroid/redteam-kali" can't be pulled from a registry
@@ -3233,7 +3302,20 @@ local-hostname: {name}
         try:
             range_client = self.get_range_client_sync(range_id, docker_url)
             range_client.images.pull(image)
-            logger.info(f"Successfully pulled '{image}' into DinD")
+            logger.info(f"Successfully pulled '{image}' into DinD from internet")
+            result["success"] = True
+            result["source"] = "internet"
+
+            # Auto-cache to registry for future deployments
+            cached = await self._cache_dind_image_to_registry(range_id, docker_url, image)
+            result["cached_to_registry"] = cached
+            if cached:
+                logger.info(f"Cached internet-pulled image '{image}' to registry")
+            else:
+                logger.warning(f"Failed to cache internet-pulled image '{image}' to registry")
+
+            return result
+
         except docker.errors.APIError as e:
             if "pull access denied" in str(e) or "repository does not exist" in str(e):
                 raise RuntimeError(
@@ -3241,6 +3323,83 @@ local-hostname: {name}
                     f"If this is a local image, ensure it exists on the host Docker daemon."
                 ) from e
             raise
+
+    async def _cache_dind_image_to_registry(
+        self,
+        range_id: str,
+        docker_url: str,
+        image: str
+    ) -> bool:
+        """Export image from DinD and push to registry for future use.
+
+        This is used when an image was pulled from the internet into DinD.
+        We export it and push to registry so future deployments use registry.
+
+        Args:
+            range_id: Range identifier
+            docker_url: DinD Docker URL (tcp://ip:port)
+            image: Image name/tag to cache
+
+        Returns:
+            True if successfully cached to registry
+        """
+        try:
+            from cyroid.services.registry_service import get_registry_service
+
+            registry = get_registry_service()
+
+            # Check if registry is healthy
+            if not await registry.is_healthy():
+                logger.warning("Registry not healthy, skipping DinD image caching")
+                return False
+
+            # Check if image already exists in registry
+            if await registry.image_exists(image):
+                logger.info(f"Image '{image}' already in registry, skipping cache")
+                return True
+
+            # Get the range client for DinD
+            range_client = self.get_range_client_sync(range_id, docker_url)
+
+            # Get the image from DinD
+            try:
+                dind_image = range_client.images.get(image)
+            except docker.errors.ImageNotFound:
+                logger.warning(f"Image '{image}' not found in DinD, cannot cache")
+                return False
+
+            # Export the image from DinD (as tar stream)
+            logger.info(f"Exporting image '{image}' from DinD for registry caching")
+            image_data = dind_image.save(named=True)
+
+            # Load to host Docker daemon temporarily
+            logger.info(f"Loading image '{image}' to host for registry push")
+            loaded_images = self.client.images.load(image_data)
+            if not loaded_images:
+                logger.warning(f"Failed to load image '{image}' to host")
+                return False
+
+            # Push to registry and cleanup host
+            logger.info(f"Pushing image '{image}' to registry")
+            try:
+                await registry.push_and_cleanup(image, progress_callback=None)
+                logger.info(f"Successfully cached '{image}' to registry")
+                return True
+            except Exception as push_err:
+                logger.warning(f"Failed to push '{image}' to registry: {push_err}")
+                # Clean up the loaded image from host
+                try:
+                    self.client.images.remove(image, force=False)
+                except Exception:
+                    pass  # Ignore cleanup errors
+                return False
+
+        except ImportError:
+            logger.warning("Registry service not available, skipping DinD image caching")
+            return False
+        except Exception as e:
+            logger.warning(f"Error caching DinD image to registry: {type(e).__name__}: {e}")
+            return False
 
     async def create_snapshot_dind(
         self,

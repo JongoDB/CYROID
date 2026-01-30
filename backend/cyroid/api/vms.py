@@ -20,7 +20,8 @@ from cyroid.models.golden_image import GoldenImage
 from cyroid.models.event_log import EventType
 from cyroid.models.event import EventParticipant
 from cyroid.models.user import User
-from cyroid.schemas.vm import VMCreate, VMUpdate, VMResponse
+from cyroid.models.vm_network import VMNetwork
+from cyroid.schemas.vm import VMCreate, VMUpdate, VMResponse, NetworkInterfaceResponse
 from cyroid.services.event_service import EventService
 from cyroid.config import get_settings
 from cyroid.utils.arch import IS_ARM
@@ -125,7 +126,12 @@ def can_access_vm_console(vm: VM, user: User, db: Session) -> bool:
     return True
 
 
-def get_next_available_ip(network: Network, db: Session, skip_gateway: bool = True) -> Optional[str]:
+def get_next_available_ip(
+    network: Network,
+    db: Session,
+    skip_gateway: bool = True,
+    exclude_ips: Optional[set] = None
+) -> Optional[str]:
     """
     Calculate the next available IP address in a network subnet.
 
@@ -133,6 +139,7 @@ def get_next_available_ip(network: Network, db: Session, skip_gateway: bool = Tr
         network: The network model with subnet info
         db: Database session for querying existing VMs
         skip_gateway: Whether to skip the gateway IP (default: True)
+        exclude_ips: Additional IPs to exclude (for batch allocation)
 
     Returns:
         The next available IP address as a string, or None if all IPs are taken
@@ -143,9 +150,19 @@ def get_next_available_ip(network: Network, db: Session, skip_gateway: bool = Tr
         logger.warning(f"Invalid subnet format: {network.subnet}")
         return None
 
-    # Get all existing IPs in this network
-    existing_ips = db.query(VM.ip_address).filter(VM.network_id == network.id).all()
-    used_ips = {ip[0] for ip in existing_ips}
+    # Get all used IPs from vm_networks table (new multi-NIC storage)
+    used_query = db.query(VMNetwork.ip_address).filter(VMNetwork.network_id == network.id)
+    used_ips = {row[0] for row in used_query.all()}
+
+    # Also check legacy vms table for backwards compatibility during migration
+    legacy_query = db.query(VM.ip_address).filter(VM.network_id == network.id)
+    for row in legacy_query.all():
+        if row[0]:
+            used_ips.add(row[0])
+
+    # Also exclude any IPs passed in (for batch allocation)
+    if exclude_ips:
+        used_ips.update(exclude_ips)
 
     # Also exclude the gateway
     if skip_gateway and network.gateway:
@@ -183,9 +200,15 @@ def get_available_ips_in_range(network: Network, db: Session, limit: int = 20) -
     except ValueError:
         return []
 
-    # Get all existing IPs in this network
-    existing_ips = db.query(VM.ip_address).filter(VM.network_id == network.id).all()
-    used_ips = {ip[0] for ip in existing_ips}
+    # Get all used IPs from vm_networks table (new multi-NIC storage)
+    used_query = db.query(VMNetwork.ip_address).filter(VMNetwork.network_id == network.id)
+    used_ips = {row[0] for row in used_query.all()}
+
+    # Also check legacy vms table for backwards compatibility during migration
+    legacy_query = db.query(VM.ip_address).filter(VM.network_id == network.id)
+    for row in legacy_query.all():
+        if row[0]:
+            used_ips.add(row[0])
 
     # Also exclude the gateway
     if network.gateway:
@@ -290,17 +313,61 @@ def compute_emulation_status(
     return False, None
 
 
+def build_network_interfaces(vm: VM, db: Session) -> List[NetworkInterfaceResponse]:
+    """
+    Build network interface list for VM response.
+
+    Args:
+        vm: The VM model instance (may have network_interfaces eager-loaded)
+        db: Database session for querying networks
+
+    Returns:
+        List of NetworkInterfaceResponse for the VM
+    """
+    # Check if network_interfaces are already loaded (via joinedload)
+    interfaces = vm.network_interfaces
+
+    # If no VMNetwork records exist, fall back to legacy network_id/ip_address
+    if not interfaces and vm.network_id:
+        network = db.query(Network).filter(Network.id == vm.network_id).first()
+        if network:
+            return [NetworkInterfaceResponse(
+                network_id=network.id,
+                network_name=network.name,
+                ip_address=vm.ip_address,
+                subnet=network.subnet,
+                is_primary=True
+            )]
+        return []
+
+    result = []
+    for iface in interfaces:
+        network = db.query(Network).filter(Network.id == iface.network_id).first()
+        if network:
+            result.append(NetworkInterfaceResponse(
+                network_id=network.id,
+                network_name=network.name,
+                ip_address=iface.ip_address,
+                subnet=network.subnet,
+                is_primary=iface.is_primary
+            ))
+
+    return result
+
+
 def vm_to_response(
     vm: VM,
+    db: Session,
     base_image: Optional[BaseImage] = None,
     golden_image: Optional[GoldenImage] = None,
     snapshot: Optional[Snapshot] = None
 ) -> dict:
     """
-    Convert VM model to response dict with emulation status.
+    Convert VM model to response dict with emulation status and network interfaces.
 
     Args:
         vm: The VM model instance
+        db: Database session for building network interfaces
         base_image: The VM's base image (optional)
         golden_image: The VM's golden image (optional)
         snapshot: The VM's source snapshot (optional)
@@ -309,10 +376,12 @@ def vm_to_response(
         Dictionary for VMResponse
     """
     emulated, warning = compute_emulation_status(vm, base_image, golden_image, snapshot)
+    networks = build_network_interfaces(vm, db)
     response = {
         "id": vm.id,
         "range_id": vm.range_id,
         "network_id": vm.network_id,
+        "networks": networks,
         "base_image_id": vm.base_image_id,
         "golden_image_id": vm.golden_image_id,
         "snapshot_id": vm.snapshot_id,
@@ -398,7 +467,8 @@ def list_vms(range_id: UUID, db: DBSession, current_user: CurrentUser):
     vms = db.query(VM).options(
         joinedload(VM.base_image),
         joinedload(VM.golden_image),
-        joinedload(VM.source_snapshot)
+        joinedload(VM.source_snapshot),
+        joinedload(VM.network_interfaces)
     ).filter(VM.range_id == range_id).all()
 
     # Filter VMs based on visibility settings (for students in training events)
@@ -410,7 +480,7 @@ def list_vms(range_id: UUID, db: DBSession, current_user: CurrentUser):
         base_image = vm.base_image  # Already loaded via joinedload
         golden_image = vm.golden_image  # Already loaded via joinedload
         snapshot = vm.source_snapshot  # Already loaded via joinedload
-        responses.append(vm_to_response(vm, base_image, golden_image, snapshot))
+        responses.append(vm_to_response(vm, db, base_image, golden_image, snapshot))
     return responses
 
 
@@ -425,30 +495,72 @@ def create_vm(vm_data: VMCreate, db: DBSession, current_user: CurrentUser):
             detail=f"Range not found: {vm_data.range_id}",
         )
 
-    # Verify network exists and belongs to the range
-    network = db.query(Network).filter(Network.id == vm_data.network_id).first()
-    if not network:
-        logger.warning(f"VM creation failed: Network not found (id={vm_data.network_id})")
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Network not found: {vm_data.network_id}",
-        )
-    if network.range_id != vm_data.range_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Network does not belong to this range",
-        )
+    # Process network interfaces - auto-assign IPs where needed
+    # vm_data.networks is guaranteed to be populated by schema validator
+    allocated_ips: dict = {}  # network_id -> set of IPs allocated in this request
+    processed_networks = []
 
-    # Auto-fill IP address if not provided
-    if vm_data.ip_address is None:
-        next_ip = get_next_available_ip(network, db)
-        if next_ip is None:
+    for i, net_config in enumerate(vm_data.networks):
+        network = db.query(Network).filter(Network.id == net_config.network_id).first()
+        if not network:
+            logger.warning(f"VM creation failed: Network not found (id={net_config.network_id})")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Network not found: {net_config.network_id}",
+            )
+        if network.range_id != vm_data.range_id:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="No available IP addresses in this network",
+                detail=f"Network {network.name} does not belong to this range",
             )
-        vm_data.ip_address = next_ip
-        logger.info(f"Auto-assigned IP {next_ip} to VM {vm_data.hostname}")
+
+        # Get or auto-assign IP
+        if net_config.ip_address:
+            ip = net_config.ip_address
+            # Validate IP is available in vm_networks
+            existing = db.query(VMNetwork).filter(
+                VMNetwork.network_id == network.id,
+                VMNetwork.ip_address == ip
+            ).first()
+            if existing:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"IP {ip} is already in use in network {network.name}",
+                )
+            # Also check legacy vms table
+            existing_legacy = db.query(VM).filter(
+                VM.network_id == network.id,
+                VM.ip_address == ip
+            ).first()
+            if existing_legacy:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"IP {ip} is already in use in network {network.name}",
+                )
+        else:
+            # Auto-assign next available IP
+            exclude = allocated_ips.get(str(network.id), set())
+            ip = get_next_available_ip(network, db, exclude_ips=exclude)
+            if not ip:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"No available IPs in network {network.name}",
+                )
+            logger.info(f"Auto-assigned IP {ip} to VM {vm_data.hostname} on network {network.name}")
+
+        # Track allocation for this request (to avoid duplicates within batch)
+        if str(network.id) not in allocated_ips:
+            allocated_ips[str(network.id)] = set()
+        allocated_ips[str(network.id)].add(ip)
+
+        processed_networks.append({
+            'network': network,
+            'ip_address': ip,
+            'is_primary': (i == 0)
+        })
+
+    # Primary network info (first in list, for backwards compat)
+    primary = processed_networks[0]
 
     # Validate source (base_image, golden_image, OR snapshot)
     base_image = None
@@ -501,22 +613,30 @@ def create_vm(vm_data: VMCreate, db: DBSession, current_user: CurrentUser):
             detail="Hostname already exists in this range",
         )
 
-    # Check for duplicate IP in the network
-    existing_ip = db.query(VM).filter(
-        VM.network_id == vm_data.network_id,
-        VM.ip_address == vm_data.ip_address
-    ).first()
-    if existing_ip:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="IP address already exists in this network",
-        )
+    # Create VM with primary network info for backwards compat
+    # Exclude 'networks' field from model_dump as it's not a VM column
+    vm_dict = vm_data.model_dump(exclude={'networks'})
+    # Override with primary network values
+    vm_dict['network_id'] = primary['network'].id
+    vm_dict['ip_address'] = primary['ip_address']
 
-    vm = VM(**vm_data.model_dump())
+    vm = VM(**vm_dict)
     db.add(vm)
+    db.flush()  # Get VM ID before creating VMNetwork records
+
+    # Create VMNetwork records for all interfaces
+    for net_info in processed_networks:
+        vm_network = VMNetwork(
+            vm_id=vm.id,
+            network_id=net_info['network'].id,
+            ip_address=net_info['ip_address'],
+            is_primary=net_info['is_primary']
+        )
+        db.add(vm_network)
+
     db.commit()
     db.refresh(vm)
-    return vm_to_response(vm, base_image, golden_image, snapshot)
+    return vm_to_response(vm, db, base_image, golden_image, snapshot)
 
 
 @router.get("/{vm_id}", response_model=VMResponse)
@@ -528,7 +648,7 @@ def get_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
             detail="VM not found",
         )
     base_image, golden_image, snapshot = load_vm_source(db, vm)
-    return vm_to_response(vm, base_image, golden_image, snapshot)
+    return vm_to_response(vm, db, base_image, golden_image, snapshot)
 
 
 @router.put("/{vm_id}", response_model=VMResponse)
@@ -552,7 +672,7 @@ def update_vm(
     db.commit()
     db.refresh(vm)
     base_image, golden_image, snapshot = load_vm_source(db, vm)
-    return vm_to_response(vm, base_image, golden_image, snapshot)
+    return vm_to_response(vm, db, base_image, golden_image, snapshot)
 
 
 @router.delete("/{vm_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -1563,7 +1683,7 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
             detail=f"Failed to start VM: {str(e)}",
         )
 
-    return vm_to_response(vm, base_image_record, golden_image_record, snapshot)
+    return vm_to_response(vm, db, base_image_record, golden_image_record, snapshot)
 
 
 @router.post("/{vm_id}/stop", response_model=VMResponse)
@@ -1630,7 +1750,7 @@ def stop_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
         )
 
     base_image, golden_image, snapshot = load_vm_source(db, vm)
-    return vm_to_response(vm, base_image, golden_image, snapshot)
+    return vm_to_response(vm, db, base_image, golden_image, snapshot)
 
 
 @router.get("/{vm_id}/stats")
@@ -2215,7 +2335,7 @@ def restart_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
         )
 
     base_image, golden_image, snapshot = load_vm_source(db, vm)
-    return vm_to_response(vm, base_image, golden_image, snapshot)
+    return vm_to_response(vm, db, base_image, golden_image, snapshot)
 
 
 @router.get("/{vm_id}/logs")

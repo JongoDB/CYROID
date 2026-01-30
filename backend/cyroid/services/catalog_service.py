@@ -7,6 +7,7 @@ an index.json describing available blueprints, scenarios, images, and base image
 The service handles syncing sources, browsing their indexes, and installing items
 into the local CYROID instance.
 """
+import asyncio
 import hashlib
 import json
 import logging
@@ -20,6 +21,8 @@ from uuid import UUID, uuid4
 
 import yaml
 from sqlalchemy.orm import Session
+
+from .registry_service import get_registry_service, RegistryPushError
 
 from cyroid.config import get_settings
 from cyroid.models.base_image import BaseImage, ImageType
@@ -936,41 +939,87 @@ class CatalogService:
     def _build_docker_image(self, image_tag: str, project_dir: Path) -> bool:
         """Build a Docker image from a project directory.
 
+        If a local registry is available, checks if the image already exists there
+        and skips the build. After building, pushes to the registry and cleans up
+        from the host Docker daemon.
+
         Args:
             image_tag: The tag for the built image.
             project_dir: Directory containing the Dockerfile.
 
         Returns:
-            True if build succeeded, False otherwise.
+            True if build succeeded (or image already in registry), False otherwise.
+
+        Raises:
+            RegistryPushError: If pushing to registry fails.
         """
         try:
             import docker
 
             client = docker.from_env()
+            registry = get_registry_service()
 
-            # Check if image already exists
+            # Check if image already exists in registry (skip build if so)
+            loop = asyncio.new_event_loop()
+            try:
+                registry_healthy = loop.run_until_complete(registry.is_healthy())
+                if registry_healthy:
+                    image_in_registry = loop.run_until_complete(
+                        registry.image_exists(image_tag)
+                    )
+                    if image_in_registry:
+                        logger.info(
+                            f"Image {image_tag} already exists in registry, "
+                            f"skipping build"
+                        )
+                        return True
+            finally:
+                loop.close()
+
+            # Check if image already exists on host
             try:
                 client.images.get(image_tag)
-                logger.info(f"Image {image_tag} already exists, skipping build")
-                return True
+                logger.info(f"Image {image_tag} already exists on host, skipping build")
+                # Image exists on host but not in registry - still need to push
             except docker.errors.ImageNotFound:
-                pass
+                # Build the image
+                logger.info(f"Building image {image_tag} from {project_dir}")
+                image, build_logs = client.images.build(
+                    path=str(project_dir),
+                    tag=image_tag,
+                    rm=True,
+                    forcerm=True,
+                )
 
-            logger.info(f"Building image {image_tag} from {project_dir}")
-            image, build_logs = client.images.build(
-                path=str(project_dir),
-                tag=image_tag,
-                rm=True,
-                forcerm=True,
-            )
+                for log_line in build_logs:
+                    if "stream" in log_line:
+                        logger.debug(log_line["stream"].strip())
 
-            for log_line in build_logs:
-                if "stream" in log_line:
-                    logger.debug(log_line["stream"].strip())
+                logger.info(f"Successfully built image {image_tag}")
 
-            logger.info(f"Successfully built image {image_tag}")
+            # Push to registry and cleanup from host
+            loop = asyncio.new_event_loop()
+            try:
+                registry_healthy = loop.run_until_complete(registry.is_healthy())
+                if registry_healthy:
+                    logger.info(f"Pushing {image_tag} to registry and cleaning up host")
+                    # push_and_cleanup raises RegistryPushError on failure
+                    loop.run_until_complete(registry.push_and_cleanup(image_tag))
+                    logger.info(
+                        f"Image {image_tag} pushed to registry and removed from host"
+                    )
+                else:
+                    logger.warning(
+                        f"Registry not healthy, keeping {image_tag} on host only"
+                    )
+            finally:
+                loop.close()
+
             return True
 
+        except RegistryPushError:
+            # Re-raise registry push errors to fail the operation
+            raise
         except Exception as e:
             logger.error(f"Failed to build image {image_tag}: {e}")
             return False
