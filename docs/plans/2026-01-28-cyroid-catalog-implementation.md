@@ -81,7 +81,7 @@ class CatalogItemType(str, enum.Enum):
     blueprint = "blueprint"
     scenario = "scenario"
     image = "image"
-    template = "template"
+    base_image = "base_image"
     content = "content"
 
 
@@ -310,7 +310,7 @@ Handles:
 - HTTP fetch of catalog index
 - Reading local catalog directories
 - Parsing index.json
-- Installing blueprints, scenarios, images, templates from catalog
+- Installing blueprints, scenarios, images, base_images from catalog
 """
 import json
 import logging
@@ -628,8 +628,8 @@ class CatalogService:
             self._install_scenario(item_path, detail)
         elif detail.type == CatalogItemType.image:
             self._install_image(item_path, detail, build_images)
-        elif detail.type == CatalogItemType.template:
-            self._install_template(item_path, detail)
+        elif detail.type == CatalogItemType.base_image:
+            self._install_base_image(item_path, detail)
 
         # Record the installation
         installed = CatalogInstalledItem(
@@ -815,10 +815,10 @@ class CatalogService:
                 self.db.flush()
                 logger.info(f"Registered BaseImage: {tag}")
 
-    def _install_template(self, item_path: Path, detail: CatalogItemDetail):
-        """Install a VM template definition."""
-        # Templates are metadata — read the YAML and register as a BaseImage
-        # if not already present. The template YAML defines the image source.
+    def _install_base_image(self, item_path: Path, detail: CatalogItemDetail):
+        """Install a VM base image definition."""
+        # Base images are metadata — read the YAML and register as a BaseImage
+        # if not already present. The base image YAML defines the image source.
         if not item_path.exists():
             logger.warning(f"Template file not found: {item_path}")
             return
@@ -875,7 +875,7 @@ class CatalogService:
         )
         self.db.add(base_image)
         self.db.flush()
-        logger.info(f"Registered template as BaseImage: {base_tag}")
+        logger.info(f"Registered base_image as BaseImage: {base_tag}")
 
     # ========================
     # Uninstall
