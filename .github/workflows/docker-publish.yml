@@ -10,7 +10,8 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}
+  # Note: repository_owner must be lowercased for Docker image names
+  IMAGE_PREFIX: ghcr.io/jongodb
 
 # Prevent concurrent pushes to the same ref (branch/tag)
 concurrency:
