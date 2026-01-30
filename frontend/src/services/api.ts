@@ -2233,12 +2233,22 @@ export interface PushResponse {
   message: string
 }
 
+export interface ImageStatusResponse {
+  image_tag: string
+  in_registry: boolean
+  on_host: boolean
+  needs_push: boolean
+}
+
 export const registryApi = {
   listImages: () =>
     api.get<RegistryImage[]>('/registry/images'),
 
   getStats: () =>
     api.get<RegistryStats>('/registry/stats'),
+
+  getImageStatus: (imageTag: string) =>
+    api.get<ImageStatusResponse>(`/registry/status/${encodeURIComponent(imageTag)}`),
 
   pushImage: (imageTag: string) =>
     api.post<PushResponse>('/registry/push', { image_tag: imageTag }),
