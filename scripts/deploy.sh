@@ -517,6 +517,422 @@ tui_summary_box() {
     fi
 }
 
+# =============================================================================
+# Full-Screen TUI Framework (K9s-style)
+# =============================================================================
+
+# Terminal state
+TERM_LINES=24
+TERM_COLS=80
+STATUS_MESSAGE=""
+STATUS_TYPE="info"  # info, success, warn, error, progress
+DEPLOYMENT_PHASE=""
+DEPLOYMENT_PROGRESS=0
+TUI_FULLSCREEN=false
+
+# Save terminal state for cleanup
+ORIGINAL_STTY=""
+
+tui_init_fullscreen() {
+    if [ "$USE_TUI" != true ]; then
+        return
+    fi
+
+    # Save terminal settings
+    ORIGINAL_STTY=$(stty -g 2>/dev/null) || true
+
+    # Get terminal dimensions
+    tui_update_dimensions
+
+    # Set up cleanup trap
+    trap 'tui_cleanup_fullscreen' EXIT INT TERM
+
+    # Hide cursor during redraws
+    tput civis 2>/dev/null || true
+
+    TUI_FULLSCREEN=true
+
+    # Initial draw
+    tui_draw_screen
+}
+
+tui_cleanup_fullscreen() {
+    if [ "$TUI_FULLSCREEN" = true ]; then
+        # Show cursor
+        tput cnorm 2>/dev/null || true
+
+        # Restore terminal settings
+        if [ -n "$ORIGINAL_STTY" ]; then
+            stty "$ORIGINAL_STTY" 2>/dev/null || true
+        fi
+
+        # Move cursor to bottom and reset
+        tput cup "$TERM_LINES" 0 2>/dev/null || true
+        echo ""
+
+        TUI_FULLSCREEN=false
+    fi
+}
+
+tui_update_dimensions() {
+    TERM_LINES=$(tput lines 2>/dev/null || echo 24)
+    TERM_COLS=$(tput cols 2>/dev/null || echo 80)
+}
+
+tui_set_status() {
+    local message="$1"
+    local type="${2:-info}"  # info, success, warn, error, progress
+
+    STATUS_MESSAGE="$message"
+    STATUS_TYPE="$type"
+
+    # Immediately update status bar if in fullscreen mode
+    if [ "$TUI_FULLSCREEN" = true ]; then
+        tui_draw_status_bar
+    fi
+}
+
+tui_set_progress() {
+    local phase="$1"
+    local progress="$2"  # 0-100
+
+    DEPLOYMENT_PHASE="$phase"
+    DEPLOYMENT_PROGRESS="$progress"
+
+    tui_set_status "$phase" "progress"
+}
+
+tui_draw_status_bar() {
+    if [ "$USE_TUI" != true ]; then
+        return
+    fi
+
+    # Update dimensions in case terminal was resized
+    tui_update_dimensions
+
+    # Save cursor position
+    tput sc 2>/dev/null || true
+
+    # Move to bottom line (leave 1 line for status bar)
+    local status_line=$((TERM_LINES - 1))
+    tput cup "$status_line" 0 2>/dev/null || true
+
+    # Build status bar content
+    local timestamp=$(date '+%H:%M:%S')
+    local status_icon=""
+    local status_color=""
+
+    case "$STATUS_TYPE" in
+        success)  status_icon="✓"; status_color="82" ;;
+        warn)     status_icon="⚠"; status_color="214" ;;
+        error)    status_icon="✗"; status_color="196" ;;
+        progress) status_icon="◐"; status_color="39" ;;
+        *)        status_icon="→"; status_color="245" ;;
+    esac
+
+    # Create progress bar if in progress mode
+    local progress_bar=""
+    if [ "$STATUS_TYPE" = "progress" ] && [ "$DEPLOYMENT_PROGRESS" -gt 0 ]; then
+        local bar_width=20
+        local filled=$((DEPLOYMENT_PROGRESS * bar_width / 100))
+        local empty=$((bar_width - filled))
+        progress_bar=" ["
+        for ((i=0; i<filled; i++)); do progress_bar+="█"; done
+        for ((i=0; i<empty; i++)); do progress_bar+="░"; done
+        progress_bar+="] ${DEPLOYMENT_PROGRESS}%"
+    fi
+
+    # Build the full status line
+    local left_content="$status_icon $STATUS_MESSAGE$progress_bar"
+    local right_content="$timestamp"
+
+    # Calculate padding
+    local left_len=${#left_content}
+    local right_len=${#right_content}
+    local padding=$((TERM_COLS - left_len - right_len - 4))
+    if [ $padding -lt 0 ]; then padding=0; fi
+
+    # Clear the line and draw status bar
+    printf "\033[48;5;236m\033[K"  # Dark gray background, clear line
+
+    # Draw with colors
+    printf "\033[38;5;${status_color}m %s\033[38;5;245m" "$status_icon"
+    printf " %s" "$STATUS_MESSAGE"
+    if [ -n "$progress_bar" ]; then
+        printf "\033[38;5;39m%s\033[0m" "$progress_bar"
+    fi
+
+    # Right-align timestamp
+    printf "%*s" "$padding" ""
+    printf "\033[38;5;245m%s \033[0m" "$right_content"
+
+    # Restore cursor position
+    tput rc 2>/dev/null || true
+}
+
+tui_draw_header_bar() {
+    if [ "$USE_TUI" != true ]; then
+        return
+    fi
+
+    # Move to top
+    tput cup 0 0 2>/dev/null || true
+
+    # Build header bar
+    local title="CYROID"
+    local version="${VERSION:-latest}"
+    local right_content="v$version"
+
+    # Calculate padding
+    local left_len=${#title}
+    local right_len=${#right_content}
+    local padding=$((TERM_COLS - left_len - right_len - 4))
+    if [ $padding -lt 0 ]; then padding=0; fi
+
+    # Draw header bar with cyan background
+    printf "\033[48;5;24m\033[38;5;255m\033[K"  # Dark blue background, white text
+    printf " %s" "$title"
+    printf "%*s" "$padding" ""
+    printf "%s \033[0m\n" "$right_content"
+}
+
+tui_draw_screen() {
+    if [ "$USE_TUI" != true ]; then
+        return
+    fi
+
+    # Clear screen
+    clear
+
+    # Draw header bar
+    tui_draw_header_bar
+
+    # Draw status bar at bottom
+    tui_draw_status_bar
+
+    # Position cursor for main content (line 3, after header)
+    tput cup 2 0 2>/dev/null || true
+}
+
+tui_main_area() {
+    # Position cursor in main content area
+    if [ "$TUI_FULLSCREEN" = true ]; then
+        tput cup 2 0 2>/dev/null || true
+    fi
+}
+
+# Deployment progress helper
+tui_deployment_step() {
+    local step_name="$1"
+    local step_num="$2"
+    local total_steps="$3"
+
+    local progress=$((step_num * 100 / total_steps))
+    tui_set_progress "$step_name" "$progress"
+
+    # Also print to main area
+    tui_info "$step_name"
+}
+
+# Service status monitoring
+tui_show_services_status() {
+    if [ "$USE_TUI" != true ]; then
+        return
+    fi
+
+    local compose_cmd="docker compose"
+    if ! docker compose version &> /dev/null 2>&1; then
+        compose_cmd="docker-compose"
+    fi
+
+    # Get service status
+    local services=$($compose_cmd -f docker-compose.yml -f docker-compose.prod.yml ps --format "table {{.Name}}\t{{.Status}}" 2>/dev/null) || true
+
+    if [ -n "$services" ]; then
+        echo ""
+        gum style --foreground 212 --bold "Services"
+        echo "$services" | while IFS= read -r line; do
+            if echo "$line" | grep -q "(healthy)"; then
+                gum style --foreground 82 "  $line"
+            elif echo "$line" | grep -q "Up"; then
+                gum style --foreground 214 "  $line"
+            elif echo "$line" | grep -q "NAME"; then
+                gum style --foreground 245 "  $line"
+            else
+                gum style --foreground 196 "  $line"
+            fi
+        done
+    fi
+}
+
+# Live status update (can be called periodically)
+tui_refresh_status() {
+    if [ "$TUI_FULLSCREEN" != true ]; then
+        return
+    fi
+
+    # Update status bar with current time
+    tui_draw_status_bar
+}
+
+# Background status updater
+STATUS_UPDATER_PID=""
+
+tui_start_status_updater() {
+    if [ "$USE_TUI" != true ]; then
+        return
+    fi
+
+    # Start background process to update status every 5 seconds
+    (
+        while true; do
+            sleep 5
+            tui_refresh_status
+        done
+    ) &
+    STATUS_UPDATER_PID=$!
+}
+
+tui_stop_status_updater() {
+    if [ -n "$STATUS_UPDATER_PID" ]; then
+        kill "$STATUS_UPDATER_PID" 2>/dev/null || true
+        STATUS_UPDATER_PID=""
+    fi
+}
+
+# Live Dashboard (K9s-style)
+tui_live_dashboard() {
+    local compose_cmd="${1:-docker compose}"
+
+    # Hide cursor
+    tput civis 2>/dev/null || true
+
+    # Trap to restore cursor on exit
+    trap 'tput cnorm 2>/dev/null; return' INT TERM
+
+    local refresh_interval=5
+    local last_key=""
+
+    while true; do
+        # Get terminal dimensions
+        local lines=$(tput lines 2>/dev/null || echo 24)
+        local cols=$(tput cols 2>/dev/null || echo 80)
+
+        # Clear screen
+        clear
+
+        # Draw header with prominent exit instructions
+        printf "\033[48;5;24m\033[38;5;255m\033[K"
+        printf " CYROID Live Dashboard"
+        printf "%*s" $((cols - 60)) ""
+        printf "\033[48;5;214m\033[38;5;0m q=quit \033[48;5;24m\033[38;5;255m r=refresh \033[0m\n"
+
+        echo ""
+
+        # Get service status
+        local services=$($compose_cmd -f docker-compose.yml -f docker-compose.prod.yml ps 2>/dev/null) || true
+        local healthy=$($compose_cmd -f docker-compose.yml -f docker-compose.prod.yml ps 2>/dev/null | grep -c "(healthy)" || echo "0")
+        local running=$($compose_cmd -f docker-compose.yml -f docker-compose.prod.yml ps 2>/dev/null | grep -c "Up" || echo "0")
+        local total=$($compose_cmd -f docker-compose.yml -f docker-compose.prod.yml ps 2>/dev/null | grep -v "NAME" | grep -c "" || echo "0")
+
+        # Summary bar
+        local status_color="82"  # green
+        local status_text="HEALTHY"
+        if [ "$healthy" -lt 3 ]; then
+            status_color="214"  # yellow
+            status_text="DEGRADED"
+        fi
+        if [ "$running" -eq 0 ]; then
+            status_color="196"  # red
+            status_text="DOWN"
+        fi
+
+        gum style --foreground "$status_color" --bold "  Status: $status_text  |  Services: $running running, $healthy healthy"
+        echo ""
+
+        # Services table
+        gum style --foreground 212 --bold "  Services"
+        echo ""
+
+        if [ -n "$services" ]; then
+            echo "$services" | while IFS= read -r line; do
+                if echo "$line" | grep -q "(healthy)"; then
+                    printf "    \033[38;5;82m●\033[0m %s\n" "$line"
+                elif echo "$line" | grep -q "Up"; then
+                    printf "    \033[38;5;214m●\033[0m %s\n" "$line"
+                elif echo "$line" | grep -q "NAME"; then
+                    printf "    \033[38;5;245m  %s\033[0m\n" "$line"
+                else
+                    printf "    \033[38;5;196m●\033[0m %s\n" "$line"
+                fi
+            done
+        else
+            gum style --foreground 196 "    No services found"
+        fi
+
+        echo ""
+
+        # Ranges section
+        local range_containers=$(docker ps --filter "label=cyroid.type=dind" --format "{{.Names}}\t{{.Status}}" 2>/dev/null) || true
+        local range_count=$(echo "$range_containers" | grep -c "" 2>/dev/null || echo "0")
+        if [ -z "$range_containers" ]; then range_count=0; fi
+
+        gum style --foreground 212 --bold "  Deployed Ranges ($range_count)"
+        echo ""
+
+        if [ -n "$range_containers" ] && [ "$range_count" -gt 0 ]; then
+            echo "$range_containers" | while IFS=$'\t' read -r name status; do
+                if [ -n "$name" ]; then
+                    if echo "$status" | grep -q "Up"; then
+                        printf "    \033[38;5;82m●\033[0m %-30s %s\n" "$name" "$status"
+                    else
+                        printf "    \033[38;5;196m●\033[0m %-30s %s\n" "$name" "$status"
+                    fi
+                fi
+            done
+        else
+            gum style --foreground 245 "    No ranges deployed"
+        fi
+
+        echo ""
+
+        # Resource usage (if docker stats available)
+        gum style --foreground 212 --bold "  Resource Usage"
+        echo ""
+
+        local stats=$(docker stats --no-stream --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}" 2>/dev/null | head -8) || true
+        if [ -n "$stats" ]; then
+            echo "$stats" | while IFS= read -r line; do
+                printf "    %s\n" "$line"
+            done
+        else
+            gum style --foreground 245 "    Stats unavailable"
+        fi
+
+        # Draw status bar at bottom
+        tput cup $((lines - 1)) 0 2>/dev/null || true
+        local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+        printf "\033[48;5;236m\033[38;5;245m\033[K"
+        printf " Auto-refresh: ${refresh_interval}s"
+        printf "%*s" $((cols - 35)) ""
+        printf "Last update: %s \033[0m" "$timestamp"
+
+        # Wait for key or timeout
+        if read -t "$refresh_interval" -n 1 key 2>/dev/null; then
+            case "$key" in
+                q|Q)
+                    tput cnorm 2>/dev/null || true
+                    clear
+                    return
+                    ;;
+                r|R)
+                    continue  # Immediate refresh
+                    ;;
+            esac
+        fi
+    done
+}
+
 check_prerequisites() {
     # Comprehensive pre-flight checks for all requirements
     local errors=0
@@ -1315,26 +1731,33 @@ wait_for_health() {
 
     local max_attempts=60
     local attempt=0
+    local target_healthy=3  # Minimum healthy services needed
 
     while [ $attempt -lt $max_attempts ]; do
-        if docker_compose_cmd -f docker-compose.yml -f docker-compose.prod.yml ps 2>/dev/null | grep -q "(healthy)"; then
-            local healthy_count=$(docker_compose_cmd -f docker-compose.yml -f docker-compose.prod.yml ps 2>/dev/null | grep -c "(healthy)" || echo "0")
-            if [ "$healthy_count" -ge 3 ]; then
-                tui_success "All services are healthy!"
-                return 0
-            fi
+        local healthy_count=$(docker_compose_cmd -f docker-compose.yml -f docker-compose.prod.yml ps 2>/dev/null | grep -c "(healthy)" || echo "0")
+        local running_count=$(docker_compose_cmd -f docker-compose.yml -f docker-compose.prod.yml ps 2>/dev/null | grep -c "Up" || echo "0")
+
+        # Update status bar with current health status
+        tui_set_status "Waiting for services... ($healthy_count/$target_healthy healthy, $running_count running)" "progress"
+
+        if [ "$healthy_count" -ge "$target_healthy" ]; then
+            tui_set_status "All services healthy!" "success"
+            tui_success "All services are healthy!"
+            return 0
         fi
 
         attempt=$((attempt + 1))
-        if [ "$USE_TUI" = true ] && command -v gum &> /dev/null; then
-            : # gum spin handles its own progress display
-        else
+
+        # Show dots in non-TUI mode
+        if [ "$USE_TUI" != true ]; then
             echo -n "."
         fi
+
         sleep 2
     done
 
     echo ""
+    tui_set_status "Some services may not be healthy" "warn"
     tui_warn "Some services may not be fully healthy yet"
     tui_info "Check status with: $0 --status"
     tui_info "View logs with: docker compose -f docker-compose.yml -f docker-compose.prod.yml logs -f"
@@ -1563,43 +1986,73 @@ do_deploy() {
         interactive_setup
     fi
 
+    # Initialize full-screen TUI for deployment
+    if [ "$USE_TUI" = true ]; then
+        tui_init_fullscreen
+        tui_set_status "Initializing deployment..." "info"
+    fi
+
+    tui_main_area
     tui_header
     tui_title "Deploying CYROID"
     echo ""
 
     # Pre-flight checks
+    tui_set_status "Running pre-flight checks..." "progress"
     check_data_dir_writable
     backup_env_file
 
-    # Create directories and config
+    # Create directories and config (Step 1/7)
+    tui_set_progress "Creating data directories..." 14
     tui_info "Creating data directories..."
     create_data_directories
     tui_success "Data directories ready"
 
+    # Generate config (Step 2/7)
+    tui_set_progress "Generating configuration..." 28
     tui_info "Generating configuration..."
     create_env_file
     tui_success "Configuration saved"
 
+    # Setup SSL (Step 3/7)
+    tui_set_progress "Setting up SSL certificates..." 42
     tui_info "Setting up SSL certificates..."
     setup_ssl
     tui_success "SSL configured"
 
+    # Init networks (Step 4/7)
+    tui_set_progress "Initializing Docker networks..." 56
     tui_info "Initializing Docker networks..."
     init_networks
     tui_success "Networks ready"
 
+    # Pull images (Step 5/7)
+    tui_set_progress "Pulling Docker images..." 70
     tui_info "Pulling Docker images (this may take a while)..."
     pull_images
     tui_success "Images pulled"
 
+    # Start services (Step 6/7)
+    tui_set_progress "Starting services..." 85
     tui_info "Starting services..."
     start_services
     tui_success "Services started"
 
+    # Wait for health (Step 7/7)
+    tui_set_progress "Waiting for services to be healthy..." 92
     wait_for_health
 
-    # Create initial admin user
+    # Create initial admin user (final step)
+    tui_set_progress "Creating admin user..." 98
     create_initial_admin
+
+    # Deployment complete
+    tui_set_status "Deployment complete!" "success"
+
+    # Clean up fullscreen mode before showing access info
+    if [ "$TUI_FULLSCREEN" = true ]; then
+        tui_cleanup_fullscreen
+    fi
 
     show_access_info
 
@@ -1621,6 +2074,7 @@ management_menu() {
         if [ "$USE_TUI" = true ] && command -v gum &> /dev/null && [ -t 0 ]; then
             local choice
             choice=$(gum choose --header "What would you like to do?" \
+                "Live Dashboard (auto-refresh)" \
                 "View logs" \
                 "Show status" \
                 "Restart services" \
@@ -1629,11 +2083,17 @@ management_menu() {
                 "Exit")
 
             case "$choice" in
+                "Live Dashboard"*)
+                    tui_live_dashboard "$compose_cmd"
+                    ;;
                 "View logs")
-                    echo ""
-                    tui_info "Showing logs (Ctrl+C to stop)..."
+                    clear
+                    gum style --background 214 --foreground 0 --bold --padding "0 2" " Press Ctrl+C to exit and return to menu "
                     echo ""
                     $compose_cmd -f docker-compose.yml -f docker-compose.prod.yml logs -f --tail=50 || true
+                    echo ""
+                    tui_success "Returned to menu"
+                    sleep 1
                     ;;
                 "Show status")
                     echo ""
@@ -1690,16 +2150,35 @@ management_menu() {
 
                     # Detect deployed ranges (DinD containers and range networks)
                     local range_containers=$(docker ps -a --filter "label=cyroid.type=dind" --format "{{.Names}}" 2>/dev/null) || true
+                    local dind_containers=$(docker ps -a --filter "name=dind-" --format "{{.Names}}" 2>/dev/null) || true
                     local range_networks=$(docker network ls --filter "name=range-" --format "{{.Name}}" 2>/dev/null) || true
                     local cyroid_networks=$(docker network ls --filter "name=cyroid-" --format "{{.Name}}" 2>/dev/null) || true
 
+                    # Combine range containers (labeled + dind- prefixed)
+                    local all_range_containers=""
+                    if [ -n "$range_containers" ]; then
+                        all_range_containers="$range_containers"
+                    fi
+                    if [ -n "$dind_containers" ]; then
+                        if [ -n "$all_range_containers" ]; then
+                            all_range_containers="$all_range_containers"$'\n'"$dind_containers"
+                        else
+                            all_range_containers="$dind_containers"
+                        fi
+                    fi
+                    # Deduplicate
+                    all_range_containers=$(echo "$all_range_containers" | sort -u | grep -v '^$') || true
+
                     local has_ranges=false
-                    if [ -n "$range_containers" ] || [ -n "$range_networks" ]; then
+                    if [ -n "$all_range_containers" ] || [ -n "$range_networks" ]; then
                         has_ranges=true
                         echo "  Deployed Ranges detected:"
-                        if [ -n "$range_containers" ]; then
-                            local range_count=$(echo "$range_containers" | wc -l | tr -d ' ')
+                        if [ -n "$all_range_containers" ]; then
+                            local range_count=$(echo "$all_range_containers" | wc -l | tr -d ' ')
                             echo "    - $range_count range container(s)"
+                            echo "$all_range_containers" | while read -r c; do
+                                [ -n "$c" ] && echo "      • $c"
+                            done
                         fi
                         if [ -n "$range_networks" ]; then
                             local net_count=$(echo "$range_networks" | wc -l | tr -d ' ')
@@ -1747,23 +2226,11 @@ management_menu() {
                         if [ "$delete_ranges" = true ]; then
                             tui_info "Stopping and removing deployed ranges..."
 
-                            # Stop and remove range containers (DinD)
-                            if [ -n "$range_containers" ]; then
-                                echo "$range_containers" | while read -r container; do
+                            # Stop and remove all range containers
+                            if [ -n "$all_range_containers" ]; then
+                                echo "$all_range_containers" | while read -r container; do
                                     if [ -n "$container" ]; then
-                                        tui_info "  Removing range: $container"
-                                        docker stop "$container" 2>/dev/null || true
-                                        docker rm -f "$container" 2>/dev/null || true
-                                    fi
-                                done
-                            fi
-
-                            # Also catch any dind- prefixed containers
-                            local dind_containers=$(docker ps -a --filter "name=dind-" --format "{{.Names}}" 2>/dev/null) || true
-                            if [ -n "$dind_containers" ]; then
-                                echo "$dind_containers" | while read -r container; do
-                                    if [ -n "$container" ]; then
-                                        tui_info "  Removing DinD container: $container"
+                                        tui_info "  Removing: $container"
                                         docker stop "$container" 2>/dev/null || true
                                         docker rm -f "$container" 2>/dev/null || true
                                     fi
@@ -1888,15 +2355,24 @@ management_menu() {
 
                     # Detect deployed ranges
                     local range_containers=$(docker ps -a --filter "label=cyroid.type=dind" --format "{{.Names}}" 2>/dev/null) || true
+                    local dind_containers=$(docker ps -a --filter "name=dind-" --format "{{.Names}}" 2>/dev/null) || true
                     local range_networks=$(docker network ls --filter "name=range-" --format "{{.Name}}" 2>/dev/null) || true
                     local cyroid_networks=$(docker network ls --filter "name=cyroid-" --format "{{.Name}}" 2>/dev/null) || true
 
+                    # Combine and deduplicate range containers
+                    local all_range_containers=""
+                    [ -n "$range_containers" ] && all_range_containers="$range_containers"
+                    if [ -n "$dind_containers" ]; then
+                        [ -n "$all_range_containers" ] && all_range_containers="$all_range_containers"$'\n'"$dind_containers" || all_range_containers="$dind_containers"
+                    fi
+                    all_range_containers=$(echo "$all_range_containers" | sort -u | grep -v '^$') || true
+
                     local has_ranges=false
-                    if [ -n "$range_containers" ] || [ -n "$range_networks" ]; then
+                    if [ -n "$all_range_containers" ] || [ -n "$range_networks" ]; then
                         has_ranges=true
                         echo "  Deployed Ranges detected:"
-                        if [ -n "$range_containers" ]; then
-                            local range_count=$(echo "$range_containers" | wc -l | tr -d ' ')
+                        if [ -n "$all_range_containers" ]; then
+                            local range_count=$(echo "$all_range_containers" | wc -l | tr -d ' ')
                             echo "    - $range_count range container(s)"
                         fi
                         if [ -n "$range_networks" ]; then
@@ -1938,18 +2414,10 @@ management_menu() {
                         if [ "$delete_ranges" = true ]; then
                             echo "Removing deployed ranges..."
 
-                            # Stop and remove range containers
-                            if [ -n "$range_containers" ]; then
-                                echo "$range_containers" | while read -r container; do
-                                    [ -n "$container" ] && docker rm -f "$container" 2>/dev/null || true
-                                done
-                            fi
-
-                            # Also catch dind- prefixed containers
-                            local dind_containers=$(docker ps -a --filter "name=dind-" --format "{{.Names}}" 2>/dev/null) || true
-                            if [ -n "$dind_containers" ]; then
-                                echo "$dind_containers" | while read -r container; do
-                                    [ -n "$container" ] && docker rm -f "$container" 2>/dev/null || true
+                            # Stop and remove all range containers
+                            if [ -n "$all_range_containers" ]; then
+                                echo "$all_range_containers" | while read -r container; do
+                                    [ -n "$container" ] && echo "  Removing: $container" && docker rm -f "$container" 2>/dev/null || true
                                 done
                             fi
 
