@@ -795,6 +795,9 @@ tui_show_services_status() {
     if ! docker compose version &> /dev/null 2>&1; then
         compose_cmd="docker-compose"
     fi
+    if [ -f "$ENV_FILE" ]; then
+        compose_cmd="$compose_cmd --env-file $ENV_FILE"
+    fi
 
     # Get service status
     local services=$($compose_cmd -f docker-compose.yml -f docker-compose.prod.yml ps --format "table {{.Name}}\t{{.Status}}" 2>/dev/null) || true
@@ -2011,10 +2014,14 @@ backup_env_file() {
 }
 
 docker_compose_cmd() {
+    local env_args=""
+    if [ -f "$ENV_FILE" ]; then
+        env_args="--env-file $ENV_FILE"
+    fi
     if docker compose version &> /dev/null 2>&1; then
-        docker compose "$@"
+        docker compose $env_args "$@"
     else
-        docker-compose "$@"
+        docker-compose $env_args "$@"
     fi
 }
 
@@ -2460,6 +2467,9 @@ pull_images() {
     if ! docker compose version &> /dev/null 2>&1; then
         compose_cmd="docker-compose"
     fi
+    if [ -f "$ENV_FILE" ]; then
+        compose_cmd="$compose_cmd --env-file $ENV_FILE"
+    fi
 
     # Get list of images to show what we're pulling
     local images
@@ -2525,6 +2535,9 @@ start_services() {
     if ! docker compose version &> /dev/null 2>&1; then
         compose_cmd="docker-compose"
     fi
+    if [ -f "$ENV_FILE" ]; then
+        compose_cmd="$compose_cmd --env-file $ENV_FILE"
+    fi
 
     # Start services (don't use gum spin - it can fail silently)
     $compose_cmd -f docker-compose.yml -f docker-compose.prod.yml up -d 2>&1 | while read -r line; do
@@ -2548,7 +2561,7 @@ wait_for_health() {
 
     local max_attempts=60
     local attempt=0
-    local target_healthy=3  # Minimum healthy services needed
+    local target_healthy=8  # All 8 services should be healthy
 
     while [ $attempt -lt $max_attempts ]; do
         local healthy_count=$(docker_compose_cmd -f docker-compose.yml -f docker-compose.prod.yml ps 2>/dev/null | grep -c "(healthy)" || echo "0")
@@ -2759,6 +2772,9 @@ do_deploy() {
     if ! docker compose version &> /dev/null 2>&1; then
         compose_cmd="docker-compose"
     fi
+    if [ -f "$ENV_FILE" ]; then
+        compose_cmd="$compose_cmd --env-file $ENV_FILE"
+    fi
 
     # Check if CYROID is already running (check for env file + running containers from this project)
     if [ -f "$ENV_FILE" ]; then
@@ -2906,6 +2922,9 @@ management_menu() {
     local compose_cmd="docker compose"
     if ! docker compose version &> /dev/null 2>&1; then
         compose_cmd="docker-compose"
+    fi
+    if [ -f "$ENV_FILE" ]; then
+        compose_cmd="$compose_cmd --env-file $ENV_FILE"
     fi
 
     while true; do
@@ -3663,6 +3682,9 @@ do_update() {
     if ! docker compose version &> /dev/null 2>&1; then
         compose_cmd="docker-compose"
     fi
+    if [ -f "$ENV_FILE" ]; then
+        compose_cmd="$compose_cmd --env-file $ENV_FILE"
+    fi
 
     # Pull images
     tui_info "Pulling Docker images for $DOCKER_PLATFORM..."
@@ -3716,6 +3738,9 @@ do_start() {
     if ! docker compose version &> /dev/null 2>&1; then
         compose_cmd="docker-compose"
     fi
+    if [ -f "$ENV_FILE" ]; then
+        compose_cmd="$compose_cmd --env-file $ENV_FILE"
+    fi
 
     tui_info "Starting CYROID services..."
     $compose_cmd -f docker-compose.yml -f docker-compose.prod.yml up -d 2>&1 || true
@@ -3751,6 +3776,9 @@ do_stop() {
     local compose_cmd="docker compose"
     if ! docker compose version &> /dev/null 2>&1; then
         compose_cmd="docker-compose"
+    fi
+    if [ -f "$ENV_FILE" ]; then
+        compose_cmd="$compose_cmd --env-file $ENV_FILE"
     fi
 
     # Check if anything is running
