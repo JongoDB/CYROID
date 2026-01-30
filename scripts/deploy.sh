@@ -959,28 +959,17 @@ REGISTRY_URL="http://127.0.0.1:5000"
 
 # Progress bar state
 PROGRESS_BAR_ACTIVE=false
-PROGRESS_SAVED_POS=""
 
-# Initialize bottom progress bar
+# Initialize progress bar
 progress_bar_init() {
     if [ "$USE_TUI" != true ]; then
         return
     fi
-
     PROGRESS_BAR_ACTIVE=true
-
-    # Get terminal height
-    local term_height=$(tput lines 2>/dev/null || echo 24)
-
-    # Reserve bottom 2 lines for progress bar
-    echo ""
-    echo ""
-
-    # Hide cursor during progress
-    tput civis 2>/dev/null || true
+    tput civis 2>/dev/null || true  # Hide cursor
 }
 
-# Update bottom progress bar
+# Update and draw progress bar at bottom of screen
 # Usage: progress_bar_update current total "Operation" "detail"
 progress_bar_update() {
     local current="${1:-0}"
@@ -988,7 +977,7 @@ progress_bar_update() {
     local operation="${3:-Working}"
     local detail="${4:-}"
 
-    if [ "$USE_TUI" != true ]; then
+    if [ "$PROGRESS_BAR_ACTIVE" != true ]; then
         return
     fi
 
@@ -997,12 +986,12 @@ progress_bar_update() {
 
     # Calculate percentage
     local percent=0
-    if [ "$total" -gt 0 ]; then
+    if [ "$total" -gt 0 ] 2>/dev/null; then
         percent=$((current * 100 / total))
     fi
 
-    # Build progress bar (width = 30 chars)
-    local bar_width=30
+    # Build progress bar - fixed width of 20
+    local bar_width=20
     local filled=$((percent * bar_width / 100))
     local empty=$((bar_width - filled))
 
@@ -1010,38 +999,33 @@ progress_bar_update() {
     for ((i=0; i<filled; i++)); do bar+="█"; done
     for ((i=0; i<empty; i++)); do bar+="░"; done
 
-    # Build status line
-    local status_line="  ${CYAN}${operation}${NC} [${GREEN}${bar}${NC}] ${percent}% (${current}/${total})"
-
-    # Build detail line (truncate if needed)
-    local detail_line=""
+    # Build the status line
+    local info=""
     if [ -n "$detail" ]; then
-        local max_detail=$((term_width - 4))
-        if [ ${#detail} -gt $max_detail ]; then
-            detail="${detail:0:$((max_detail - 3))}..."
-        fi
-        detail_line="  ${YELLOW}→${NC} ${detail}"
+        info="${operation}: ${detail}"
+    else
+        info="${operation}"
     fi
 
-    # Save cursor position
+    # Truncate info if needed
+    local max_info=$((term_width - 35))
+    if [ ${#info} -gt $max_info ] && [ $max_info -gt 3 ]; then
+        info="${info:0:$((max_info - 3))}..."
+    fi
+
+    # Save cursor, move to bottom, draw, restore cursor
     tput sc 2>/dev/null || true
-
-    # Move to bottom of screen and draw
-    tput cup $((term_height - 2)) 0 2>/dev/null || true
-    # Clear line and draw status
-    printf "\033[2K%s" "$status_line"
-
     tput cup $((term_height - 1)) 0 2>/dev/null || true
-    # Clear line and draw detail
-    printf "\033[2K%s" "$detail_line"
 
-    # Restore cursor position
+    # Clear line and draw progress bar
+    echo -ne "\033[2K ${GREEN}${bar}${NC} ${percent}% │ ${CYAN}${info}${NC}"
+
     tput rc 2>/dev/null || true
 }
 
 # Clean up progress bar
 progress_bar_cleanup() {
-    if [ "$USE_TUI" != true ]; then
+    if [ "$PROGRESS_BAR_ACTIVE" != true ]; then
         return
     fi
 
@@ -1049,17 +1033,11 @@ progress_bar_cleanup() {
 
     local term_height=$(tput lines 2>/dev/null || echo 24)
 
-    # Clear bottom lines
-    tput cup $((term_height - 2)) 0 2>/dev/null || true
-    printf "\033[2K"
+    # Clear the progress bar line
     tput cup $((term_height - 1)) 0 2>/dev/null || true
-    printf "\033[2K"
+    echo -ne "\033[2K"
 
-    # Show cursor
-    tput cnorm 2>/dev/null || true
-
-    # Move cursor back up
-    tput cup $((term_height - 3)) 0 2>/dev/null || true
+    tput cnorm 2>/dev/null || true  # Show cursor
 }
 
 # Get list of images from CYROID registry
@@ -1224,7 +1202,7 @@ backup_images() {
 
             # First pull from registry to ensure we have it locally
             if ! docker pull "$img" >/dev/null 2>&1; then
-                echo "    ${RED}✗${NC} Failed to pull from registry"
+                echo -e "    ${RED}✗${NC} Failed to pull from registry"
                 failed=$((failed + 1))
                 continue
             fi
@@ -1238,10 +1216,10 @@ backup_images() {
 
                 gzip -f "$tar_file" 2>/dev/null || true
                 local size=$(du -h "${tar_file}.gz" 2>/dev/null | cut -f1) || size="?"
-                echo "    ${GREEN}✓${NC} ${safe_name}.tar.gz ($size)"
+                echo -e "    ${GREEN}✓${NC} ${safe_name}.tar.gz ($size)"
                 echo "$img|${safe_name}.tar.gz" >> "$backup_path/manifest.txt"
             else
-                echo "    ${RED}✗${NC} FAILED to save"
+                echo -e "    ${RED}✗${NC} FAILED to save"
                 failed=$((failed + 1))
             fi
         fi
@@ -1427,7 +1405,7 @@ restore_images() {
 
             if [ -z "$tar_filename" ]; then
                 echo "  [$current/$image_count] $img"
-                echo "    ${RED}✗${NC} NOT FOUND in manifest"
+                echo -e "    ${RED}✗${NC} NOT FOUND in manifest"
                 failed=$((failed + 1))
                 continue
             fi
@@ -1436,7 +1414,7 @@ restore_images() {
 
             if [ ! -f "$tar_file" ]; then
                 echo "  [$current/$image_count] $img"
-                echo "    ${RED}✗${NC} FILE NOT FOUND: $tar_filename"
+                echo -e "    ${RED}✗${NC} FILE NOT FOUND: $tar_filename"
                 failed=$((failed + 1))
                 continue
             fi
@@ -1449,10 +1427,10 @@ restore_images() {
             progress_bar_update "$current" "$image_count" "Restore" "Loading: $img"
 
             if gunzip -c "$tar_file" | docker load >/dev/null 2>&1; then
-                echo "    ${GREEN}✓${NC} Loaded"
+                echo -e "    ${GREEN}✓${NC} Loaded"
                 echo "$img" >> /tmp/cyroid_restored_images.txt
             else
-                echo "    ${RED}✗${NC} FAILED to load"
+                echo -e "    ${RED}✗${NC} FAILED to load"
                 failed=$((failed + 1))
             fi
         fi
@@ -1553,9 +1531,9 @@ push_restored_to_registry() {
             echo "  [$current/$total] $img"
 
             if docker push "$img" >/dev/null 2>&1; then
-                echo "    ${GREEN}✓${NC} Pushed"
+                echo -e "    ${GREEN}✓${NC} Pushed"
             else
-                echo "    ${RED}✗${NC} FAILED (check if registry is running)"
+                echo -e "    ${RED}✗${NC} FAILED (check if registry is running)"
                 failed=$((failed + 1))
             fi
         fi
@@ -2423,11 +2401,6 @@ pull_images() {
         echo ""
         tui_info "Pulling $total images:"
 
-        # Initialize progress bar
-        if [ "$TUI_FULLSCREEN" != true ]; then
-            progress_bar_init
-        fi
-
         local current=0
         # Store images to temp file for reliable iteration
         local temp_images="/tmp/cyroid_pull_images_$$"
@@ -2448,19 +2421,13 @@ pull_images() {
 
             # Pull individual image
             if docker pull "$img" >/dev/null 2>&1; then
-                echo "    ${GREEN}✓${NC} Pulled"
+                echo -e "    ${GREEN}✓${NC} Pulled"
             else
-                echo "    ${YELLOW}⚠${NC} May already exist locally"
+                echo -e "    ${YELLOW}⚠${NC} May already exist locally"
             fi
         done < "$temp_images"
 
         rm -f "$temp_images"
-
-        # Clean up progress bar
-        if [ "$TUI_FULLSCREEN" != true ]; then
-            progress_bar_cleanup
-        fi
-
         echo ""
     else
         # Fallback to compose pull if we can't parse images
@@ -2497,11 +2464,6 @@ wait_for_health() {
     local attempt=0
     local target_healthy=3  # Minimum healthy services needed
 
-    # Initialize progress bar for health check
-    if [ "$TUI_FULLSCREEN" != true ]; then
-        progress_bar_init
-    fi
-
     while [ $attempt -lt $max_attempts ]; do
         local healthy_count=$(docker_compose_cmd -f docker-compose.yml -f docker-compose.prod.yml ps 2>/dev/null | grep -c "(healthy)" || echo "0")
         local running_count=$(docker_compose_cmd -f docker-compose.yml -f docker-compose.prod.yml ps 2>/dev/null | grep -c "Up" || echo "0")
@@ -2514,9 +2476,6 @@ wait_for_health() {
         fi
 
         if [ "$healthy_count" -ge "$target_healthy" ]; then
-            if [ "$TUI_FULLSCREEN" != true ]; then
-                progress_bar_cleanup
-            fi
             tui_set_status "All services healthy!" "success"
             tui_success "All services are healthy!"
             return 0
@@ -2531,10 +2490,6 @@ wait_for_health() {
 
         sleep 2
     done
-
-    if [ "$TUI_FULLSCREEN" != true ]; then
-        progress_bar_cleanup
-    fi
 
     echo ""
     tui_set_status "Some services may not be healthy" "warn"
