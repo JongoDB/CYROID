@@ -204,6 +204,8 @@ class BlueprintImportResult(BaseModel):
     templates_created: List[str] = []  # Deprecated
     templates_skipped: List[str] = []  # Deprecated
     images_built: List[str] = []
+    images_loaded: List[str] = []  # Images loaded from tar and pushed to registry
+    images_skipped: List[str] = []  # Images already in registry (skipped)
     dockerfiles_extracted: List[str] = []
     dockerfiles_skipped: List[str] = []
     content_imported: bool = False
