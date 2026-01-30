@@ -59,8 +59,8 @@ services:
       - ./traefik/dynamic:/app/traefik/dynamic
     restart: always
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:8000/health"]
-      interval: 30s
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=5)\" || exit 1"]
+      interval: 10s
       timeout: 10s
       retries: 3
       start_period: 30s
@@ -93,8 +93,8 @@ services:
       - ./traefik/dynamic:/app/traefik/dynamic
     restart: always
     healthcheck:
-      test: ["CMD-SHELL", "pgrep -f dramatiq || exit 1"]
-      interval: 30s
+      test: ["CMD-SHELL", "python -c \"import os; exit(0 if any('dramatiq' in open(f'/proc/{p}/cmdline').read() for p in os.listdir('/proc') if p.isdigit() and os.path.exists(f'/proc/{p}/cmdline')) else 1)\""]
+      interval: 10s
       timeout: 10s
       retries: 3
       start_period: 30s
