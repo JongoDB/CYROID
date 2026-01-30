@@ -1675,7 +1675,7 @@ management_menu() {
                     # List running containers
                     local containers=$($compose_cmd -f docker-compose.yml -f docker-compose.prod.yml ps --format "{{.Names}}" 2>/dev/null) || true
                     if [ -n "$containers" ]; then
-                        echo "  Containers:"
+                        echo "  CYROID Services:"
                         echo "$containers" | while read -r c; do echo "    - $c"; done
                         echo ""
                     fi
@@ -1685,6 +1685,26 @@ management_menu() {
                     if [ -n "$volumes" ]; then
                         echo "  Docker volumes:"
                         echo "$volumes" | while read -r v; do echo "    - $v"; done
+                        echo ""
+                    fi
+
+                    # Detect deployed ranges (DinD containers and range networks)
+                    local range_containers=$(docker ps -a --filter "label=cyroid.type=dind" --format "{{.Names}}" 2>/dev/null) || true
+                    local range_networks=$(docker network ls --filter "name=range-" --format "{{.Name}}" 2>/dev/null) || true
+                    local cyroid_networks=$(docker network ls --filter "name=cyroid-" --format "{{.Name}}" 2>/dev/null) || true
+
+                    local has_ranges=false
+                    if [ -n "$range_containers" ] || [ -n "$range_networks" ]; then
+                        has_ranges=true
+                        echo "  Deployed Ranges detected:"
+                        if [ -n "$range_containers" ]; then
+                            local range_count=$(echo "$range_containers" | wc -l | tr -d ' ')
+                            echo "    - $range_count range container(s)"
+                        fi
+                        if [ -n "$range_networks" ]; then
+                            local net_count=$(echo "$range_networks" | wc -l | tr -d ' ')
+                            echo "    - $net_count range network(s)"
+                        fi
                         echo ""
                     fi
 
@@ -1709,10 +1729,74 @@ management_menu() {
                     fi
                     echo ""
 
+                    # Ask about ranges if they exist
+                    local delete_ranges=false
+                    if [ "$has_ranges" = true ]; then
+                        echo ""
+                        if gum confirm --affirmative="Yes, delete ranges too" --negative="Keep ranges" "Also delete all deployed ranges and their networks?"; then
+                            delete_ranges=true
+                            tui_warn "Ranges will also be deleted!"
+                        else
+                            tui_info "Ranges will be preserved"
+                        fi
+                        echo ""
+                    fi
+
                     if gum confirm --affirmative="Yes, delete everything" --negative="Cancel" "Are you sure? This cannot be undone."; then
-                        tui_info "Stopping services..."
+                        # Delete ranges first if requested
+                        if [ "$delete_ranges" = true ]; then
+                            tui_info "Stopping and removing deployed ranges..."
+
+                            # Stop and remove range containers (DinD)
+                            if [ -n "$range_containers" ]; then
+                                echo "$range_containers" | while read -r container; do
+                                    if [ -n "$container" ]; then
+                                        tui_info "  Removing range: $container"
+                                        docker stop "$container" 2>/dev/null || true
+                                        docker rm -f "$container" 2>/dev/null || true
+                                    fi
+                                done
+                            fi
+
+                            # Also catch any dind- prefixed containers
+                            local dind_containers=$(docker ps -a --filter "name=dind-" --format "{{.Names}}" 2>/dev/null) || true
+                            if [ -n "$dind_containers" ]; then
+                                echo "$dind_containers" | while read -r container; do
+                                    if [ -n "$container" ]; then
+                                        tui_info "  Removing DinD container: $container"
+                                        docker stop "$container" 2>/dev/null || true
+                                        docker rm -f "$container" 2>/dev/null || true
+                                    fi
+                                done
+                            fi
+
+                            # Remove range networks
+                            if [ -n "$range_networks" ]; then
+                                echo "$range_networks" | while read -r network; do
+                                    if [ -n "$network" ]; then
+                                        tui_info "  Removing network: $network"
+                                        docker network rm "$network" 2>/dev/null || true
+                                    fi
+                                done
+                            fi
+
+                            tui_success "Deployed ranges removed"
+                        fi
+
+                        tui_info "Stopping CYROID services..."
                         $compose_cmd -f docker-compose.yml -f docker-compose.prod.yml down -v
                         tui_success "Services stopped and volumes removed"
+
+                        # Remove CYROID management networks
+                        if [ -n "$cyroid_networks" ]; then
+                            tui_info "Removing CYROID networks..."
+                            echo "$cyroid_networks" | while read -r network; do
+                                if [ -n "$network" ]; then
+                                    docker network rm "$network" 2>/dev/null || true
+                                fi
+                            done
+                            tui_success "CYROID networks removed"
+                        fi
 
                         if [ -n "$DATA_DIR" ] && [ -d "$DATA_DIR" ]; then
                             tui_info "Removing data directory: $DATA_DIR"
@@ -1789,7 +1873,7 @@ management_menu() {
                     # List containers
                     local containers=$($compose_cmd -f docker-compose.yml -f docker-compose.prod.yml ps --format "{{.Names}}" 2>/dev/null) || true
                     if [ -n "$containers" ]; then
-                        echo "  Containers:"
+                        echo "  CYROID Services:"
                         echo "$containers" | while read -r c; do echo "    - $c"; done
                         echo ""
                     fi
@@ -1799,6 +1883,26 @@ management_menu() {
                     if [ -n "$volumes" ]; then
                         echo "  Docker volumes:"
                         echo "$volumes" | while read -r v; do echo "    - $v"; done
+                        echo ""
+                    fi
+
+                    # Detect deployed ranges
+                    local range_containers=$(docker ps -a --filter "label=cyroid.type=dind" --format "{{.Names}}" 2>/dev/null) || true
+                    local range_networks=$(docker network ls --filter "name=range-" --format "{{.Name}}" 2>/dev/null) || true
+                    local cyroid_networks=$(docker network ls --filter "name=cyroid-" --format "{{.Name}}" 2>/dev/null) || true
+
+                    local has_ranges=false
+                    if [ -n "$range_containers" ] || [ -n "$range_networks" ]; then
+                        has_ranges=true
+                        echo "  Deployed Ranges detected:"
+                        if [ -n "$range_containers" ]; then
+                            local range_count=$(echo "$range_containers" | wc -l | tr -d ' ')
+                            echo "    - $range_count range container(s)"
+                        fi
+                        if [ -n "$range_networks" ]; then
+                            local net_count=$(echo "$range_networks" | wc -l | tr -d ' ')
+                            echo "    - $net_count range network(s)"
+                        fi
                         echo ""
                     fi
 
@@ -1817,9 +1921,57 @@ management_menu() {
                     [ -d "$PROJECT_ROOT/traefik/certs" ] && echo "    - $PROJECT_ROOT/traefik/certs/"
                     echo ""
 
+                    # Ask about ranges
+                    local delete_ranges=false
+                    if [ "$has_ranges" = true ]; then
+                        read -p "Also delete all deployed ranges? [y/N]: " range_confirm
+                        if [[ "$range_confirm" =~ ^[Yy] ]]; then
+                            delete_ranges=true
+                            echo "Ranges will also be deleted."
+                        fi
+                        echo ""
+                    fi
+
                     read -p "Type 'DELETE' to confirm: " confirm
                     if [ "$confirm" = "DELETE" ]; then
+                        # Delete ranges first if requested
+                        if [ "$delete_ranges" = true ]; then
+                            echo "Removing deployed ranges..."
+
+                            # Stop and remove range containers
+                            if [ -n "$range_containers" ]; then
+                                echo "$range_containers" | while read -r container; do
+                                    [ -n "$container" ] && docker rm -f "$container" 2>/dev/null || true
+                                done
+                            fi
+
+                            # Also catch dind- prefixed containers
+                            local dind_containers=$(docker ps -a --filter "name=dind-" --format "{{.Names}}" 2>/dev/null) || true
+                            if [ -n "$dind_containers" ]; then
+                                echo "$dind_containers" | while read -r container; do
+                                    [ -n "$container" ] && docker rm -f "$container" 2>/dev/null || true
+                                done
+                            fi
+
+                            # Remove range networks
+                            if [ -n "$range_networks" ]; then
+                                echo "$range_networks" | while read -r network; do
+                                    [ -n "$network" ] && docker network rm "$network" 2>/dev/null || true
+                                done
+                            fi
+
+                            echo "Ranges removed"
+                        fi
+
                         $compose_cmd -f docker-compose.yml -f docker-compose.prod.yml down -v
+
+                        # Remove CYROID networks
+                        if [ -n "$cyroid_networks" ]; then
+                            echo "$cyroid_networks" | while read -r network; do
+                                [ -n "$network" ] && docker network rm "$network" 2>/dev/null || true
+                            done
+                        fi
+
                         if [ -n "$DATA_DIR" ] && [ -d "$DATA_DIR" ]; then
                             rm -rf "$DATA_DIR" 2>/dev/null || sudo rm -rf "$DATA_DIR"
                         fi
