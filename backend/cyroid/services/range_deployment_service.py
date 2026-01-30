@@ -28,6 +28,8 @@ from cyroid.services.event_service import EventService
 from cyroid.services.dind_service import DinDService, get_dind_service
 from cyroid.services.docker_service import DockerService, get_docker_service
 from cyroid.services.traefik_route_service import get_traefik_route_service
+from cyroid.services.notification_service import notify_range_users
+from cyroid.models.notification import NotificationType, NotificationSeverity
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -328,12 +330,34 @@ class RangeDeploymentService:
                         )
 
             try:
-                await self.docker_service.pull_image_to_dind(
+                pull_result = await self.docker_service.pull_image_to_dind(
                     range_id=range_id,
                     docker_url=docker_url,
                     image=image,
                     progress_callback=image_progress_callback,
                 )
+
+                # Notify users if image was pulled from internet (not from local registry)
+                if pull_result["source"] == "internet":
+                    event_service.log_event(
+                        range_id=range_uuid,
+                        event_type=EventType.DEPLOYMENT_STEP,
+                        message=f"WARNING: Image {image} pulled from internet (not from local registry)",
+                    )
+                    cache_msg = (
+                        "Cached to registry for future deployments."
+                        if pull_result["cached_to_registry"]
+                        else "Failed to cache - future deployments may also pull from internet."
+                    )
+                    notify_range_users(
+                        db=db,
+                        range_id=range_uuid,
+                        title="Image Pulled from Internet",
+                        message=f"Image {image} was pulled from the internet (not cached locally). {cache_msg}",
+                        notification_type=NotificationType.SYSTEM_ALERT,
+                        severity=NotificationSeverity.WARNING,
+                    )
+
                 event_service.log_event(
                     range_id=range_uuid,
                     event_type=EventType.DEPLOYMENT_STEP,
@@ -837,7 +861,25 @@ class RangeDeploymentService:
         # Pull images into DinD
         for image in unique_images:
             logger.info(f"Pulling image {image} into DinD for sync")
-            await self.docker_service.pull_image_to_dind(range_id_str, docker_url, image)
+            pull_result = await self.docker_service.pull_image_to_dind(range_id_str, docker_url, image)
+
+            # Notify users if image was pulled from internet (not from local registry)
+            if pull_result["source"] == "internet":
+                logger.warning(f"Image {image} pulled from internet (not from local registry) during sync")
+                cache_msg = (
+                    "Cached to registry for future deployments."
+                    if pull_result["cached_to_registry"]
+                    else "Failed to cache - future deployments may also pull from internet."
+                )
+                notify_range_users(
+                    db=db,
+                    range_id=range_id,
+                    title="Image Pulled from Internet",
+                    message=f"Image {image} was pulled from the internet (not cached locally). {cache_msg}",
+                    notification_type=NotificationType.SYSTEM_ALERT,
+                    severity=NotificationSeverity.WARNING,
+                )
+
             result["images_pulled"] += 1
 
         # 3. Create new VMs
