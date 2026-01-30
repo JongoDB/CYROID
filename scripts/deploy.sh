@@ -47,7 +47,21 @@ BOLD='\033[1m'
 # Handle both normal execution and piped execution (curl | bash)
 if [ -n "${BASH_SOURCE[0]}" ] && [ "${BASH_SOURCE[0]}" != "/dev/stdin" ] && [ -f "${BASH_SOURCE[0]}" ]; then
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+
+    # Check if script is in a "scripts/" subdirectory (standard repo layout)
+    PARENT_DIR="$(dirname "$SCRIPT_DIR")"
+    SCRIPT_BASENAME="$(basename "$SCRIPT_DIR")"
+
+    if [ "$SCRIPT_BASENAME" = "scripts" ] && [ -f "$PARENT_DIR/docker-compose.yml" ]; then
+        # Script is at PROJECT_ROOT/scripts/deploy.sh
+        PROJECT_ROOT="$PARENT_DIR"
+    elif [ -f "$SCRIPT_DIR/docker-compose.yml" ]; then
+        # Script is at PROJECT_ROOT/deploy.sh (same dir has docker-compose.yml)
+        PROJECT_ROOT="$SCRIPT_DIR"
+    else
+        # Standalone mode - script dir becomes project root, will bootstrap files
+        PROJECT_ROOT="$SCRIPT_DIR"
+    fi
 else
     # Running via curl | bash or similar - use current directory or home
     if [ -f "./docker-compose.yml" ]; then
@@ -67,6 +81,11 @@ SSL_MODE=""
 VERSION="latest"
 ACTION="deploy"
 DATA_DIR=""  # Set after OS detection
+
+# Admin user credentials (set during create_initial_admin)
+ADMIN_USERNAME=""
+ADMIN_EMAIL=""
+ADMIN_PASSWORD=""
 
 # GitHub repository for downloading files
 GITHUB_REPO="JongoDB/CYROID"
@@ -225,38 +244,155 @@ generate_secret() {
 
 USE_TUI=true
 
+# Auto-install gum (TUI tool) on macOS and Linux
+install_gum() {
+    local arch
+    local os
+    local gum_version="0.14.5"
+    local download_url
+    local tmp_dir
+
+    # Detect architecture
+    case "$(uname -m)" in
+        x86_64|amd64) arch="x86_64" ;;
+        arm64|aarch64) arch="arm64" ;;
+        armv7l) arch="armv7" ;;
+        *)
+            echo -e "${RED}Unsupported architecture: $(uname -m)${NC}"
+            return 1
+            ;;
+    esac
+
+    # Detect OS
+    case "$(uname -s)" in
+        Darwin) os="Darwin" ;;
+        Linux) os="Linux" ;;
+        *)
+            echo -e "${RED}Unsupported OS: $(uname -s)${NC}"
+            return 1
+            ;;
+    esac
+
+    download_url="https://github.com/charmbracelet/gum/releases/download/v${gum_version}/gum_${gum_version}_${os}_${arch}.tar.gz"
+    tmp_dir=$(mktemp -d)
+
+    echo -e "${CYAN}Downloading gum v${gum_version} for ${os}/${arch}...${NC}"
+
+    if command -v curl &> /dev/null; then
+        curl -fsSL "$download_url" -o "$tmp_dir/gum.tar.gz" || return 1
+    elif command -v wget &> /dev/null; then
+        wget -q "$download_url" -O "$tmp_dir/gum.tar.gz" || return 1
+    else
+        echo -e "${RED}Neither curl nor wget found${NC}"
+        return 1
+    fi
+
+    # Extract and install
+    tar -xzf "$tmp_dir/gum.tar.gz" -C "$tmp_dir" || return 1
+
+    # Try to install to /usr/local/bin, fall back to ~/.local/bin
+    if [ -w /usr/local/bin ]; then
+        mv "$tmp_dir/gum" /usr/local/bin/gum
+        chmod +x /usr/local/bin/gum
+    elif [ -w ~/.local/bin ]; then
+        mkdir -p ~/.local/bin
+        mv "$tmp_dir/gum" ~/.local/bin/gum
+        chmod +x ~/.local/bin/gum
+        export PATH="$HOME/.local/bin:$PATH"
+    else
+        # Try with sudo
+        echo -e "${YELLOW}Installing gum requires sudo access...${NC}"
+        sudo mv "$tmp_dir/gum" /usr/local/bin/gum
+        sudo chmod +x /usr/local/bin/gum
+    fi
+
+    rm -rf "$tmp_dir"
+
+    if command -v gum &> /dev/null; then
+        echo -e "${GREEN}gum installed successfully${NC}"
+        return 0
+    else
+        return 1
+    fi
+}
+
 check_gum() {
     if command -v gum &> /dev/null; then
         return 0
     fi
 
-    echo -e "${YELLOW}The TUI requires 'gum' to be installed.${NC}"
-    echo ""
+    echo -e "${YELLOW}Installing 'gum' for beautiful terminal interfaces...${NC}"
 
     detect_os
+
+    # Try package manager first (preferred for updates)
+    local installed=false
+
     if [ "$OS_TYPE" = "macos" ]; then
-        echo "Install with: brew install gum"
-        read -p "Install gum now? [Y/n]: " install_choice
-        if [[ ! "$install_choice" =~ ^[Nn] ]]; then
-            if command -v brew &> /dev/null; then
-                brew install gum
-                return 0
-            else
-                echo -e "${RED}Homebrew not found. Install from: https://brew.sh${NC}"
+        if command -v brew &> /dev/null; then
+            echo -e "${CYAN}Installing via Homebrew...${NC}"
+            if brew install gum 2>/dev/null; then
+                installed=true
             fi
         fi
     else
-        echo "Install with your package manager:"
-        echo "  Ubuntu/Debian: sudo apt install gum"
-        echo "  Fedora: sudo dnf install gum"
-        echo "  Arch: sudo pacman -S gum"
-        echo "  Or: go install github.com/charmbracelet/gum@latest"
-        read -p "Continue without TUI? [Y/n]: " continue_choice
-        if [[ "$continue_choice" =~ ^[Nn] ]]; then
-            exit 1
+        # Linux - try various package managers
+        if command -v apt-get &> /dev/null; then
+            # Debian/Ubuntu - add charm repo if needed
+            if ! apt-cache show gum &> /dev/null 2>&1; then
+                echo -e "${CYAN}Adding Charm repository...${NC}"
+                sudo mkdir -p /etc/apt/keyrings
+                curl -fsSL https://repo.charm.sh/apt/gpg.key | sudo gpg --dearmor -o /etc/apt/keyrings/charm.gpg 2>/dev/null || true
+                echo "deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ * *" | sudo tee /etc/apt/sources.list.d/charm.list > /dev/null
+                sudo apt-get update -qq 2>/dev/null || true
+            fi
+            echo -e "${CYAN}Installing via apt...${NC}"
+            if sudo apt-get install -y gum 2>/dev/null; then
+                installed=true
+            fi
+        elif command -v dnf &> /dev/null; then
+            echo -e "${CYAN}Installing via dnf...${NC}"
+            if sudo dnf install -y gum 2>/dev/null; then
+                installed=true
+            fi
+        elif command -v yum &> /dev/null; then
+            echo -e "${CYAN}Installing via yum...${NC}"
+            if sudo yum install -y gum 2>/dev/null; then
+                installed=true
+            fi
+        elif command -v pacman &> /dev/null; then
+            echo -e "${CYAN}Installing via pacman...${NC}"
+            if sudo pacman -S --noconfirm gum 2>/dev/null; then
+                installed=true
+            fi
+        elif command -v zypper &> /dev/null; then
+            echo -e "${CYAN}Installing via zypper...${NC}"
+            if sudo zypper install -y gum 2>/dev/null; then
+                installed=true
+            fi
+        elif command -v apk &> /dev/null; then
+            echo -e "${CYAN}Installing via apk...${NC}"
+            if sudo apk add gum 2>/dev/null; then
+                installed=true
+            fi
         fi
     fi
 
+    # If package manager failed, try direct binary download
+    if [ "$installed" = false ]; then
+        echo -e "${YELLOW}Package manager install failed, trying direct download...${NC}"
+        if install_gum; then
+            installed=true
+        fi
+    fi
+
+    # Final check
+    if command -v gum &> /dev/null; then
+        return 0
+    fi
+
+    # All install methods failed - fall back to non-TUI mode
+    echo -e "${YELLOW}Could not install gum. Continuing without TUI...${NC}"
     USE_TUI=false
     return 1
 }
@@ -581,6 +717,8 @@ check_docker() {
         fi
         exit 1
     fi
+
+    return 0
 }
 
 check_ports() {
@@ -591,17 +729,21 @@ check_ports() {
     # Check if port 80 is in use (skip if we're updating an existing deployment)
     if [ "$ACTION" != "update" ]; then
         # Try to identify what's using the ports
+        # Check for processes LISTENING on ports (not outbound connections)
         if command -v lsof &> /dev/null; then
-            port80_proc=$(lsof -i :80 -t 2>/dev/null | head -1)
-            port443_proc=$(lsof -i :443 -t 2>/dev/null | head -1)
-            [ -n "$port80_proc" ] && ports_in_use="80 $ports_in_use"
-            [ -n "$port443_proc" ] && ports_in_use="443 $ports_in_use"
+            # -sTCP:LISTEN filters to only listening sockets
+            port80_proc=$(lsof -iTCP:80 -sTCP:LISTEN -t 2>/dev/null | head -1) || true
+            port443_proc=$(lsof -iTCP:443 -sTCP:LISTEN -t 2>/dev/null | head -1) || true
+            if [ -n "$port80_proc" ]; then ports_in_use="80 $ports_in_use"; fi
+            if [ -n "$port443_proc" ]; then ports_in_use="443 $ports_in_use"; fi
         elif command -v ss &> /dev/null; then
-            ss -tuln | grep -q ':80 ' && ports_in_use="80 $ports_in_use"
-            ss -tuln | grep -q ':443 ' && ports_in_use="443 $ports_in_use"
+            # ss -tuln shows only listening sockets
+            if ss -tuln | grep -q ':80 '; then ports_in_use="80 $ports_in_use"; fi
+            if ss -tuln | grep -q ':443 '; then ports_in_use="443 $ports_in_use"; fi
         elif command -v netstat &> /dev/null; then
-            netstat -tuln 2>/dev/null | grep -q ':80 ' && ports_in_use="80 $ports_in_use"
-            netstat -tuln 2>/dev/null | grep -q ':443 ' && ports_in_use="443 $ports_in_use"
+            # netstat -tuln shows only listening sockets
+            if netstat -tuln 2>/dev/null | grep -q ':80 '; then ports_in_use="80 $ports_in_use"; fi
+            if netstat -tuln 2>/dev/null | grep -q ':443 '; then ports_in_use="443 $ports_in_use"; fi
         fi
 
         if [ -n "$ports_in_use" ]; then
@@ -636,7 +778,7 @@ check_ports() {
                 fi
             else
                 # Offer to show what to do
-                if [ "$USE_TUI" = true ] && command -v gum &> /dev/null; then
+                if [ "$USE_TUI" = true ] && command -v gum &> /dev/null && [ -t 0 ]; then
                     local choice
                     choice=$(gum choose --header "What would you like to do?" \
                         "Continue anyway (may fail)" \
@@ -674,7 +816,8 @@ check_ports() {
                         echo "To free up ports, try:"
                         echo "  sudo systemctl stop apache2"
                         echo "  sudo systemctl stop nginx"
-                        [ -n "$port80_proc" ] && echo "  sudo kill $port80_proc"
+                        if [ -n "$port80_proc" ]; then echo "  sudo kill $port80_proc"; fi
+                        if [ -n "$port443_proc" ]; then echo "  sudo kill $port443_proc"; fi
                         exit 1
                     fi
                 fi
@@ -683,6 +826,8 @@ check_ports() {
             tui_success "Ports 80 and 443 are available"
         fi
     fi
+
+    return 0
 }
 
 check_data_dir_writable() {
@@ -783,6 +928,7 @@ detect_os() {
         Darwin*)    OS_TYPE="macos" ;;
         *)          OS_TYPE="unknown" ;;
     esac
+    return 0
 }
 
 get_default_data_dir() {
@@ -1105,13 +1251,40 @@ pull_images() {
     cd "$PROJECT_ROOT"
 
     # Export env vars for docker-compose
-    export $(grep -v '^#' "$ENV_FILE" | xargs)
+    export $(grep -v '^#' "$ENV_FILE" | xargs) 2>/dev/null || true
 
-    if [ "$USE_TUI" = true ] && command -v gum &> /dev/null; then
-        gum spin --spinner dot --title "Pulling Docker images..." -- \
-            docker_compose_cmd -f docker-compose.yml -f docker-compose.prod.yml pull -q
+    # Determine docker compose command
+    local compose_cmd="docker compose"
+    if ! docker compose version &> /dev/null 2>&1; then
+        compose_cmd="docker-compose"
+    fi
+
+    # Get list of images to show what we're pulling
+    local images
+    images=$($compose_cmd -f docker-compose.yml -f docker-compose.prod.yml config 2>/dev/null | grep 'image:' | awk '{print $2}' | sort -u) || true
+
+    if [ -n "$images" ]; then
+        local total=$(echo "$images" | wc -l | tr -d ' ')
+        echo ""
+        tui_info "Pulling $total images:"
+        echo "$images" | while read -r img; do
+            local name=$(echo "$img" | sed 's/.*\///' | cut -d: -f1)
+            echo "  - $name"
+        done
+        echo ""
+    fi
+
+    # Pull with docker compose (more reliable, handles auth, shows progress)
+    if [ "$USE_TUI" = true ] && command -v gum &> /dev/null && [ -t 0 ]; then
+        # Use compose pull without -q to show progress, gum will capture it
+        $compose_cmd -f docker-compose.yml -f docker-compose.prod.yml pull 2>&1 | while read -r line; do
+            # Show pull progress
+            if echo "$line" | grep -q "Pull"; then
+                echo "  $line"
+            fi
+        done
     else
-        docker_compose_cmd -f docker-compose.yml -f docker-compose.prod.yml pull
+        $compose_cmd -f docker-compose.yml -f docker-compose.prod.yml pull
     fi
 }
 
@@ -1123,12 +1296,18 @@ start_services() {
     source "$ENV_FILE"
     set +a
 
-    if [ "$USE_TUI" = true ] && command -v gum &> /dev/null; then
-        gum spin --spinner dot --title "Starting services..." -- \
-            docker_compose_cmd -f docker-compose.yml -f docker-compose.prod.yml up -d
-    else
-        docker_compose_cmd -f docker-compose.yml -f docker-compose.prod.yml up -d
+    # Determine docker compose command
+    local compose_cmd="docker compose"
+    if ! docker compose version &> /dev/null 2>&1; then
+        compose_cmd="docker-compose"
     fi
+
+    # Start services (don't use gum spin - it can fail silently)
+    $compose_cmd -f docker-compose.yml -f docker-compose.prod.yml up -d 2>&1 | while read -r line; do
+        if [ -n "$line" ]; then
+            echo "  $line"
+        fi
+    done || true
 }
 
 wait_for_health() {
@@ -1161,6 +1340,92 @@ wait_for_health() {
     tui_info "View logs with: docker compose -f docker-compose.yml -f docker-compose.prod.yml logs -f"
 }
 
+create_initial_admin() {
+    # Create the initial admin user via API
+    local address="${DOMAIN:-$IP}"
+    local protocol="https"
+    local api_url="${protocol}://${address}/api/v1/auth/register"
+
+    # Default credentials
+    local default_username="admin"
+    local default_email="admin@cyroid.com"
+    local default_password="password"
+
+    echo ""
+    tui_title "Step 5: Initial Admin User"
+    echo ""
+
+    # TUI input with defaults pre-filled
+    local admin_username admin_email admin_password
+
+    if [ "$USE_TUI" = true ] && command -v gum &> /dev/null; then
+        admin_username=$(gum input --placeholder "admin" --value "$default_username" --header "Admin username:")
+        admin_email=$(gum input --placeholder "admin@cyroid.com" --value "$default_email" --header "Admin email:")
+        admin_password=$(gum input --placeholder "password" --value "$default_password" --password --header "Admin password:")
+    else
+        read -p "Admin username [$default_username]: " admin_username
+        admin_username="${admin_username:-$default_username}"
+        read -p "Admin email [$default_email]: " admin_email
+        admin_email="${admin_email:-$default_email}"
+        read -sp "Admin password [$default_password]: " admin_password
+        admin_password="${admin_password:-$default_password}"
+        echo ""
+    fi
+
+    # Use defaults if empty
+    admin_username="${admin_username:-$default_username}"
+    admin_email="${admin_email:-$default_email}"
+    admin_password="${admin_password:-$default_password}"
+
+    echo ""
+    tui_info "Creating admin user: $admin_username ($admin_email)"
+
+    # Wait a bit for API to be fully ready
+    sleep 3
+
+    # Call the register API (-k for self-signed certs)
+    local response
+    local http_code
+
+    if command -v curl &> /dev/null; then
+        response=$(curl -sk -w "\n%{http_code}" -X POST "$api_url" \
+            -H "Content-Type: application/json" \
+            -d "{\"username\":\"$admin_username\",\"email\":\"$admin_email\",\"password\":\"$admin_password\"}" 2>/dev/null)
+    elif command -v wget &> /dev/null; then
+        response=$(wget -qO- --no-check-certificate --post-data="{\"username\":\"$admin_username\",\"email\":\"$admin_email\",\"password\":\"$admin_password\"}" \
+            --header="Content-Type: application/json" "$api_url" 2>/dev/null)
+        http_code="200"
+    else
+        tui_warn "Neither curl nor wget available - skipping admin user creation"
+        tui_info "Register the first user through the web UI to become admin"
+        return 0
+    fi
+
+    # Parse response (last line is http code from curl)
+    if command -v curl &> /dev/null; then
+        http_code=$(echo "$response" | tail -n1)
+        response=$(echo "$response" | sed '$d')
+    fi
+
+    if [ "$http_code" = "201" ]; then
+        tui_success "Admin user '$admin_username' created successfully!"
+
+        # Store credentials for display
+        ADMIN_USERNAME="$admin_username"
+        ADMIN_EMAIL="$admin_email"
+        ADMIN_PASSWORD="$admin_password"
+    elif echo "$response" | grep -q "already registered"; then
+        tui_warn "User already exists - skipping admin creation"
+        tui_info "An admin user may have been created previously"
+    else
+        tui_warn "Could not create admin user automatically"
+        tui_info "Register through the web UI - first user becomes admin"
+        if [ -n "$response" ]; then
+            tui_info "API response: $response"
+        fi
+    fi
+}
+
 show_access_info() {
     local address="${DOMAIN:-$IP}"
     local protocol="https"
@@ -1171,9 +1436,21 @@ show_access_info() {
         local ssl_note=""
         if [ "$SSL_MODE" = "selfsigned" ]; then
             ssl_note="
+
 Note: Using self-signed certificate.
       Browser will show a security warning.
       Click 'Advanced' → 'Proceed' to continue."
+        fi
+
+        local login_info=""
+        if [ -n "$ADMIN_USERNAME" ]; then
+            login_info="Login credentials:
+  Username: $ADMIN_USERNAME
+  Password: $ADMIN_PASSWORD"
+        else
+            login_info="First login:
+  Register a new account
+  First user becomes admin"
         fi
 
         gum style \
@@ -1183,9 +1460,7 @@ Note: Using self-signed certificate.
 
 Access URL: ${protocol}://${address}
 
-First login:
-  Register a new account
-  First user becomes admin${ssl_note}"
+${login_info}${ssl_note}"
 
         echo ""
         gum style --foreground 245 "Useful commands:"
@@ -1201,8 +1476,14 @@ First login:
         echo -e "${GREEN}║${NC}                                                            ${GREEN}║${NC}"
         echo -e "${GREEN}║${NC}  ${CYAN}Access URL:${NC}  ${protocol}://${address}                  ${GREEN}║${NC}"
         echo -e "${GREEN}║${NC}                                                            ${GREEN}║${NC}"
+        if [ -n "$ADMIN_USERNAME" ]; then
+        echo -e "${GREEN}║${NC}  ${CYAN}Login credentials:${NC}                                      ${GREEN}║${NC}"
+        echo -e "${GREEN}║${NC}    Username: $ADMIN_USERNAME                                        ${GREEN}║${NC}"
+        echo -e "${GREEN}║${NC}    Password: $ADMIN_PASSWORD                                     ${GREEN}║${NC}"
+        else
         echo -e "${GREEN}║${NC}  ${CYAN}First login:${NC}                                           ${GREEN}║${NC}"
         echo -e "${GREEN}║${NC}    Register a new account - first user becomes admin      ${GREEN}║${NC}"
+        fi
         echo -e "${GREEN}║${NC}                                                            ${GREEN}║${NC}"
         if [ "$SSL_MODE" = "selfsigned" ]; then
         echo -e "${GREEN}║${NC}  ${YELLOW}Note:${NC} Using self-signed certificate.                    ${GREEN}║${NC}"
@@ -1222,6 +1503,46 @@ First login:
 }
 
 do_deploy() {
+    # Determine docker compose command
+    local compose_cmd="docker compose"
+    if ! docker compose version &> /dev/null 2>&1; then
+        compose_cmd="docker-compose"
+    fi
+
+    # Check if CYROID is already running (check for env file + running containers from this project)
+    if [ -f "$ENV_FILE" ]; then
+        # Load env first so compose can work
+        set -a
+        source "$ENV_FILE" 2>/dev/null || true
+        set +a
+
+        local running_containers=""
+        running_containers=$($compose_cmd -f docker-compose.yml -f docker-compose.prod.yml ps -q 2>/dev/null | head -1) || true
+
+        if [ -n "$running_containers" ]; then
+            tui_clear
+            tui_header
+
+            tui_success "CYROID is already running!"
+            echo ""
+
+            # Get address from env
+            local address="${DOMAIN:-$IP}"
+            if [ -n "$address" ]; then
+                tui_info "Access at: https://$address"
+            fi
+
+            # Go straight to management menu
+            if [ -t 0 ]; then
+                management_menu
+            else
+                tui_info "Use '$0 --stop' to stop services"
+                tui_info "Use '$0 --status' to check status"
+            fi
+            return 0
+        fi
+    fi
+
     # If interactive mode, TUI header shown in interactive_setup
     # Otherwise show banner now
     if [ -n "$DOMAIN" ] || [ -n "$IP" ]; then
@@ -1276,7 +1597,399 @@ do_deploy() {
     tui_success "Services started"
 
     wait_for_health
+
+    # Create initial admin user
+    create_initial_admin
+
     show_access_info
+
+    # Show management menu if running interactively
+    if [ -t 0 ]; then
+        management_menu
+    fi
+}
+
+management_menu() {
+    # Determine docker compose command
+    local compose_cmd="docker compose"
+    if ! docker compose version &> /dev/null 2>&1; then
+        compose_cmd="docker-compose"
+    fi
+
+    while true; do
+        echo ""
+        if [ "$USE_TUI" = true ] && command -v gum &> /dev/null && [ -t 0 ]; then
+            local choice
+            choice=$(gum choose --header "What would you like to do?" \
+                "View logs" \
+                "Show status" \
+                "Restart services" \
+                "Stop services" \
+                "Clean up (stop + remove data)" \
+                "Exit")
+
+            case "$choice" in
+                "View logs")
+                    echo ""
+                    tui_info "Showing logs (Ctrl+C to stop)..."
+                    echo ""
+                    $compose_cmd -f docker-compose.yml -f docker-compose.prod.yml logs -f --tail=50 || true
+                    ;;
+                "Show status")
+                    echo ""
+                    tui_title "Service Status"
+                    echo ""
+                    $compose_cmd -f docker-compose.yml -f docker-compose.prod.yml ps
+                    echo ""
+                    local healthy=$($compose_cmd -f docker-compose.yml -f docker-compose.prod.yml ps 2>/dev/null | grep -c "(healthy)" || echo "0")
+                    local running=$($compose_cmd -f docker-compose.yml -f docker-compose.prod.yml ps 2>/dev/null | grep -c "Up" || echo "0")
+                    tui_info "Running: $running | Healthy: $healthy"
+                    ;;
+                "Restart services")
+                    echo ""
+                    tui_info "Restarting services..."
+                    $compose_cmd -f docker-compose.yml -f docker-compose.prod.yml restart
+                    tui_success "Services restarted"
+                    wait_for_health
+                    ;;
+                "Stop services")
+                    echo ""
+                    if gum confirm "Stop all CYROID services?"; then
+                        tui_info "Stopping services..."
+                        $compose_cmd -f docker-compose.yml -f docker-compose.prod.yml down
+                        tui_success "Services stopped"
+                        echo ""
+                        tui_info "Run '$0 --start' to start again"
+                        break
+                    fi
+                    ;;
+                "Clean up"*)
+                    echo ""
+                    tui_warn "This will stop all services and DELETE all data!"
+                    echo ""
+
+                    # Show what will be removed
+                    tui_title "The following will be removed:"
+                    echo ""
+
+                    # List running containers
+                    local containers=$($compose_cmd -f docker-compose.yml -f docker-compose.prod.yml ps --format "{{.Names}}" 2>/dev/null) || true
+                    if [ -n "$containers" ]; then
+                        echo "  CYROID Services:"
+                        echo "$containers" | while read -r c; do echo "    - $c"; done
+                        echo ""
+                    fi
+
+                    # List volumes
+                    local volumes=$($compose_cmd -f docker-compose.yml -f docker-compose.prod.yml config --volumes 2>/dev/null) || true
+                    if [ -n "$volumes" ]; then
+                        echo "  Docker volumes:"
+                        echo "$volumes" | while read -r v; do echo "    - $v"; done
+                        echo ""
+                    fi
+
+                    # Detect deployed ranges (DinD containers and range networks)
+                    local range_containers=$(docker ps -a --filter "label=cyroid.type=dind" --format "{{.Names}}" 2>/dev/null) || true
+                    local range_networks=$(docker network ls --filter "name=range-" --format "{{.Name}}" 2>/dev/null) || true
+                    local cyroid_networks=$(docker network ls --filter "name=cyroid-" --format "{{.Name}}" 2>/dev/null) || true
+
+                    local has_ranges=false
+                    if [ -n "$range_containers" ] || [ -n "$range_networks" ]; then
+                        has_ranges=true
+                        echo "  Deployed Ranges detected:"
+                        if [ -n "$range_containers" ]; then
+                            local range_count=$(echo "$range_containers" | wc -l | tr -d ' ')
+                            echo "    - $range_count range container(s)"
+                        fi
+                        if [ -n "$range_networks" ]; then
+                            local net_count=$(echo "$range_networks" | wc -l | tr -d ' ')
+                            echo "    - $net_count range network(s)"
+                        fi
+                        echo ""
+                    fi
+
+                    # Data directory with size
+                    if [ -n "$DATA_DIR" ] && [ -d "$DATA_DIR" ]; then
+                        local data_size=$(du -sh "$DATA_DIR" 2>/dev/null | cut -f1) || data_size="unknown"
+                        echo "  Data directory:"
+                        echo "    - $DATA_DIR ($data_size)"
+                        echo ""
+                    fi
+
+                    # Config files
+                    echo "  Configuration files:"
+                    if [ -f "$ENV_FILE" ]; then
+                        echo "    - $ENV_FILE"
+                    fi
+                    if [ -f "$PROJECT_ROOT/traefik/acme.json" ]; then
+                        echo "    - $PROJECT_ROOT/traefik/acme.json (SSL certificates)"
+                    fi
+                    if [ -d "$PROJECT_ROOT/traefik/certs" ]; then
+                        echo "    - $PROJECT_ROOT/traefik/certs/ (SSL certificates)"
+                    fi
+                    echo ""
+
+                    # Ask about ranges if they exist
+                    local delete_ranges=false
+                    if [ "$has_ranges" = true ]; then
+                        echo ""
+                        if gum confirm --affirmative="Yes, delete ranges too" --negative="Keep ranges" "Also delete all deployed ranges and their networks?"; then
+                            delete_ranges=true
+                            tui_warn "Ranges will also be deleted!"
+                        else
+                            tui_info "Ranges will be preserved"
+                        fi
+                        echo ""
+                    fi
+
+                    if gum confirm --affirmative="Yes, delete everything" --negative="Cancel" "Are you sure? This cannot be undone."; then
+                        # Delete ranges first if requested
+                        if [ "$delete_ranges" = true ]; then
+                            tui_info "Stopping and removing deployed ranges..."
+
+                            # Stop and remove range containers (DinD)
+                            if [ -n "$range_containers" ]; then
+                                echo "$range_containers" | while read -r container; do
+                                    if [ -n "$container" ]; then
+                                        tui_info "  Removing range: $container"
+                                        docker stop "$container" 2>/dev/null || true
+                                        docker rm -f "$container" 2>/dev/null || true
+                                    fi
+                                done
+                            fi
+
+                            # Also catch any dind- prefixed containers
+                            local dind_containers=$(docker ps -a --filter "name=dind-" --format "{{.Names}}" 2>/dev/null) || true
+                            if [ -n "$dind_containers" ]; then
+                                echo "$dind_containers" | while read -r container; do
+                                    if [ -n "$container" ]; then
+                                        tui_info "  Removing DinD container: $container"
+                                        docker stop "$container" 2>/dev/null || true
+                                        docker rm -f "$container" 2>/dev/null || true
+                                    fi
+                                done
+                            fi
+
+                            # Remove range networks
+                            if [ -n "$range_networks" ]; then
+                                echo "$range_networks" | while read -r network; do
+                                    if [ -n "$network" ]; then
+                                        tui_info "  Removing network: $network"
+                                        docker network rm "$network" 2>/dev/null || true
+                                    fi
+                                done
+                            fi
+
+                            tui_success "Deployed ranges removed"
+                        fi
+
+                        tui_info "Stopping CYROID services..."
+                        $compose_cmd -f docker-compose.yml -f docker-compose.prod.yml down -v
+                        tui_success "Services stopped and volumes removed"
+
+                        # Remove CYROID management networks
+                        if [ -n "$cyroid_networks" ]; then
+                            tui_info "Removing CYROID networks..."
+                            echo "$cyroid_networks" | while read -r network; do
+                                if [ -n "$network" ]; then
+                                    docker network rm "$network" 2>/dev/null || true
+                                fi
+                            done
+                            tui_success "CYROID networks removed"
+                        fi
+
+                        if [ -n "$DATA_DIR" ] && [ -d "$DATA_DIR" ]; then
+                            tui_info "Removing data directory: $DATA_DIR"
+                            rm -rf "$DATA_DIR" 2>/dev/null || sudo rm -rf "$DATA_DIR"
+                            tui_success "Data directory removed"
+                        fi
+
+                        if [ -f "$ENV_FILE" ]; then
+                            rm -f "$ENV_FILE"
+                            tui_success "Configuration removed"
+                        fi
+
+                        # Clean up traefik certs
+                        rm -f "$PROJECT_ROOT/traefik/acme.json" 2>/dev/null || true
+                        rm -rf "$PROJECT_ROOT/traefik/certs" 2>/dev/null || true
+
+                        echo ""
+                        tui_success "Cleanup complete"
+                        break
+                    fi
+                    ;;
+                "Exit"|"")
+                    echo ""
+                    tui_info "CYROID is still running in the background"
+                    tui_info "Use '$0 --stop' to stop services"
+                    break
+                    ;;
+            esac
+        else
+            # Non-TUI fallback
+            echo ""
+            echo "Management Menu:"
+            echo "  1) View logs"
+            echo "  2) Show status"
+            echo "  3) Restart services"
+            echo "  4) Stop services"
+            echo "  5) Clean up (stop + remove data)"
+            echo "  6) Exit"
+            echo ""
+            read -p "Choice [1-6]: " choice
+
+            case "$choice" in
+                1)
+                    echo ""
+                    echo "Showing logs (Ctrl+C to stop)..."
+                    $compose_cmd -f docker-compose.yml -f docker-compose.prod.yml logs -f --tail=50 || true
+                    ;;
+                2)
+                    echo ""
+                    $compose_cmd -f docker-compose.yml -f docker-compose.prod.yml ps
+                    ;;
+                3)
+                    echo ""
+                    echo "Restarting services..."
+                    $compose_cmd -f docker-compose.yml -f docker-compose.prod.yml restart
+                    echo "Services restarted"
+                    ;;
+                4)
+                    echo ""
+                    read -p "Stop all services? [y/N]: " confirm
+                    if [[ "$confirm" =~ ^[Yy] ]]; then
+                        $compose_cmd -f docker-compose.yml -f docker-compose.prod.yml down
+                        echo "Services stopped"
+                        break
+                    fi
+                    ;;
+                5)
+                    echo ""
+                    echo "WARNING: This will delete all data!"
+                    echo ""
+                    echo "The following will be removed:"
+                    echo ""
+
+                    # List containers
+                    local containers=$($compose_cmd -f docker-compose.yml -f docker-compose.prod.yml ps --format "{{.Names}}" 2>/dev/null) || true
+                    if [ -n "$containers" ]; then
+                        echo "  CYROID Services:"
+                        echo "$containers" | while read -r c; do echo "    - $c"; done
+                        echo ""
+                    fi
+
+                    # List volumes
+                    local volumes=$($compose_cmd -f docker-compose.yml -f docker-compose.prod.yml config --volumes 2>/dev/null) || true
+                    if [ -n "$volumes" ]; then
+                        echo "  Docker volumes:"
+                        echo "$volumes" | while read -r v; do echo "    - $v"; done
+                        echo ""
+                    fi
+
+                    # Detect deployed ranges
+                    local range_containers=$(docker ps -a --filter "label=cyroid.type=dind" --format "{{.Names}}" 2>/dev/null) || true
+                    local range_networks=$(docker network ls --filter "name=range-" --format "{{.Name}}" 2>/dev/null) || true
+                    local cyroid_networks=$(docker network ls --filter "name=cyroid-" --format "{{.Name}}" 2>/dev/null) || true
+
+                    local has_ranges=false
+                    if [ -n "$range_containers" ] || [ -n "$range_networks" ]; then
+                        has_ranges=true
+                        echo "  Deployed Ranges detected:"
+                        if [ -n "$range_containers" ]; then
+                            local range_count=$(echo "$range_containers" | wc -l | tr -d ' ')
+                            echo "    - $range_count range container(s)"
+                        fi
+                        if [ -n "$range_networks" ]; then
+                            local net_count=$(echo "$range_networks" | wc -l | tr -d ' ')
+                            echo "    - $net_count range network(s)"
+                        fi
+                        echo ""
+                    fi
+
+                    # Data directory
+                    if [ -n "$DATA_DIR" ] && [ -d "$DATA_DIR" ]; then
+                        local data_size=$(du -sh "$DATA_DIR" 2>/dev/null | cut -f1) || data_size="unknown"
+                        echo "  Data directory:"
+                        echo "    - $DATA_DIR ($data_size)"
+                        echo ""
+                    fi
+
+                    # Config
+                    echo "  Configuration files:"
+                    [ -f "$ENV_FILE" ] && echo "    - $ENV_FILE"
+                    [ -f "$PROJECT_ROOT/traefik/acme.json" ] && echo "    - $PROJECT_ROOT/traefik/acme.json"
+                    [ -d "$PROJECT_ROOT/traefik/certs" ] && echo "    - $PROJECT_ROOT/traefik/certs/"
+                    echo ""
+
+                    # Ask about ranges
+                    local delete_ranges=false
+                    if [ "$has_ranges" = true ]; then
+                        read -p "Also delete all deployed ranges? [y/N]: " range_confirm
+                        if [[ "$range_confirm" =~ ^[Yy] ]]; then
+                            delete_ranges=true
+                            echo "Ranges will also be deleted."
+                        fi
+                        echo ""
+                    fi
+
+                    read -p "Type 'DELETE' to confirm: " confirm
+                    if [ "$confirm" = "DELETE" ]; then
+                        # Delete ranges first if requested
+                        if [ "$delete_ranges" = true ]; then
+                            echo "Removing deployed ranges..."
+
+                            # Stop and remove range containers
+                            if [ -n "$range_containers" ]; then
+                                echo "$range_containers" | while read -r container; do
+                                    [ -n "$container" ] && docker rm -f "$container" 2>/dev/null || true
+                                done
+                            fi
+
+                            # Also catch dind- prefixed containers
+                            local dind_containers=$(docker ps -a --filter "name=dind-" --format "{{.Names}}" 2>/dev/null) || true
+                            if [ -n "$dind_containers" ]; then
+                                echo "$dind_containers" | while read -r container; do
+                                    [ -n "$container" ] && docker rm -f "$container" 2>/dev/null || true
+                                done
+                            fi
+
+                            # Remove range networks
+                            if [ -n "$range_networks" ]; then
+                                echo "$range_networks" | while read -r network; do
+                                    [ -n "$network" ] && docker network rm "$network" 2>/dev/null || true
+                                done
+                            fi
+
+                            echo "Ranges removed"
+                        fi
+
+                        $compose_cmd -f docker-compose.yml -f docker-compose.prod.yml down -v
+
+                        # Remove CYROID networks
+                        if [ -n "$cyroid_networks" ]; then
+                            echo "$cyroid_networks" | while read -r network; do
+                                [ -n "$network" ] && docker network rm "$network" 2>/dev/null || true
+                            done
+                        fi
+
+                        if [ -n "$DATA_DIR" ] && [ -d "$DATA_DIR" ]; then
+                            rm -rf "$DATA_DIR" 2>/dev/null || sudo rm -rf "$DATA_DIR"
+                        fi
+                        rm -f "$ENV_FILE" 2>/dev/null || true
+                        rm -f "$PROJECT_ROOT/traefik/acme.json" 2>/dev/null || true
+                        rm -rf "$PROJECT_ROOT/traefik/certs" 2>/dev/null || true
+                        echo "Cleanup complete"
+                        break
+                    fi
+                    ;;
+                6|"")
+                    echo ""
+                    echo "CYROID is still running. Use '$0 --stop' to stop."
+                    break
+                    ;;
+            esac
+        fi
+    done
 }
 
 get_current_version() {
@@ -1308,6 +2021,117 @@ get_available_tags() {
         wget -qO- "https://api.github.com/repos/JongoDB/CYROID/tags?per_page=15" 2>/dev/null | \
             grep '"name"' | sed 's/.*"name": "\(.*\)".*/\1/' | head -15
     fi
+}
+
+select_version_interactive() {
+    # Interactive version selection - sets VERSION variable
+    # Returns the selected version
+
+    if [ "$USE_TUI" = true ] && command -v gum &> /dev/null; then
+        tui_info "Fetching available versions from GitHub..."
+        echo ""
+
+        local releases=$(get_available_releases)
+        local tags=$(get_available_tags)
+
+        if [ -n "$releases" ] || [ -n "$tags" ]; then
+            # Get the latest version to display
+            local latest_version=""
+            if [ -n "$releases" ]; then
+                latest_version=$(echo "$releases" | head -1)
+            elif [ -n "$tags" ]; then
+                latest_version=$(echo "$tags" | head -1)
+            fi
+
+            local latest_label="Latest (recommended)"
+            if [ -n "$latest_version" ]; then
+                latest_label="Latest (recommended) - $latest_version"
+            fi
+
+            local version_choice
+            version_choice=$(gum choose --header "Select version to deploy:" \
+                "$latest_label" \
+                "Choose from releases" \
+                "Choose from all tags" \
+                "Enter version manually")
+
+            case "$version_choice" in
+                "Latest"*)
+                    VERSION="latest"
+                    tui_success "Using latest version${latest_version:+ ($latest_version)}"
+                    ;;
+                "Choose from releases"*)
+                    if [ -n "$releases" ]; then
+                        # Show releases with gum choose
+                        echo ""
+                        tui_info "Available releases:"
+                        VERSION=$(echo "$releases" | gum choose --header "Select a release:")
+                        if [ -n "$VERSION" ]; then
+                            tui_success "Selected: $VERSION"
+                        else
+                            VERSION="latest"
+                            tui_warn "No selection made, using latest"
+                        fi
+                    else
+                        tui_warn "No releases found, using latest"
+                        VERSION="latest"
+                    fi
+                    ;;
+                "Choose from all tags"*)
+                    if [ -n "$tags" ]; then
+                        echo ""
+                        tui_info "Available tags:"
+                        VERSION=$(echo "$tags" | gum choose --header "Select a tag:")
+                        if [ -n "$VERSION" ]; then
+                            tui_success "Selected: $VERSION"
+                        else
+                            VERSION="latest"
+                            tui_warn "No selection made, using latest"
+                        fi
+                    else
+                        tui_warn "No tags found, using latest"
+                        VERSION="latest"
+                    fi
+                    ;;
+                "Enter"*)
+                    VERSION=$(gum input --placeholder "v0.32.0" --header "Enter version (e.g., v0.32.0):")
+                    if [ -z "$VERSION" ]; then
+                        VERSION="latest"
+                        tui_warn "No version entered, using latest"
+                    else
+                        tui_success "Using version: $VERSION"
+                    fi
+                    ;;
+                *)
+                    VERSION="latest"
+                    ;;
+            esac
+        else
+            tui_warn "Could not fetch versions from GitHub"
+            tui_info "Using latest version"
+            VERSION="latest"
+        fi
+    else
+        # Non-TUI fallback
+        echo "Version options:"
+        echo "  1) Latest (recommended)"
+        echo "  2) Enter specific version"
+        echo ""
+        read -p "Choice [1]: " choice
+
+        case "$choice" in
+            2)
+                read -p "Enter version (e.g., v0.32.0): " VERSION
+                VERSION="${VERSION:-latest}"
+                ;;
+            *)
+                VERSION="latest"
+                ;;
+        esac
+        echo "Using version: $VERSION"
+    fi
+
+    echo "$VERSION"
 }
 
 do_update() {
@@ -1411,24 +2235,20 @@ do_update() {
         export VERSION="$target_version"
     fi
 
+    # Determine docker compose command
+    local compose_cmd="docker compose"
+    if ! docker compose version &> /dev/null 2>&1; then
+        compose_cmd="docker-compose"
+    fi
+
     # Pull images
     tui_info "Pulling Docker images..."
-    if [ "$USE_TUI" = true ] && command -v gum &> /dev/null; then
-        gum spin --spinner dot --title "Pulling images for $target_version..." -- \
-            docker_compose_cmd -f docker-compose.yml -f docker-compose.prod.yml pull -q
-    else
-        docker_compose_cmd -f docker-compose.yml -f docker-compose.prod.yml pull
-    fi
+    $compose_cmd -f docker-compose.yml -f docker-compose.prod.yml pull 2>&1 || true
     tui_success "Images pulled"
 
     # Restart services
     tui_info "Restarting services..."
-    if [ "$USE_TUI" = true ] && command -v gum &> /dev/null; then
-        gum spin --spinner dot --title "Restarting services..." -- \
-            docker_compose_cmd -f docker-compose.yml -f docker-compose.prod.yml up -d
-    else
-        docker_compose_cmd -f docker-compose.yml -f docker-compose.prod.yml up -d
-    fi
+    $compose_cmd -f docker-compose.yml -f docker-compose.prod.yml up -d 2>&1 || true
     tui_success "Services restarted"
 
     wait_for_health
@@ -1461,14 +2281,14 @@ do_start() {
     source "$ENV_FILE"
     set +a
 
-    tui_info "Starting CYROID services..."
-
-    if [ "$USE_TUI" = true ] && command -v gum &> /dev/null; then
-        gum spin --spinner dot --title "Starting services..." -- \
-            docker_compose_cmd -f docker-compose.yml -f docker-compose.prod.yml up -d
-    else
-        docker_compose_cmd -f docker-compose.yml -f docker-compose.prod.yml up -d
+    # Determine docker compose command
+    local compose_cmd="docker compose"
+    if ! docker compose version &> /dev/null 2>&1; then
+        compose_cmd="docker-compose"
     fi
+
+    tui_info "Starting CYROID services..."
+    $compose_cmd -f docker-compose.yml -f docker-compose.prod.yml up -d 2>&1 || true
 
     wait_for_health
 
@@ -1497,8 +2317,14 @@ do_stop() {
         set +a
     fi
 
+    # Determine docker compose command
+    local compose_cmd="docker compose"
+    if ! docker compose version &> /dev/null 2>&1; then
+        compose_cmd="docker-compose"
+    fi
+
     # Check if anything is running
-    local running=$(docker_compose_cmd -f docker-compose.yml -f docker-compose.prod.yml ps -q 2>/dev/null | wc -l | tr -d ' ')
+    local running=$($compose_cmd -f docker-compose.yml -f docker-compose.prod.yml ps -q 2>/dev/null | wc -l | tr -d ' ')
 
     if [ "$running" = "0" ]; then
         tui_info "CYROID is not currently running"
@@ -1515,14 +2341,7 @@ do_stop() {
 
     echo ""
     tui_info "Stopping services..."
-
-    if [ "$USE_TUI" = true ] && command -v gum &> /dev/null; then
-        gum spin --spinner dot --title "Stopping CYROID..." -- \
-            docker_compose_cmd -f docker-compose.yml -f docker-compose.prod.yml down
-    else
-        docker_compose_cmd -f docker-compose.yml -f docker-compose.prod.yml down
-    fi
-
+    $compose_cmd -f docker-compose.yml -f docker-compose.prod.yml down 2>&1 || true
     tui_success "All services stopped"
     echo ""
 }
@@ -1578,105 +2397,368 @@ interactive_setup() {
     # Check for TUI support
     check_gum
 
-    tui_clear
-    tui_header
+    # Step tracking for back navigation
+    local current_step=1
+    local max_step=5  # 1=Access, 2=SSL, 3=Data, 4=Version, 5=Summary
+    local access_type=""  # "domain" or "ip"
 
-    if [ "$USE_TUI" = true ]; then
-        gum style --foreground 245 "This wizard will configure CYROID for production use."
-        echo ""
-    else
-        echo "This wizard will configure CYROID for production use."
-        echo ""
-    fi
+    while [ $current_step -le $max_step ]; do
+        tui_clear
+        tui_header
 
-    # Step 1: Access method
-    tui_title "Step 1: Server Access"
-    echo ""
-
-    local access_choice
-    access_choice=$(tui_choose "How will users access CYROID?" \
-        "Domain name (e.g., cyroid.example.com)" \
-        "IP address (e.g., 192.168.1.100)")
-
-    case "$access_choice" in
-        "Domain name"*)
+        if [ "$USE_TUI" = true ]; then
+            gum style --foreground 245 "This wizard will configure CYROID for production use."
+            gum style --foreground 245 --italic "Use '← Back' option to return to previous step."
             echo ""
-            DOMAIN=$(tui_input "Enter your domain name:" "cyroid.example.com" "")
-            if [ -z "$DOMAIN" ]; then
-                tui_error "Domain name cannot be empty"
-                exit 1
-            fi
-
+        else
+            echo "This wizard will configure CYROID for production use."
             echo ""
-            tui_title "Step 2: SSL Certificate"
-            echo ""
+        fi
 
-            local ssl_choice
-            ssl_choice=$(tui_choose "Choose SSL certificate type:" \
-                "Let's Encrypt (automatic, free, requires public domain)" \
-                "Self-signed (works immediately, browser warning)")
+        case $current_step in
+            1)
+                # Step 1: Access method
+                tui_title "Step 1: Server Access"
+                echo ""
 
-            case "$ssl_choice" in
-                "Let's Encrypt"*)
-                    SSL_MODE="letsencrypt"
+                local access_choice
+                if [ "$USE_TUI" = true ] && command -v gum &> /dev/null; then
+                    access_choice=$(gum choose --header "How will users access CYROID?" \
+                        "IP address (e.g., 0.0.0.0)" \
+                        "Domain name (e.g., cyroid.example.com)")
+                else
+                    access_choice=$(tui_choose "How will users access CYROID?" \
+                        "IP address (e.g., 0.0.0.0)" \
+                        "Domain name (e.g., cyroid.example.com)")
+                fi
+
+                case "$access_choice" in
+                    "IP address"*)
+                        access_type="ip"
+                        echo ""
+                        local input_ip
+                        input_ip=$(tui_input "Enter server IP address:" "0.0.0.0" "${IP:-0.0.0.0}")
+                        if [ -z "$input_ip" ]; then
+                            tui_error "IP address cannot be empty"
+                            sleep 1
+                            continue
+                        fi
+                        IP="$input_ip"
+                        DOMAIN=""
+                        SSL_MODE="selfsigned"
+                        current_step=3  # Skip SSL step for IP (always self-signed)
+                        ;;
+                    "Domain name"*)
+                        access_type="domain"
+                        echo ""
+                        local input_domain
+                        input_domain=$(tui_input "Enter your domain name:" "cyroid.example.com" "${DOMAIN:-}")
+                        if [ -z "$input_domain" ]; then
+                            tui_error "Domain name cannot be empty"
+                            sleep 1
+                            continue
+                        fi
+                        DOMAIN="$input_domain"
+                        IP=""
+                        current_step=2
+                        ;;
+                    *)
+                        tui_error "Invalid choice"
+                        sleep 1
+                        continue
+                        ;;
+                esac
+                ;;
+
+            2)
+                # Step 2: SSL Certificate (only for domain)
+                tui_title "Step 2: SSL Certificate"
+                echo ""
+
+                local ssl_choice
+                if [ "$USE_TUI" = true ] && command -v gum &> /dev/null; then
+                    ssl_choice=$(gum choose --header "Choose SSL certificate type:" \
+                        "Let's Encrypt (automatic, free, requires public domain)" \
+                        "Self-signed (works immediately, browser warning)" \
+                        "← Back")
+                else
+                    ssl_choice=$(tui_choose "Choose SSL certificate type:" \
+                        "Let's Encrypt (automatic, free, requires public domain)" \
+                        "Self-signed (works immediately, browser warning)" \
+                        "← Back")
+                fi
+
+                case "$ssl_choice" in
+                    "← Back"*)
+                        current_step=1
+                        continue
+                        ;;
+                    "Let's Encrypt"*)
+                        SSL_MODE="letsencrypt"
+                        echo ""
+                        EMAIL=$(tui_input "Email for Let's Encrypt notifications:" "admin@$DOMAIN" "${EMAIL:-admin@$DOMAIN}")
+                        current_step=3
+                        ;;
+                    "Self-signed"*)
+                        SSL_MODE="selfsigned"
+                        EMAIL=""
+                        current_step=3
+                        ;;
+                    *)
+                        continue
+                        ;;
+                esac
+                ;;
+
+            3)
+                # Step 3: Data directory
+                tui_title "Step 3: Data Storage"
+                echo ""
+
+                if [ -z "$DATA_DIR" ]; then
+                    DATA_DIR=$(get_default_data_dir)
+                fi
+
+                if [ "$USE_TUI" = true ] && command -v gum &> /dev/null; then
+                    # Show back option first
+                    local data_choice
+                    data_choice=$(gum choose --header "Configure data storage location:" \
+                        "Use default: $DATA_DIR" \
+                        "Enter custom path" \
+                        "← Back")
+
+                    case "$data_choice" in
+                        "← Back"*)
+                            if [ "$access_type" = "ip" ]; then
+                                current_step=1  # IP skips SSL step
+                            else
+                                current_step=2
+                            fi
+                            continue
+                            ;;
+                        "Use default"*)
+                            # Keep default DATA_DIR
+                            current_step=4
+                            ;;
+                        "Enter custom"*)
+                            local input_data_dir
+                            input_data_dir=$(gum input --placeholder "$DATA_DIR" --value "$DATA_DIR" --header "Data directory for CYROID storage:")
+                            if [ -n "$input_data_dir" ]; then
+                                DATA_DIR="$input_data_dir"
+                            fi
+                            current_step=4
+                            ;;
+                        *)
+                            continue
+                            ;;
+                    esac
+                else
+                    local input_data_dir
+                    input_data_dir=$(tui_input "Data directory for CYROID storage:" "$DATA_DIR" "$DATA_DIR")
+                    if [ -n "$input_data_dir" ]; then
+                        DATA_DIR="$input_data_dir"
+                    fi
+                    current_step=4
+                fi
+                ;;
+
+            4)
+                # Step 4: Version selection
+                tui_title "Step 4: Version Selection"
+                echo ""
+
+                if [ "$USE_TUI" = true ] && command -v gum &> /dev/null; then
+                    tui_info "Fetching available versions from GitHub..."
                     echo ""
-                    EMAIL=$(tui_input "Email for Let's Encrypt notifications:" "admin@$DOMAIN" "admin@$DOMAIN")
-                    ;;
-                *)
-                    SSL_MODE="selfsigned"
-                    ;;
-            esac
-            ;;
-        "IP address"*)
-            echo ""
-            IP=$(tui_input "Enter server IP address:" "192.168.1.100" "")
-            if [ -z "$IP" ]; then
-                tui_error "IP address cannot be empty"
-                exit 1
-            fi
-            SSL_MODE="selfsigned"
-            ;;
-        *)
-            tui_error "Invalid choice"
-            exit 1
-            ;;
-    esac
 
-    # Step 3: Data directory
-    echo ""
-    tui_title "Step 3: Data Storage"
-    echo ""
+                    local releases=$(get_available_releases)
+                    local tags=$(get_available_tags)
 
-    if [ -z "$DATA_DIR" ]; then
-        DATA_DIR=$(get_default_data_dir)
-    fi
+                    # Get the latest version to display
+                    local latest_version=""
+                    if [ -n "$releases" ]; then
+                        latest_version=$(echo "$releases" | head -1)
+                    elif [ -n "$tags" ]; then
+                        latest_version=$(echo "$tags" | head -1)
+                    fi
 
-    local input_data_dir
-    input_data_dir=$(tui_input "Data directory for CYROID storage:" "$DATA_DIR" "$DATA_DIR")
-    if [ -n "$input_data_dir" ]; then
-        DATA_DIR="$input_data_dir"
-    fi
+                    local latest_label="Latest (recommended)"
+                    if [ -n "$latest_version" ]; then
+                        latest_label="Latest (recommended) - $latest_version"
+                    fi
 
-    # Summary
-    echo ""
-    tui_title "Configuration Summary"
+                    local version_choice
+                    version_choice=$(gum choose --header "Select version to deploy:" \
+                        "$latest_label" \
+                        "Choose from releases" \
+                        "Choose from all tags" \
+                        "Enter version manually" \
+                        "← Back")
 
-    local summary="Address:     ${DOMAIN:-$IP}
+                    case "$version_choice" in
+                        "← Back"*)
+                            current_step=3
+                            continue
+                            ;;
+                        "Latest"*)
+                            VERSION="latest"
+                            tui_success "Using latest version${latest_version:+ ($latest_version)}"
+                            sleep 1
+                            current_step=5
+                            ;;
+                        "Choose from releases"*)
+                            if [ -n "$releases" ]; then
+                                echo ""
+                                # Add back option to releases list
+                                local release_choice
+                                release_choice=$(echo -e "← Back\n$releases" | gum choose --header "Select a release:")
+                                if [ "$release_choice" = "← Back" ]; then
+                                    continue
+                                elif [ -n "$release_choice" ]; then
+                                    VERSION="$release_choice"
+                                    tui_success "Selected: $VERSION"
+                                    sleep 1
+                                    current_step=5
+                                else
+                                    continue
+                                fi
+                            else
+                                tui_warn "No releases found"
+                                sleep 1
+                                continue
+                            fi
+                            ;;
+                        "Choose from all tags"*)
+                            if [ -n "$tags" ]; then
+                                echo ""
+                                local tag_choice
+                                tag_choice=$(echo -e "← Back\n$tags" | gum choose --header "Select a tag:")
+                                if [ "$tag_choice" = "← Back" ]; then
+                                    continue
+                                elif [ -n "$tag_choice" ]; then
+                                    VERSION="$tag_choice"
+                                    tui_success "Selected: $VERSION"
+                                    sleep 1
+                                    current_step=5
+                                else
+                                    continue
+                                fi
+                            else
+                                tui_warn "No tags found"
+                                sleep 1
+                                continue
+                            fi
+                            ;;
+                        "Enter"*)
+                            VERSION=$(gum input --placeholder "v0.32.0" --header "Enter version (e.g., v0.32.0):")
+                            if [ -z "$VERSION" ]; then
+                                VERSION="latest"
+                            fi
+                            tui_success "Using version: $VERSION"
+                            sleep 1
+                            current_step=5
+                            ;;
+                        *)
+                            continue
+                            ;;
+                    esac
+                else
+                    # Non-TUI fallback
+                    echo "Version options:"
+                    echo "  1) Latest (recommended)"
+                    echo "  2) Enter specific version"
+                    echo "  b) Back"
+                    echo ""
+                    read -p "Choice [1]: " choice
+
+                    case "$choice" in
+                        b|B)
+                            current_step=3
+                            continue
+                            ;;
+                        2)
+                            read -p "Enter version (e.g., v0.32.0): " VERSION
+                            VERSION="${VERSION:-latest}"
+                            current_step=5
+                            ;;
+                        *)
+                            VERSION="latest"
+                            current_step=5
+                            ;;
+                    esac
+                fi
+                ;;
+
+            5)
+                # Summary
+                tui_title "Configuration Summary"
+
+                local version_display="$VERSION"
+                if [ "$VERSION" = "latest" ]; then
+                    version_display="latest (newest)"
+                fi
+
+                local summary="Address:     ${DOMAIN:-$IP}
 SSL Mode:    $SSL_MODE
-Data Dir:    $DATA_DIR"
+Data Dir:    $DATA_DIR
+Version:     $version_display"
 
-    if [ -n "$EMAIL" ]; then
-        summary="$summary
+                if [ -n "$EMAIL" ]; then
+                    summary="$summary
 Email:       $EMAIL"
-    fi
+                fi
 
-    tui_summary_box "$summary"
+                tui_summary_box "$summary"
 
-    echo ""
-    if ! tui_confirm "Proceed with deployment?"; then
-        tui_info "Deployment cancelled"
-        exit 0
-    fi
+                echo ""
+
+                if [ "$USE_TUI" = true ] && command -v gum &> /dev/null; then
+                    local confirm_choice
+                    confirm_choice=$(gum choose --header "Ready to deploy?" \
+                        "Yes, proceed with deployment" \
+                        "← Back to version selection" \
+                        "Cancel deployment")
+
+                    case "$confirm_choice" in
+                        "Yes"*)
+                            current_step=6  # Exit loop
+                            ;;
+                        "← Back"*)
+                            current_step=4
+                            continue
+                            ;;
+                        "Cancel"*)
+                            tui_info "Deployment cancelled"
+                            exit 0
+                            ;;
+                        *)
+                            continue
+                            ;;
+                    esac
+                else
+                    echo "Options:"
+                    echo "  1) Proceed with deployment"
+                    echo "  b) Back"
+                    echo "  c) Cancel"
+                    read -p "Choice [1]: " choice
+
+                    case "$choice" in
+                        b|B)
+                            current_step=4
+                            continue
+                            ;;
+                        c|C)
+                            echo "Deployment cancelled"
+                            exit 0
+                            ;;
+                        *)
+                            current_step=6  # Exit loop
+                            ;;
+                    esac
+                fi
+                ;;
+        esac
+    done
 
     tui_clear
 }
@@ -1746,6 +2828,9 @@ done
 
 # Bootstrap: download required files if running standalone
 bootstrap_standalone
+
+# Check for gum (TUI tool) early - before any TUI functions are called
+check_gum
 
 # Set OS-specific default for DATA_DIR if not specified
 if [ -z "$DATA_DIR" ]; then
