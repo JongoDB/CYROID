@@ -600,11 +600,22 @@ tui_set_status() {
 tui_set_progress() {
     local phase="$1"
     local progress="$2"  # 0-100
+    local detail="${3:-}"
 
     DEPLOYMENT_PHASE="$phase"
     DEPLOYMENT_PROGRESS="$progress"
 
-    tui_set_status "$phase" "progress"
+    # Update fullscreen status bar if active
+    if [ "$TUI_FULLSCREEN" = true ]; then
+        tui_set_status "$phase" "progress"
+    else
+        # Use bottom progress bar for non-fullscreen mode
+        # Convert percentage to step/total format (assume 7 major steps)
+        local step=$((progress / 14))
+        [ "$step" -lt 1 ] && step=1
+        [ "$step" -gt 7 ] && step=7
+        progress_bar_update "$step" 7 "Deploy" "$phase"
+    fi
 }
 
 tui_draw_status_bar() {
@@ -2411,23 +2422,48 @@ pull_images() {
         local total=$(echo "$images" | wc -l | tr -d ' ')
         echo ""
         tui_info "Pulling $total images:"
-        echo "$images" | while read -r img; do
-            local name=$(echo "$img" | sed 's/.*\///' | cut -d: -f1)
-            echo "  - $name"
-        done
-        echo ""
-    fi
 
-    # Pull with docker compose (more reliable, handles auth, shows progress)
-    if [ "$USE_TUI" = true ] && command -v gum &> /dev/null && [ -t 0 ]; then
-        # Use compose pull without -q to show progress, gum will capture it
-        $compose_cmd -f docker-compose.yml -f docker-compose.prod.yml pull 2>&1 | while read -r line; do
-            # Show pull progress
-            if echo "$line" | grep -q "Pull"; then
-                echo "  $line"
+        # Initialize progress bar
+        if [ "$TUI_FULLSCREEN" != true ]; then
+            progress_bar_init
+        fi
+
+        local current=0
+        # Store images to temp file for reliable iteration
+        local temp_images="/tmp/cyroid_pull_images_$$"
+        echo "$images" > "$temp_images"
+
+        while IFS= read -r img; do
+            current=$((current + 1))
+            local name=$(echo "$img" | sed 's/.*\///' | cut -d: -f1)
+
+            # Update progress
+            if [ "$TUI_FULLSCREEN" = true ]; then
+                tui_set_status "Pulling ($current/$total): $name" "progress"
+            else
+                progress_bar_update "$current" "$total" "Pull Images" "$img"
             fi
-        done
+
+            echo "  [$current/$total] $name"
+
+            # Pull individual image
+            if docker pull "$img" >/dev/null 2>&1; then
+                echo "    ${GREEN}✓${NC} Pulled"
+            else
+                echo "    ${YELLOW}⚠${NC} May already exist locally"
+            fi
+        done < "$temp_images"
+
+        rm -f "$temp_images"
+
+        # Clean up progress bar
+        if [ "$TUI_FULLSCREEN" != true ]; then
+            progress_bar_cleanup
+        fi
+
+        echo ""
     else
+        # Fallback to compose pull if we can't parse images
         $compose_cmd -f docker-compose.yml -f docker-compose.prod.yml pull
     fi
 }
@@ -2461,14 +2497,26 @@ wait_for_health() {
     local attempt=0
     local target_healthy=3  # Minimum healthy services needed
 
+    # Initialize progress bar for health check
+    if [ "$TUI_FULLSCREEN" != true ]; then
+        progress_bar_init
+    fi
+
     while [ $attempt -lt $max_attempts ]; do
         local healthy_count=$(docker_compose_cmd -f docker-compose.yml -f docker-compose.prod.yml ps 2>/dev/null | grep -c "(healthy)" || echo "0")
         local running_count=$(docker_compose_cmd -f docker-compose.yml -f docker-compose.prod.yml ps 2>/dev/null | grep -c "Up" || echo "0")
 
-        # Update status bar with current health status
-        tui_set_status "Waiting for services... ($healthy_count/$target_healthy healthy, $running_count running)" "progress"
+        # Update progress bar
+        if [ "$TUI_FULLSCREEN" = true ]; then
+            tui_set_status "Waiting for services... ($healthy_count/$target_healthy healthy, $running_count running)" "progress"
+        else
+            progress_bar_update "$healthy_count" "$target_healthy" "Health Check" "$healthy_count/$target_healthy healthy, $running_count running"
+        fi
 
         if [ "$healthy_count" -ge "$target_healthy" ]; then
+            if [ "$TUI_FULLSCREEN" != true ]; then
+                progress_bar_cleanup
+            fi
             tui_set_status "All services healthy!" "success"
             tui_success "All services are healthy!"
             return 0
@@ -2476,13 +2524,17 @@ wait_for_health() {
 
         attempt=$((attempt + 1))
 
-        # Show dots in non-TUI mode
+        # Show dots in non-TUI mode without progress bar
         if [ "$USE_TUI" != true ]; then
             echo -n "."
         fi
 
         sleep 2
     done
+
+    if [ "$TUI_FULLSCREEN" != true ]; then
+        progress_bar_cleanup
+    fi
 
     echo ""
     tui_set_status "Some services may not be healthy" "warn"
@@ -2714,10 +2766,15 @@ do_deploy() {
         interactive_setup
     fi
 
-    # Initialize full-screen TUI for deployment
+    # Initialize TUI for deployment
     if [ "$USE_TUI" = true ]; then
         tui_init_fullscreen
         tui_set_status "Initializing deployment..." "info"
+    fi
+
+    # Initialize progress bar for non-fullscreen mode
+    if [ "$TUI_FULLSCREEN" != true ] && [ "$USE_TUI" = true ]; then
+        progress_bar_init
     fi
 
     tui_main_area
@@ -2726,7 +2783,11 @@ do_deploy() {
     echo ""
 
     # Pre-flight checks
-    tui_set_status "Running pre-flight checks..." "progress"
+    if [ "$TUI_FULLSCREEN" = true ]; then
+        tui_set_status "Running pre-flight checks..." "progress"
+    else
+        progress_bar_update 0 7 "Deploy" "Running pre-flight checks..."
+    fi
     check_data_dir_writable
     backup_env_file
 
@@ -2777,9 +2838,11 @@ do_deploy() {
     # Deployment complete
     tui_set_status "Deployment complete!" "success"
 
-    # Clean up fullscreen mode before showing access info
+    # Clean up TUI modes before showing access info
     if [ "$TUI_FULLSCREEN" = true ]; then
         tui_cleanup_fullscreen
+    elif [ "$PROGRESS_BAR_ACTIVE" = true ]; then
+        progress_bar_cleanup
     fi
 
     show_access_info
