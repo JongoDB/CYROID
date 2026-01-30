@@ -65,3 +65,6 @@ traefik/dynamic/range-*.yml
 
 # Runtime data (local development cache)
 data/
+
+# Git worktrees
+.worktrees/
