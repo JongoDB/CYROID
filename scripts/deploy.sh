@@ -943,7 +943,8 @@ tui_live_dashboard() {
 # =============================================================================
 
 BACKUP_DIR="${CYROID_BACKUP_DIR:-$HOME/.cyroid-backups}"
-REGISTRY_URL="http://localhost:5000"
+# Use 127.0.0.1 explicitly - 'localhost' may resolve to IPv6 and conflict with macOS AirPlay on port 5000
+REGISTRY_URL="http://127.0.0.1:5000"
 
 # Get list of images from CYROID registry
 get_registry_images() {
