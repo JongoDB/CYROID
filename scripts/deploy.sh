@@ -18,6 +18,8 @@
 #   ./scripts/deploy.sh --stop                            # Stop all services
 #   ./scripts/deploy.sh --restart                         # Restart all services
 #   ./scripts/deploy.sh --status                          # Show service status
+#   ./scripts/deploy.sh --backup [name]                   # Backup Docker images
+#   ./scripts/deploy.sh --restore [name]                  # Restore Docker images
 #
 # Options:
 #   --domain DOMAIN    Domain name for the server
@@ -30,6 +32,8 @@
 #   --stop             Stop all services
 #   --restart          Stop and start all services
 #   --status           Show service status and health
+#   --backup [NAME]    Backup Docker images to disk (optional name)
+#   --restore [NAME]   Restore Docker images from backup (optional name)
 #   --help             Show this help message
 
 set -euo pipefail
@@ -81,6 +85,7 @@ SSL_MODE=""
 VERSION="latest"
 ACTION="deploy"
 DATA_DIR=""  # Set after OS detection
+BACKUP_NAME=""  # For --backup/--restore
 
 # Admin user credentials (set during create_initial_admin)
 ADMIN_USERNAME=""
@@ -623,11 +628,22 @@ tui_set_status() {
 tui_set_progress() {
     local phase="$1"
     local progress="$2"  # 0-100
+    local detail="${3:-}"
 
     DEPLOYMENT_PHASE="$phase"
     DEPLOYMENT_PROGRESS="$progress"
 
-    tui_set_status "$phase" "progress"
+    # Update fullscreen status bar if active
+    if [ "$TUI_FULLSCREEN" = true ]; then
+        tui_set_status "$phase" "progress"
+    else
+        # Use bottom progress bar for non-fullscreen mode
+        # Convert percentage to step/total format (assume 7 major steps)
+        local step=$((progress / 14))
+        [ "$step" -lt 1 ] && step=1
+        [ "$step" -gt 7 ] && step=7
+        progress_bar_update "$step" 7 "Deploy" "$phase"
+    fi
 }
 
 tui_draw_status_bar() {
@@ -959,6 +975,694 @@ tui_live_dashboard() {
             esac
         fi
     done
+}
+
+# =============================================================================
+# Image Backup/Restore Functions
+# =============================================================================
+
+BACKUP_DIR="${CYROID_BACKUP_DIR:-$HOME/.cyroid-backups}"
+# Use 127.0.0.1 explicitly - 'localhost' may resolve to IPv6 and conflict with macOS AirPlay on port 5000
+REGISTRY_URL="http://127.0.0.1:5000"
+
+# Progress bar state
+PROGRESS_BAR_ACTIVE=false
+
+# Initialize progress bar
+progress_bar_init() {
+    if [ "$USE_TUI" != true ]; then
+        return
+    fi
+    PROGRESS_BAR_ACTIVE=true
+    tput civis 2>/dev/null || true  # Hide cursor
+}
+
+# Update and draw progress bar at bottom of screen
+# Usage: progress_bar_update current total "Operation" "detail"
+progress_bar_update() {
+    local current="${1:-0}"
+    local total="${2:-1}"
+    local operation="${3:-Working}"
+    local detail="${4:-}"
+
+    if [ "$PROGRESS_BAR_ACTIVE" != true ]; then
+        return
+    fi
+
+    local term_width=$(tput cols 2>/dev/null || echo 80)
+    local term_height=$(tput lines 2>/dev/null || echo 24)
+
+    # Calculate percentage
+    local percent=0
+    if [ "$total" -gt 0 ] 2>/dev/null; then
+        percent=$((current * 100 / total))
+    fi
+
+    # Build progress bar - fixed width of 20
+    local bar_width=20
+    local filled=$((percent * bar_width / 100))
+    local empty=$((bar_width - filled))
+
+    local bar=""
+    for ((i=0; i<filled; i++)); do bar+="█"; done
+    for ((i=0; i<empty; i++)); do bar+="░"; done
+
+    # Build the status line
+    local info=""
+    if [ -n "$detail" ]; then
+        info="${operation}: ${detail}"
+    else
+        info="${operation}"
+    fi
+
+    # Truncate info if needed
+    local max_info=$((term_width - 35))
+    if [ ${#info} -gt $max_info ] && [ $max_info -gt 3 ]; then
+        info="${info:0:$((max_info - 3))}..."
+    fi
+
+    # Save cursor, move to bottom, draw, restore cursor
+    tput sc 2>/dev/null || true
+    tput cup $((term_height - 1)) 0 2>/dev/null || true
+
+    # Clear line and draw progress bar
+    echo -ne "\033[2K ${GREEN}${bar}${NC} ${percent}% │ ${CYAN}${info}${NC}"
+
+    tput rc 2>/dev/null || true
+}
+
+# Clean up progress bar
+progress_bar_cleanup() {
+    if [ "$PROGRESS_BAR_ACTIVE" != true ]; then
+        return
+    fi
+
+    PROGRESS_BAR_ACTIVE=false
+
+    local term_height=$(tput lines 2>/dev/null || echo 24)
+
+    # Clear the progress bar line
+    tput cup $((term_height - 1)) 0 2>/dev/null || true
+    echo -ne "\033[2K"
+
+    tput cnorm 2>/dev/null || true  # Show cursor
+}
+
+# Get list of images from CYROID registry
+get_registry_images() {
+    local images=""
+
+    # Query registry catalog
+    local catalog=$(curl -s "${REGISTRY_URL}/v2/_catalog" 2>/dev/null) || true
+
+    if [ -z "$catalog" ] || echo "$catalog" | grep -q "error\|connection refused" 2>/dev/null; then
+        return 1
+    fi
+
+    # Parse repository names from JSON response
+    local repos=$(echo "$catalog" | grep -oE '"[^"]+/[^"]+"' | tr -d '"' | sort -u) || true
+
+    if [ -z "$repos" ]; then
+        # Try alternate JSON parsing
+        repos=$(echo "$catalog" | sed 's/.*"repositories":\[//;s/\].*//' | tr ',' '\n' | tr -d '"[] ' | grep -v '^$') || true
+    fi
+
+    # Get tags for each repository
+    for repo in $repos; do
+        local tags_json=$(curl -s "${REGISTRY_URL}/v2/${repo}/tags/list" 2>/dev/null) || true
+        local tags=$(echo "$tags_json" | sed 's/.*"tags":\[//;s/\].*//' | tr ',' '\n' | tr -d '"[] ' | grep -v '^$' | grep -v 'null') || true
+
+        for tag in $tags; do
+            if [ -n "$tag" ]; then
+                echo "localhost:5000/${repo}:${tag}"
+            fi
+        done
+    done
+}
+
+backup_images() {
+    local backup_name="${1:-}"
+
+    tui_title "Backup Registry Images"
+    echo ""
+
+    tui_info "Scanning CYROID registry at ${REGISTRY_URL}..."
+    echo ""
+
+    # Get images from registry
+    local all_images=$(get_registry_images)
+
+    if [ -z "$all_images" ]; then
+        tui_error "No images found in CYROID registry"
+        tui_info "Make sure CYROID is running and the registry has images"
+        return 1
+    fi
+
+    local total_count=$(echo "$all_images" | wc -l | tr -d ' ')
+    tui_info "Found $total_count images in registry"
+    echo ""
+
+    # Let user select which images to backup
+    local selected_images=""
+
+    if [ "$USE_TUI" = true ] && command -v gum &> /dev/null; then
+        tui_info "Select images to backup (space to select, enter to confirm):"
+        echo ""
+
+        # Use gum filter with multi-select
+        selected_images=$(echo "$all_images" | gum filter --no-limit --header "Select images (space=select, enter=confirm):" --placeholder "Type to filter...") || true
+
+        if [ -z "$selected_images" ]; then
+            # If filter returned nothing, offer to select all
+            if gum confirm "No images selected. Backup all $total_count images?"; then
+                selected_images="$all_images"
+            else
+                tui_info "Backup cancelled"
+                return 0
+            fi
+        fi
+    else
+        # Non-TUI mode: show numbered list
+        echo "Available images:"
+        local i=1
+        echo "$all_images" | while read -r img; do
+            echo "  [$i] $img"
+            i=$((i + 1))
+        done
+        echo ""
+        echo "Enter image numbers to backup (comma-separated, or 'all'):"
+        read -p "> " selection
+
+        if [ "$selection" = "all" ]; then
+            selected_images="$all_images"
+        else
+            # Parse comma-separated numbers
+            for num in $(echo "$selection" | tr ',' ' '); do
+                local img=$(echo "$all_images" | sed -n "${num}p")
+                [ -n "$img" ] && selected_images="${selected_images}${img}"$'\n'
+            done
+        fi
+    fi
+
+    if [ -z "$selected_images" ]; then
+        tui_info "No images selected, backup cancelled"
+        return 0
+    fi
+
+    local image_count=$(echo "$selected_images" | grep -v '^$' | wc -l | tr -d ' ')
+    echo ""
+    tui_info "Selected $image_count images for backup"
+
+    # Get backup name if not provided
+    if [ -z "$backup_name" ]; then
+        if [ "$USE_TUI" = true ] && command -v gum &> /dev/null; then
+            backup_name=$(gum input --placeholder "Enter backup name" --value "$(date +%Y%m%d_%H%M%S)")
+        else
+            read -p "Backup name [$(date +%Y%m%d_%H%M%S)]: " backup_name
+            [ -z "$backup_name" ] && backup_name="$(date +%Y%m%d_%H%M%S)"
+        fi
+    fi
+
+    local backup_path="$BACKUP_DIR/$backup_name"
+    mkdir -p "$backup_path"
+
+    echo ""
+    tui_info "Backup location: $backup_path"
+    echo ""
+
+    if [ "$USE_TUI" = true ] && command -v gum &> /dev/null; then
+        if ! gum confirm "Proceed with backup of $image_count images?"; then
+            tui_info "Backup cancelled"
+            rm -rf "$backup_path"
+            return 0
+        fi
+    else
+        read -p "Proceed with backup? [Y/n]: " confirm
+        if [[ "$confirm" =~ ^[Nn] ]]; then
+            echo "Backup cancelled"
+            rm -rf "$backup_path"
+            return 0
+        fi
+    fi
+
+    echo ""
+    tui_info "Starting backup (this may take a while)..."
+
+    # Initialize progress bar
+    progress_bar_init
+
+    local current=0
+    local failed=0
+
+    # Store selected images to a temp file for reliable iteration with counter
+    local temp_images="/tmp/cyroid_backup_images_$$"
+    echo "$selected_images" | grep -v '^$' > "$temp_images"
+
+    while IFS= read -r img; do
+        if [ -n "$img" ]; then
+            current=$((current + 1))
+            local safe_name=$(echo "$img" | tr '/:' '_')
+            local tar_file="$backup_path/${safe_name}.tar"
+
+            # Update progress bar - Pulling phase
+            progress_bar_update "$current" "$image_count" "Backup" "Pulling: $img"
+            echo "  [$current/$image_count] $img"
+
+            # First pull from registry to ensure we have it locally
+            if ! docker pull "$img" >/dev/null 2>&1; then
+                echo -e "    ${RED}✗${NC} Failed to pull from registry"
+                failed=$((failed + 1))
+                continue
+            fi
+
+            # Update progress bar - Saving phase
+            progress_bar_update "$current" "$image_count" "Backup" "Saving: $img"
+
+            if docker save "$img" -o "$tar_file" 2>/dev/null; then
+                # Update progress bar - Compressing phase
+                progress_bar_update "$current" "$image_count" "Backup" "Compressing: ${safe_name}.tar"
+
+                gzip -f "$tar_file" 2>/dev/null || true
+                local size=$(du -h "${tar_file}.gz" 2>/dev/null | cut -f1) || size="?"
+                echo -e "    ${GREEN}✓${NC} ${safe_name}.tar.gz ($size)"
+                echo "$img|${safe_name}.tar.gz" >> "$backup_path/manifest.txt"
+            else
+                echo -e "    ${RED}✗${NC} FAILED to save"
+                failed=$((failed + 1))
+            fi
+        fi
+    done < "$temp_images"
+
+    rm -f "$temp_images"
+
+    # Clean up progress bar
+    progress_bar_cleanup
+
+    # Save metadata
+    cat > "$backup_path/backup_info.txt" << EOF
+CYROID Registry Image Backup
+Created: $(date)
+Host: $(hostname)
+Images: $image_count
+Source: ${REGISTRY_URL}
+EOF
+
+    echo ""
+    local backup_size=$(du -sh "$backup_path" 2>/dev/null | cut -f1) || backup_size="unknown"
+    tui_success "Backup complete: $backup_path ($backup_size)"
+
+    if [ "$failed" -gt 0 ]; then
+        tui_warn "$failed image(s) failed to backup"
+    fi
+
+    echo ""
+    tui_info "To restore, run: $0 --restore $backup_name"
+}
+
+restore_images() {
+    local backup_name="$1"
+
+    tui_title "Restore Registry Images"
+    echo ""
+
+    # List available backups if no name specified
+    if [ -z "$backup_name" ]; then
+        if [ ! -d "$BACKUP_DIR" ]; then
+            tui_error "No backups found at $BACKUP_DIR"
+            return 1
+        fi
+
+        local backups=$(ls -1 "$BACKUP_DIR" 2>/dev/null | sort -r) || true
+
+        if [ -z "$backups" ]; then
+            tui_error "No backups found"
+            return 1
+        fi
+
+        tui_info "Available backups:"
+        echo ""
+
+        echo "$backups" | while read -r b; do
+            if [ -d "$BACKUP_DIR/$b" ]; then
+                local size=$(du -sh "$BACKUP_DIR/$b" 2>/dev/null | cut -f1) || size="?"
+                local date_info=""
+                [ -f "$BACKUP_DIR/$b/backup_info.txt" ] && date_info=$(grep "Created:" "$BACKUP_DIR/$b/backup_info.txt" | cut -d: -f2-) || true
+                echo "  • $b ($size) $date_info"
+            fi
+        done
+
+        echo ""
+
+        if [ "$USE_TUI" = true ] && command -v gum &> /dev/null; then
+            backup_name=$(echo "$backups" | gum choose --header "Select backup to restore:")
+        else
+            read -p "Enter backup name: " backup_name
+        fi
+
+        if [ -z "$backup_name" ]; then
+            tui_info "Restore cancelled"
+            return 0
+        fi
+    fi
+
+    local backup_path="$BACKUP_DIR/$backup_name"
+
+    if [ ! -d "$backup_path" ]; then
+        tui_error "Backup not found: $backup_path"
+        return 1
+    fi
+
+    # Get list of images from manifest
+    if [ ! -f "$backup_path/manifest.txt" ]; then
+        tui_error "No manifest found in backup - cannot determine image names"
+        return 1
+    fi
+
+    # Read manifest into array-like format
+    local all_images=$(cat "$backup_path/manifest.txt" | cut -d'|' -f1)
+    local total_count=$(echo "$all_images" | wc -l | tr -d ' ')
+
+    tui_info "Backup: $backup_name"
+    tui_info "Total images in backup: $total_count"
+    echo ""
+
+    # Let user select which images to restore
+    local selected_images=""
+
+    if [ "$USE_TUI" = true ] && command -v gum &> /dev/null; then
+        tui_info "Select images to restore (space to select, enter to confirm):"
+        echo ""
+
+        # Use gum filter with multi-select
+        selected_images=$(echo "$all_images" | gum filter --no-limit --header "Select images (space=select, enter=confirm):" --placeholder "Type to filter...") || true
+
+        if [ -z "$selected_images" ]; then
+            # If filter returned nothing, offer to restore all
+            if gum confirm "No images selected. Restore all $total_count images?"; then
+                selected_images="$all_images"
+            else
+                tui_info "Restore cancelled"
+                return 0
+            fi
+        fi
+    else
+        # Non-TUI mode: show numbered list
+        echo "Available images:"
+        local i=1
+        echo "$all_images" | while read -r img; do
+            echo "  [$i] $img"
+            i=$((i + 1))
+        done
+        echo ""
+        echo "Enter image numbers to restore (comma-separated, or 'all'):"
+        read -p "> " selection
+
+        if [ "$selection" = "all" ]; then
+            selected_images="$all_images"
+        else
+            # Parse comma-separated numbers
+            for num in $(echo "$selection" | tr ',' ' '); do
+                local img=$(echo "$all_images" | sed -n "${num}p")
+                [ -n "$img" ] && selected_images="${selected_images}${img}"$'\n'
+            done
+        fi
+    fi
+
+    if [ -z "$selected_images" ]; then
+        tui_info "No images selected, restore cancelled"
+        return 0
+    fi
+
+    local image_count=$(echo "$selected_images" | grep -v '^$' | wc -l | tr -d ' ')
+    echo ""
+    tui_info "Selected $image_count images for restore"
+    echo ""
+
+    if [ "$USE_TUI" = true ] && command -v gum &> /dev/null; then
+        if ! gum confirm "Proceed with restore of $image_count images?"; then
+            tui_info "Restore cancelled"
+            return 0
+        fi
+    else
+        read -p "Proceed with restore? [Y/n]: " confirm
+        if [[ "$confirm" =~ ^[Nn] ]]; then
+            echo "Restore cancelled"
+            return 0
+        fi
+    fi
+
+    echo ""
+    tui_info "Restoring images..."
+
+    # Initialize progress bar
+    progress_bar_init
+
+    local current=0
+    local failed=0
+
+    # Store selected images to a temp file for reliable iteration with counter
+    local temp_images="/tmp/cyroid_restore_images_$$"
+    echo "$selected_images" | grep -v '^$' > "$temp_images"
+
+    while IFS= read -r img; do
+        if [ -n "$img" ]; then
+            current=$((current + 1))
+
+            # Find the tar file for this image from manifest
+            local tar_filename=$(grep "^${img}|" "$backup_path/manifest.txt" | cut -d'|' -f2)
+
+            if [ -z "$tar_filename" ]; then
+                echo "  [$current/$image_count] $img"
+                echo -e "    ${RED}✗${NC} NOT FOUND in manifest"
+                failed=$((failed + 1))
+                continue
+            fi
+
+            local tar_file="$backup_path/$tar_filename"
+
+            if [ ! -f "$tar_file" ]; then
+                echo "  [$current/$image_count] $img"
+                echo -e "    ${RED}✗${NC} FILE NOT FOUND: $tar_filename"
+                failed=$((failed + 1))
+                continue
+            fi
+
+            # Update progress bar - Decompressing phase
+            progress_bar_update "$current" "$image_count" "Restore" "Decompressing: $tar_filename"
+            echo "  [$current/$image_count] $img"
+
+            # Update progress bar - Loading phase
+            progress_bar_update "$current" "$image_count" "Restore" "Loading: $img"
+
+            if gunzip -c "$tar_file" | docker load >/dev/null 2>&1; then
+                echo -e "    ${GREEN}✓${NC} Loaded"
+                echo "$img" >> /tmp/cyroid_restored_images.txt
+            else
+                echo -e "    ${RED}✗${NC} FAILED to load"
+                failed=$((failed + 1))
+            fi
+        fi
+    done < "$temp_images"
+
+    rm -f "$temp_images"
+
+    # Clean up progress bar
+    progress_bar_cleanup
+
+    echo ""
+    tui_success "Restored $((image_count - failed)) of $image_count images"
+
+    if [ "$failed" -gt 0 ]; then
+        tui_warn "$failed image(s) failed to restore"
+    fi
+
+    # Offer to push to local registry
+    echo ""
+    tui_info "To use restored images in CYROID, push them to the local registry."
+    echo ""
+
+    if [ "$USE_TUI" = true ] && command -v gum &> /dev/null; then
+        if gum confirm "Push restored images to CYROID registry?"; then
+            push_restored_to_registry
+        fi
+    else
+        read -p "Push restored images to CYROID registry? [Y/n]: " push_confirm
+        if [[ ! "$push_confirm" =~ ^[Nn] ]]; then
+            push_restored_to_registry
+        fi
+    fi
+
+    # Cleanup temp file
+    rm -f /tmp/cyroid_restored_images.txt
+}
+
+push_to_registry() {
+    tui_info "Pushing images to CYROID registry..."
+
+    # Get localhost:5000 images that need to be pushed
+    local images=$(docker images --format "{{.Repository}}:{{.Tag}}" 2>/dev/null | grep "localhost:5000" | grep -v "<none>") || true
+
+    if [ -z "$images" ]; then
+        tui_warn "No images found for local registry"
+        return
+    fi
+
+    echo "$images" | while read -r img; do
+        if [ -n "$img" ]; then
+            echo "  Pushing: $img"
+            docker push "$img" 2>/dev/null || echo "    → Failed (registry may not be running)"
+        fi
+    done
+
+    tui_success "Push complete"
+}
+
+push_restored_to_registry() {
+    tui_info "Pushing restored images to CYROID registry..."
+
+    # Check if registry is running
+    if ! curl -s "${REGISTRY_URL}/v2/" >/dev/null 2>&1; then
+        tui_error "CYROID registry is not running"
+        tui_info "Start CYROID first with: $0 --start"
+        return 1
+    fi
+
+    # Get list of restored images from temp file or scan docker
+    local images=""
+    if [ -f /tmp/cyroid_restored_images.txt ]; then
+        images=$(cat /tmp/cyroid_restored_images.txt | sort -u)
+    else
+        # Fallback: get all localhost:5000 images
+        images=$(docker images --format "{{.Repository}}:{{.Tag}}" 2>/dev/null | grep "localhost:5000" | grep -v "<none>") || true
+    fi
+
+    if [ -z "$images" ]; then
+        tui_warn "No images to push"
+        return
+    fi
+
+    local total=$(echo "$images" | grep -v '^$' | wc -l | tr -d ' ')
+    local current=0
+    local failed=0
+
+    # Initialize progress bar
+    progress_bar_init
+
+    # Store images to temp file for reliable iteration
+    local temp_images="/tmp/cyroid_push_images_$$"
+    echo "$images" | grep -v '^$' > "$temp_images"
+
+    while IFS= read -r img; do
+        if [ -n "$img" ]; then
+            current=$((current + 1))
+            progress_bar_update "$current" "$total" "Push" "Pushing: $img"
+            echo "  [$current/$total] $img"
+
+            if docker push "$img" >/dev/null 2>&1; then
+                echo -e "    ${GREEN}✓${NC} Pushed"
+            else
+                echo -e "    ${RED}✗${NC} FAILED (check if registry is running)"
+                failed=$((failed + 1))
+            fi
+        fi
+    done < "$temp_images"
+
+    rm -f "$temp_images"
+
+    # Clean up progress bar
+    progress_bar_cleanup
+
+    echo ""
+    if [ "$failed" -gt 0 ]; then
+        tui_warn "$failed image(s) failed to push"
+    else
+        tui_success "All images pushed to registry"
+    fi
+}
+
+list_backups() {
+    tui_title "Available Image Backups"
+    echo ""
+
+    if [ ! -d "$BACKUP_DIR" ]; then
+        tui_info "No backups found"
+        tui_info "Backup location: $BACKUP_DIR"
+        return
+    fi
+
+    local backups=$(ls -1 "$BACKUP_DIR" 2>/dev/null) || true
+
+    if [ -z "$backups" ]; then
+        tui_info "No backups found"
+        return
+    fi
+
+    echo "$backups" | while read -r b; do
+        if [ -d "$BACKUP_DIR/$b" ]; then
+            local size=$(du -sh "$BACKUP_DIR/$b" 2>/dev/null | cut -f1) || size="?"
+            local image_count=$(ls -1 "$BACKUP_DIR/$b"/*.tar.gz 2>/dev/null | wc -l | tr -d ' ') || image_count="?"
+
+            echo ""
+            gum style --foreground 212 --bold "  $b"
+            echo "    Size: $size"
+            echo "    Images: $image_count"
+
+            if [ -f "$BACKUP_DIR/$b/backup_info.txt" ]; then
+                local created=$(grep "Created:" "$BACKUP_DIR/$b/backup_info.txt" | cut -d: -f2-) || true
+                [ -n "$created" ] && echo "    Created:$created"
+            fi
+        fi
+    done
+
+    echo ""
+    tui_info "Backup location: $BACKUP_DIR"
+}
+
+delete_backup() {
+    local backup_name="$1"
+
+    if [ -z "$backup_name" ]; then
+        # List and select
+        local backups=$(ls -1 "$BACKUP_DIR" 2>/dev/null | sort -r) || true
+
+        if [ -z "$backups" ]; then
+            tui_error "No backups found"
+            return 1
+        fi
+
+        if [ "$USE_TUI" = true ] && command -v gum &> /dev/null; then
+            backup_name=$(echo "$backups" | gum choose --header "Select backup to delete:")
+        else
+            list_backups
+            read -p "Enter backup name to delete: " backup_name
+        fi
+    fi
+
+    if [ -z "$backup_name" ]; then
+        return 0
+    fi
+
+    local backup_path="$BACKUP_DIR/$backup_name"
+
+    if [ ! -d "$backup_path" ]; then
+        tui_error "Backup not found: $backup_name"
+        return 1
+    fi
+
+    local size=$(du -sh "$backup_path" 2>/dev/null | cut -f1) || size="?"
+
+    if [ "$USE_TUI" = true ] && command -v gum &> /dev/null; then
+        if gum confirm "Delete backup '$backup_name' ($size)?"; then
+            rm -rf "$backup_path"
+            tui_success "Backup deleted: $backup_name"
+        fi
+    else
+        read -p "Delete backup '$backup_name' ($size)? [y/N]: " confirm
+        if [[ "$confirm" =~ ^[Yy] ]]; then
+            rm -rf "$backup_path"
+            echo "Backup deleted: $backup_name"
+        fi
+    fi
 }
 
 check_prerequisites() {
@@ -1339,6 +2043,11 @@ show_help() {
     echo "  --update           Update to new version (interactive selection)"
     echo "  --status           Show current status and health"
     echo ""
+    echo "Image Backup/Restore:"
+    echo "  --backup [NAME]    Backup all CYROID Docker images to disk"
+    echo "  --restore [NAME]   Restore Docker images from a backup"
+    echo "                     NAME is optional - interactive selection if omitted"
+    echo ""
     echo "Deploy Options:"
     echo "  --domain DOMAIN    Domain name for the server"
     echo "  --ip IP            IP address for the server"
@@ -1360,6 +2069,14 @@ show_help() {
     echo ""
     echo "  # Check status"
     echo "  $0 --status"
+    echo ""
+    echo "  # Backup Docker images"
+    echo "  $0 --backup                         # Interactive name selection"
+    echo "  $0 --backup my-backup               # Named backup"
+    echo ""
+    echo "  # Restore Docker images"
+    echo "  $0 --restore                        # Interactive backup selection"
+    echo "  $0 --restore my-backup              # Restore specific backup"
 }
 
 # =============================================================================
@@ -1715,24 +2432,37 @@ pull_images() {
         local total=$(echo "$images" | wc -l | tr -d ' ')
         echo ""
         tui_info "Pulling $total images for $DOCKER_PLATFORM:"
-        echo "$images" | while read -r img; do
-            local name=$(echo "$img" | sed 's/.*\///' | cut -d: -f1)
-            echo "  - $name"
-        done
-        echo ""
-    fi
 
-    # Pull with docker compose (more reliable, handles auth, shows progress)
-    # DOCKER_DEFAULT_PLATFORM is already exported by detect_platform
-    if [ "$USE_TUI" = true ] && command -v gum &> /dev/null && [ -t 0 ]; then
-        # Use compose pull without -q to show progress, gum will capture it
-        $compose_cmd -f docker-compose.yml -f docker-compose.prod.yml pull 2>&1 | while read -r line; do
-            # Show pull progress
-            if echo "$line" | grep -q "Pull"; then
-                echo "  $line"
+        local current=0
+        # Store images to temp file for reliable iteration
+        local temp_images="/tmp/cyroid_pull_images_$$"
+        echo "$images" > "$temp_images"
+
+        while IFS= read -r img; do
+            current=$((current + 1))
+            local name=$(echo "$img" | sed 's/.*\///' | cut -d: -f1)
+
+            # Update progress
+            if [ "$TUI_FULLSCREEN" = true ]; then
+                tui_set_status "Pulling ($current/$total): $name" "progress"
+            else
+                progress_bar_update "$current" "$total" "Pull Images" "$img"
             fi
-        done
+
+            echo "  [$current/$total] $name"
+
+            # Pull individual image (DOCKER_DEFAULT_PLATFORM is exported by detect_platform)
+            if docker pull "$img" >/dev/null 2>&1; then
+                echo -e "    ${GREEN}✓${NC} Pulled"
+            else
+                echo -e "    ${YELLOW}⚠${NC} May already exist locally"
+            fi
+        done < "$temp_images"
+
+        rm -f "$temp_images"
+        echo ""
     else
+        # Fallback to compose pull if we can't parse images
         $compose_cmd -f docker-compose.yml -f docker-compose.prod.yml pull
     fi
 }
@@ -1770,8 +2500,12 @@ wait_for_health() {
         local healthy_count=$(docker_compose_cmd -f docker-compose.yml -f docker-compose.prod.yml ps 2>/dev/null | grep -c "(healthy)" || echo "0")
         local running_count=$(docker_compose_cmd -f docker-compose.yml -f docker-compose.prod.yml ps 2>/dev/null | grep -c "Up" || echo "0")
 
-        # Update status bar with current health status
-        tui_set_status "Waiting for services... ($healthy_count/$target_healthy healthy, $running_count running)" "progress"
+        # Update progress bar
+        if [ "$TUI_FULLSCREEN" = true ]; then
+            tui_set_status "Waiting for services... ($healthy_count/$target_healthy healthy, $running_count running)" "progress"
+        else
+            progress_bar_update "$healthy_count" "$target_healthy" "Health Check" "$healthy_count/$target_healthy healthy, $running_count running"
+        fi
 
         if [ "$healthy_count" -ge "$target_healthy" ]; then
             tui_set_status "All services healthy!" "success"
@@ -1781,7 +2515,7 @@ wait_for_health() {
 
         attempt=$((attempt + 1))
 
-        # Show dots in non-TUI mode
+        # Show dots in non-TUI mode without progress bar
         if [ "$USE_TUI" != true ]; then
             echo -n "."
         fi
@@ -2019,10 +2753,15 @@ do_deploy() {
         interactive_setup
     fi
 
-    # Initialize full-screen TUI for deployment
+    # Initialize TUI for deployment
     if [ "$USE_TUI" = true ]; then
         tui_init_fullscreen
         tui_set_status "Initializing deployment..." "info"
+    fi
+
+    # Initialize progress bar for non-fullscreen mode
+    if [ "$TUI_FULLSCREEN" != true ] && [ "$USE_TUI" = true ]; then
+        progress_bar_init
     fi
 
     tui_main_area
@@ -2031,7 +2770,11 @@ do_deploy() {
     echo ""
 
     # Pre-flight checks
-    tui_set_status "Running pre-flight checks..." "progress"
+    if [ "$TUI_FULLSCREEN" = true ]; then
+        tui_set_status "Running pre-flight checks..." "progress"
+    else
+        progress_bar_update 0 7 "Deploy" "Running pre-flight checks..."
+    fi
     check_data_dir_writable
     backup_env_file
 
@@ -2082,9 +2825,11 @@ do_deploy() {
     # Deployment complete
     tui_set_status "Deployment complete!" "success"
 
-    # Clean up fullscreen mode before showing access info
+    # Clean up TUI modes before showing access info
     if [ "$TUI_FULLSCREEN" = true ]; then
         tui_cleanup_fullscreen
+    elif [ "$PROGRESS_BAR_ACTIVE" = true ]; then
+        progress_bar_cleanup
     fi
 
     show_access_info
@@ -2112,6 +2857,7 @@ management_menu() {
                 "Show status" \
                 "Restart services" \
                 "Stop services" \
+                "Image Backup/Restore" \
                 "Clean up (stop + remove data)" \
                 "Exit")
 
@@ -2155,6 +2901,37 @@ management_menu() {
                         tui_info "Run '$0 --start' to start again"
                         break
                     fi
+                    ;;
+                "Image Backup/Restore"*)
+                    echo ""
+                    local backup_choice
+                    backup_choice=$(gum choose --header "Image Backup/Restore" \
+                        "Backup images (save to disk)" \
+                        "Restore images (load from backup)" \
+                        "List backups" \
+                        "Delete backup" \
+                        "← Back")
+
+                    case "$backup_choice" in
+                        "Backup"*)
+                            echo ""
+                            local backup_name
+                            backup_name=$(gum input --placeholder "$(date +%Y%m%d_%H%M%S)" --header "Backup name (or press Enter for timestamp):")
+                            backup_images "$backup_name"
+                            ;;
+                        "Restore"*)
+                            restore_images
+                            ;;
+                        "List"*)
+                            list_backups
+                            ;;
+                        "Delete"*)
+                            delete_backup
+                            ;;
+                        "← Back"*)
+                            continue
+                            ;;
+                    esac
                     ;;
                 "Clean up"*)
                     echo ""
@@ -2254,6 +3031,37 @@ management_menu() {
                         echo ""
                     fi
 
+                    # Check for image backups - PROTECT BY DEFAULT
+                    local delete_backups=false
+                    local backup_list=""
+                    if [ -d "$BACKUP_DIR" ]; then
+                        backup_list=$(ls -1 "$BACKUP_DIR" 2>/dev/null) || true
+                    fi
+
+                    if [ -n "$backup_list" ]; then
+                        local backup_count=$(echo "$backup_list" | wc -l | tr -d ' ')
+                        local backup_size=$(du -sh "$BACKUP_DIR" 2>/dev/null | cut -f1) || backup_size="unknown"
+
+                        echo ""
+                        gum style --foreground 212 --bold "  Image Backups Found: $backup_count ($backup_size total)"
+                        echo ""
+                        echo "  Backups are stored separately at: $BACKUP_DIR"
+                        echo "  These will be ${GREEN}PRESERVED${NC} by default."
+                        echo ""
+                        echo "$backup_list" | while read -r b; do
+                            [ -n "$b" ] && echo "    • $b"
+                        done
+                        echo ""
+
+                        if gum confirm --affirmative="Delete backups too" --negative="Keep backups (recommended)" --default=false "Also delete image backups?"; then
+                            delete_backups=true
+                            tui_warn "Image backups will also be deleted!"
+                        else
+                            tui_success "Image backups will be preserved"
+                        fi
+                        echo ""
+                    fi
+
                     if gum confirm --affirmative="Yes, delete everything" --negative="Cancel" "Are you sure? This cannot be undone."; then
                         # Delete ranges first if requested
                         if [ "$delete_ranges" = true ]; then
@@ -2312,6 +3120,16 @@ management_menu() {
                         # Clean up traefik certs
                         rm -f "$PROJECT_ROOT/traefik/acme.json" 2>/dev/null || true
                         rm -rf "$PROJECT_ROOT/traefik/certs" 2>/dev/null || true
+
+                        # Delete backups only if explicitly requested
+                        if [ "$delete_backups" = true ] && [ -d "$BACKUP_DIR" ]; then
+                            tui_info "Removing image backups..."
+                            rm -rf "$BACKUP_DIR"
+                            tui_success "Image backups removed"
+                        elif [ -d "$BACKUP_DIR" ] && [ -n "$backup_list" ]; then
+                            echo ""
+                            tui_success "Image backups preserved at: $BACKUP_DIR"
+                        fi
 
                         echo ""
                         tui_success "Cleanup complete"
@@ -2441,6 +3259,31 @@ management_menu() {
                         echo ""
                     fi
 
+                    # Check for image backups - PROTECT BY DEFAULT
+                    local delete_backups=false
+                    local backup_list=""
+                    if [ -d "$BACKUP_DIR" ]; then
+                        backup_list=$(ls -1 "$BACKUP_DIR" 2>/dev/null) || true
+                    fi
+
+                    if [ -n "$backup_list" ]; then
+                        local backup_count=$(echo "$backup_list" | wc -l | tr -d ' ')
+                        local backup_size=$(du -sh "$BACKUP_DIR" 2>/dev/null | cut -f1) || backup_size="unknown"
+                        echo ""
+                        echo "  Image Backups Found: $backup_count ($backup_size total)"
+                        echo "  Location: $BACKUP_DIR"
+                        echo "  Backups will be PRESERVED by default."
+                        echo ""
+                        read -p "Also delete image backups? [y/N]: " backup_confirm
+                        if [[ "$backup_confirm" =~ ^[Yy] ]]; then
+                            delete_backups=true
+                            echo "Image backups will also be deleted."
+                        else
+                            echo "Image backups will be preserved."
+                        fi
+                        echo ""
+                    fi
+
                     read -p "Type 'DELETE' to confirm: " confirm
                     if [ "$confirm" = "DELETE" ]; then
                         # Delete ranges first if requested
@@ -2479,6 +3322,17 @@ management_menu() {
                         rm -f "$ENV_FILE" 2>/dev/null || true
                         rm -f "$PROJECT_ROOT/traefik/acme.json" 2>/dev/null || true
                         rm -rf "$PROJECT_ROOT/traefik/certs" 2>/dev/null || true
+
+                        # Delete backups only if explicitly requested
+                        if [ "$delete_backups" = true ] && [ -d "$BACKUP_DIR" ]; then
+                            echo "Removing image backups..."
+                            rm -rf "$BACKUP_DIR"
+                            echo "Image backups removed"
+                        elif [ -d "$BACKUP_DIR" ] && [ -n "$backup_list" ]; then
+                            echo ""
+                            echo "Image backups preserved at: $BACKUP_DIR"
+                        fi
+
                         echo "Cleanup complete"
                         break
                     fi
@@ -3329,6 +4183,28 @@ while [[ $# -gt 0 ]]; do
             ACTION="status"
             shift
             ;;
+        --backup)
+            ACTION="backup"
+            # Check if next arg is a backup name (not another option)
+            if [ $# -gt 1 ] && [[ ! "$2" =~ ^-- ]]; then
+                BACKUP_NAME="$2"
+                shift 2
+            else
+                BACKUP_NAME=""
+                shift
+            fi
+            ;;
+        --restore)
+            ACTION="restore"
+            # Check if next arg is a backup name (not another option)
+            if [ $# -gt 1 ] && [[ ! "$2" =~ ^-- ]]; then
+                BACKUP_NAME="$2"
+                shift 2
+            else
+                BACKUP_NAME=""
+                shift
+            fi
+            ;;
         --help|-h)
             show_help
             exit 0
@@ -3375,5 +4251,19 @@ case "$ACTION" in
         ;;
     status)
         do_status
+        ;;
+    backup)
+        if [ -n "$BACKUP_NAME" ]; then
+            backup_images "$BACKUP_NAME"
+        else
+            backup_images
+        fi
+        ;;
+    restore)
+        if [ -n "$BACKUP_NAME" ]; then
+            restore_images "$BACKUP_NAME"
+        else
+            restore_images
+        fi
         ;;
 esac
