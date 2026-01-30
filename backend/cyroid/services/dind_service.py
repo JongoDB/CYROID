@@ -100,6 +100,11 @@ class DinDService:
         """Get the network name for range DinD containers."""
         return getattr(settings, "cyroid_ranges_network", "cyroid-ranges")
 
+    @property
+    def mgmt_network(self) -> str:
+        """Get the management network name (for registry access)."""
+        return getattr(settings, "cyroid_mgmt_network", "cyroid-mgmt")
+
     async def ensure_dind_image(self) -> str:
         """Ensure the DinD image is available locally.
 
@@ -272,6 +277,14 @@ class DinDService:
         report_progress(f"Creating DinD container '{container_name}'...")
         container = self.host_client.containers.run(**container_config)
         report_progress(f"DinD container '{container_name}' created, getting network info...")
+
+        # Connect container to mgmt network for registry access
+        try:
+            mgmt_net = self.host_client.networks.get(self.mgmt_network)
+            mgmt_net.connect(container)
+            report_progress(f"Connected to {self.mgmt_network} network for registry access")
+        except Exception as e:
+            logger.warning(f"Could not connect to mgmt network: {e} - registry may not be accessible")
 
         # Get container info including IP
         container.reload()

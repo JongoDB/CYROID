@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 class RegistryService:
     """Service for interacting with the local Docker registry."""
 
-    REGISTRY_HOST = "cyroid-registry"
+    REGISTRY_HOST = "registry"  # Docker Compose service name
     REGISTRY_PORT = 5000
     REGISTRY_URL = f"http://{REGISTRY_HOST}:{REGISTRY_PORT}"
     REGISTRY_IP = "172.30.0.16"
