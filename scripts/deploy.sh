@@ -946,6 +946,111 @@ BACKUP_DIR="${CYROID_BACKUP_DIR:-$HOME/.cyroid-backups}"
 # Use 127.0.0.1 explicitly - 'localhost' may resolve to IPv6 and conflict with macOS AirPlay on port 5000
 REGISTRY_URL="http://127.0.0.1:5000"
 
+# Progress bar state
+PROGRESS_BAR_ACTIVE=false
+PROGRESS_SAVED_POS=""
+
+# Initialize bottom progress bar
+progress_bar_init() {
+    if [ "$USE_TUI" != true ]; then
+        return
+    fi
+
+    PROGRESS_BAR_ACTIVE=true
+
+    # Get terminal height
+    local term_height=$(tput lines 2>/dev/null || echo 24)
+
+    # Reserve bottom 2 lines for progress bar
+    echo ""
+    echo ""
+
+    # Hide cursor during progress
+    tput civis 2>/dev/null || true
+}
+
+# Update bottom progress bar
+# Usage: progress_bar_update current total "Operation" "detail"
+progress_bar_update() {
+    local current="$1"
+    local total="$2"
+    local operation="$3"
+    local detail="${4:-}"
+
+    if [ "$USE_TUI" != true ]; then
+        return
+    fi
+
+    local term_width=$(tput cols 2>/dev/null || echo 80)
+    local term_height=$(tput lines 2>/dev/null || echo 24)
+
+    # Calculate percentage
+    local percent=0
+    if [ "$total" -gt 0 ]; then
+        percent=$((current * 100 / total))
+    fi
+
+    # Build progress bar (width = 30 chars)
+    local bar_width=30
+    local filled=$((percent * bar_width / 100))
+    local empty=$((bar_width - filled))
+
+    local bar=""
+    for ((i=0; i<filled; i++)); do bar+="█"; done
+    for ((i=0; i<empty; i++)); do bar+="░"; done
+
+    # Build status line
+    local status_line="  ${CYAN}${operation}${NC} [${GREEN}${bar}${NC}] ${percent}% (${current}/${total})"
+
+    # Build detail line (truncate if needed)
+    local detail_line=""
+    if [ -n "$detail" ]; then
+        local max_detail=$((term_width - 4))
+        if [ ${#detail} -gt $max_detail ]; then
+            detail="${detail:0:$((max_detail - 3))}..."
+        fi
+        detail_line="  ${YELLOW}→${NC} ${detail}"
+    fi
+
+    # Save cursor position
+    tput sc 2>/dev/null || true
+
+    # Move to bottom of screen and draw
+    tput cup $((term_height - 2)) 0 2>/dev/null || true
+    # Clear line and draw status
+    printf "\033[2K%s" "$status_line"
+
+    tput cup $((term_height - 1)) 0 2>/dev/null || true
+    # Clear line and draw detail
+    printf "\033[2K%s" "$detail_line"
+
+    # Restore cursor position
+    tput rc 2>/dev/null || true
+}
+
+# Clean up progress bar
+progress_bar_cleanup() {
+    if [ "$USE_TUI" != true ]; then
+        return
+    fi
+
+    PROGRESS_BAR_ACTIVE=false
+
+    local term_height=$(tput lines 2>/dev/null || echo 24)
+
+    # Clear bottom lines
+    tput cup $((term_height - 2)) 0 2>/dev/null || true
+    printf "\033[2K"
+    tput cup $((term_height - 1)) 0 2>/dev/null || true
+    printf "\033[2K"
+
+    # Show cursor
+    tput cnorm 2>/dev/null || true
+
+    # Move cursor back up
+    tput cup $((term_height - 3)) 0 2>/dev/null || true
+}
+
 # Get list of images from CYROID registry
 get_registry_images() {
     local images=""
@@ -1085,39 +1190,56 @@ backup_images() {
 
     echo ""
     tui_info "Starting backup (this may take a while)..."
-    tui_set_status "Backing up images..." "progress"
+
+    # Initialize progress bar
+    progress_bar_init
 
     local current=0
     local failed=0
 
-    echo "$selected_images" | grep -v '^$' | while read -r img; do
+    # Store selected images to a temp file for reliable iteration with counter
+    local temp_images="/tmp/cyroid_backup_images_$$"
+    echo "$selected_images" | grep -v '^$' > "$temp_images"
+
+    while IFS= read -r img; do
         if [ -n "$img" ]; then
             current=$((current + 1))
             local safe_name=$(echo "$img" | tr '/:' '_')
             local tar_file="$backup_path/${safe_name}.tar"
 
-            tui_set_status "Backing up ($current/$image_count): $img" "progress"
+            # Update progress bar - Pulling phase
+            progress_bar_update "$current" "$image_count" "Backup" "Pulling: $img"
             echo "  [$current/$image_count] $img"
 
             # First pull from registry to ensure we have it locally
             if ! docker pull "$img" >/dev/null 2>&1; then
-                echo "    → Failed to pull from registry"
+                echo "    ${RED}✗${NC} Failed to pull from registry"
                 failed=$((failed + 1))
                 continue
             fi
 
+            # Update progress bar - Saving phase
+            progress_bar_update "$current" "$image_count" "Backup" "Saving: $img"
+
             if docker save "$img" -o "$tar_file" 2>/dev/null; then
-                # Compress with gzip
+                # Update progress bar - Compressing phase
+                progress_bar_update "$current" "$image_count" "Backup" "Compressing: ${safe_name}.tar"
+
                 gzip -f "$tar_file" 2>/dev/null || true
                 local size=$(du -h "${tar_file}.gz" 2>/dev/null | cut -f1) || size="?"
-                echo "    → ${safe_name}.tar.gz ($size)"
+                echo "    ${GREEN}✓${NC} ${safe_name}.tar.gz ($size)"
                 echo "$img|${safe_name}.tar.gz" >> "$backup_path/manifest.txt"
             else
-                echo "    → FAILED to save"
+                echo "    ${RED}✗${NC} FAILED to save"
                 failed=$((failed + 1))
             fi
         fi
-    done
+    done < "$temp_images"
+
+    rm -f "$temp_images"
+
+    # Clean up progress bar
+    progress_bar_cleanup
 
     # Save metadata
     cat > "$backup_path/backup_info.txt" << EOF
@@ -1129,8 +1251,6 @@ Source: ${REGISTRY_URL}
 EOF
 
     echo ""
-    tui_set_status "Backup complete!" "success"
-
     local backup_size=$(du -sh "$backup_path" 2>/dev/null | cut -f1) || backup_size="unknown"
     tui_success "Backup complete: $backup_path ($backup_size)"
 
@@ -1276,13 +1396,18 @@ restore_images() {
 
     echo ""
     tui_info "Restoring images..."
-    tui_set_status "Restoring images..." "progress"
+
+    # Initialize progress bar
+    progress_bar_init
 
     local current=0
     local failed=0
-    local restored_images=""
 
-    echo "$selected_images" | grep -v '^$' | while read -r img; do
+    # Store selected images to a temp file for reliable iteration with counter
+    local temp_images="/tmp/cyroid_restore_images_$$"
+    echo "$selected_images" | grep -v '^$' > "$temp_images"
+
+    while IFS= read -r img; do
         if [ -n "$img" ]; then
             current=$((current + 1))
 
@@ -1291,7 +1416,7 @@ restore_images() {
 
             if [ -z "$tar_filename" ]; then
                 echo "  [$current/$image_count] $img"
-                echo "    → NOT FOUND in manifest"
+                echo "    ${RED}✗${NC} NOT FOUND in manifest"
                 failed=$((failed + 1))
                 continue
             fi
@@ -1300,26 +1425,34 @@ restore_images() {
 
             if [ ! -f "$tar_file" ]; then
                 echo "  [$current/$image_count] $img"
-                echo "    → FILE NOT FOUND: $tar_filename"
+                echo "    ${RED}✗${NC} FILE NOT FOUND: $tar_filename"
                 failed=$((failed + 1))
                 continue
             fi
 
-            tui_set_status "Restoring ($current/$image_count): $img" "progress"
+            # Update progress bar - Decompressing phase
+            progress_bar_update "$current" "$image_count" "Restore" "Decompressing: $tar_filename"
             echo "  [$current/$image_count] $img"
 
+            # Update progress bar - Loading phase
+            progress_bar_update "$current" "$image_count" "Restore" "Loading: $img"
+
             if gunzip -c "$tar_file" | docker load >/dev/null 2>&1; then
-                echo "    → Loaded"
+                echo "    ${GREEN}✓${NC} Loaded"
                 echo "$img" >> /tmp/cyroid_restored_images.txt
             else
-                echo "    → FAILED to load"
+                echo "    ${RED}✗${NC} FAILED to load"
                 failed=$((failed + 1))
             fi
         fi
-    done
+    done < "$temp_images"
+
+    rm -f "$temp_images"
+
+    # Clean up progress bar
+    progress_bar_cleanup
 
     echo ""
-    tui_set_status "Restore complete!" "success"
     tui_success "Restored $((image_count - failed)) of $image_count images"
 
     if [ "$failed" -gt 0 ]; then
@@ -1395,20 +1528,32 @@ push_restored_to_registry() {
     local current=0
     local failed=0
 
-    echo "$images" | grep -v '^$' | while read -r img; do
+    # Initialize progress bar
+    progress_bar_init
+
+    # Store images to temp file for reliable iteration
+    local temp_images="/tmp/cyroid_push_images_$$"
+    echo "$images" | grep -v '^$' > "$temp_images"
+
+    while IFS= read -r img; do
         if [ -n "$img" ]; then
             current=$((current + 1))
-            tui_set_status "Pushing ($current/$total): $img" "progress"
+            progress_bar_update "$current" "$total" "Push" "Pushing: $img"
             echo "  [$current/$total] $img"
 
             if docker push "$img" >/dev/null 2>&1; then
-                echo "    → Pushed"
+                echo "    ${GREEN}✓${NC} Pushed"
             else
-                echo "    → FAILED (check if registry is running)"
+                echo "    ${RED}✗${NC} FAILED (check if registry is running)"
                 failed=$((failed + 1))
             fi
         fi
-    done
+    done < "$temp_images"
+
+    rm -f "$temp_images"
+
+    # Clean up progress bar
+    progress_bar_cleanup
 
     echo ""
     if [ "$failed" -gt 0 ]; then
