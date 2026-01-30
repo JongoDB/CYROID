@@ -2137,6 +2137,31 @@ create_data_directories() {
 
     log_info "Data directory: $DATA_DIR"
     log_info "Operating system: $OS_TYPE"
+
+    # Create registry config file if missing (must be a file, not directory)
+    local registry_config="$PROJECT_ROOT/config/registry-config.yml"
+    if [ -d "$registry_config" ]; then
+        log_warn "Removing invalid registry config directory"
+        rm -rf "$registry_config"
+    fi
+    if [ ! -f "$registry_config" ]; then
+        mkdir -p "$PROJECT_ROOT/config"
+        cat > "$registry_config" << 'REGISTRYEOF'
+version: 0.1
+log:
+  level: info
+storage:
+  filesystem:
+    rootdirectory: /var/lib/registry
+  delete:
+    enabled: true
+http:
+  addr: :5000
+  headers:
+    X-Content-Type-Options: [nosniff]
+REGISTRYEOF
+        log_info "Created registry config"
+    fi
 }
 
 create_env_file() {
@@ -2358,6 +2383,7 @@ entryPoints:
 providers:
   docker:
     exposedByDefault: false
+    network: cyroid-mgmt
   file:
     directory: /etc/traefik/dynamic
     watch: true
@@ -2487,6 +2513,15 @@ start_services() {
             echo "  $line"
         fi
     done || true
+
+    # Verify all containers started (retry any stuck in "Created" state)
+    sleep 2
+    local created_containers=$($compose_cmd -f docker-compose.yml -f docker-compose.prod.yml ps --filter "status=created" -q 2>/dev/null) || true
+    if [ -n "$created_containers" ]; then
+        log_warn "Some containers didn't start, retrying..."
+        echo "$created_containers" | xargs -r docker start 2>/dev/null || true
+        sleep 2
+    fi
 }
 
 wait_for_health() {
