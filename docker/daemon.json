@@ -1,5 +1,4 @@
 {
-    "hosts": ["unix:///var/run/docker.sock", "tcp://0.0.0.0:2375"],
     "storage-driver": "overlay2",
     "insecure-registries": ["cyroid-registry:5000", "172.30.0.16:5000"],
     "log-driver": "json-file",
