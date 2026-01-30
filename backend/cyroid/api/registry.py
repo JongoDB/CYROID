@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from cyroid.api.deps import CurrentUser, AdminUser
-from cyroid.services.registry_service import get_registry_service
+from cyroid.services.registry_service import get_registry_service, RegistryPushError
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/registry", tags=["registry"])
@@ -87,12 +87,11 @@ async def push_image_to_registry(
     if not await registry.is_healthy():
         raise HTTPException(status_code=503, detail="Registry is not healthy")
 
-    success = await registry.push_image(request.image_tag)
-
-    if success:
-        return PushResponse(success=True, message=f"Successfully pushed {request.image_tag}")
-    else:
-        raise HTTPException(status_code=500, detail=f"Failed to push {request.image_tag}")
+    try:
+        await registry.push_and_cleanup(request.image_tag)
+        return PushResponse(success=True, message=f"Pushed {request.image_tag} to registry and cleaned up host")
+    except RegistryPushError as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/status/{image_tag:path}", response_model=ImageStatusResponse)

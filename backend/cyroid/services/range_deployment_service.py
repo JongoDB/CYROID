@@ -308,13 +308,25 @@ class RangeDeploymentService:
                         event_service.log_event(
                             range_id=range_uuid,
                             event_type=EventType.DEPLOYMENT_STEP,
-                            message=f"Image {idx}/{len(unique_images)}: {image} found on host ({size_mb:.1f} MB)",
+                            message=f"Image {idx}/{len(unique_images)}: {image} ({size_mb:.1f} MB)",
+                        )
+                    elif status == 'pushing_to_registry':
+                        event_service.log_event(
+                            range_id=range_uuid,
+                            event_type=EventType.DEPLOYMENT_STEP,
+                            message=f"Ensuring {image} is in registry...",
+                        )
+                    elif status == 'pulling_from_registry':
+                        event_service.log_event(
+                            range_id=range_uuid,
+                            event_type=EventType.DEPLOYMENT_STEP,
+                            message=f"Pulling {image} from registry into DinD...",
                         )
                     elif status == 'transferring':
                         event_service.log_event(
                             range_id=range_uuid,
                             event_type=EventType.DEPLOYMENT_STEP,
-                            message=f"Copying {image} into DinD container (0%)...",
+                            message=f"Transferring {image} via tar (fallback)...",
                         )
                     elif status == 'already_exists':
                         event_service.log_event(
@@ -326,7 +338,7 @@ class RangeDeploymentService:
                         event_service.log_event(
                             range_id=range_uuid,
                             event_type=EventType.DEPLOYMENT_STEP,
-                            message=f"Pulling {image} from registry to host...",
+                            message=f"Pulling {image} to host...",
                         )
 
             try:

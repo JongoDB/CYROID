@@ -253,7 +253,13 @@
       "Bash(established\" errors during development.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
       "Bash(gh pr checks:*)",
       "Bash(gh run rerun:*)",
-      "Bash(alembic history:*)"
+      "Bash(alembic history:*)",
+      "Bash(gh pr edit:*)",
+      "Bash(git stash:*)",
+      "Bash(bash -n:*)",
+      "Bash(npm run typecheck:*)",
+      "Bash(git -C /Users/JonWFH/jondev/CYROID commit -m \"$\\(cat <<''EOF''\nfeat\\(scripts\\): add migration script for existing images to registry\n\nAdds migrate-images-to-registry.sh for installations upgrading to the\nnew registry-centric architecture. The script pushes all cyroid/* images\nfrom the host Docker daemon to the local registry, with an optional flag\nto remove them from the host after successful push.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(TOKEN=\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIzZTZjZDEyOC00NmIxLTRjMzAtYTcyNi0wZDBjOTg1ZmYwYjkiLCJleHAiOjE3Njk3NTI5MDV9.B3rn4VF881S8AmORlFGAQNB_WxnALl_5vsWg0Qh5mec\")"
     ]
   },
   "enableAllProjectMcpServers": true,
