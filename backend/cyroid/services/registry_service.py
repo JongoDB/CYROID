@@ -14,8 +14,9 @@ class RegistryService:
     REGISTRY_HOST = "registry"  # Docker Compose service name
     REGISTRY_PORT = 5000
     REGISTRY_URL = f"http://{REGISTRY_HOST}:{REGISTRY_PORT}"
-    REGISTRY_IP = "172.30.0.16"
+    REGISTRY_IP = "172.30.0.16"  # Internal IP for DinD containers to pull
     REGISTRY_IP_URL = f"http://{REGISTRY_IP}:{REGISTRY_PORT}"
+    REGISTRY_LOCALHOST = "127.0.0.1"  # For host Docker daemon to push (no insecure-registries needed)
 
     def __init__(self):
         self._http_client: Optional[httpx.AsyncClient] = None
@@ -46,8 +47,17 @@ class RegistryService:
             return parts[0], parts[1]
         return image_tag, 'latest'
 
-    def get_registry_tag(self, image_tag: str) -> str:
-        """Convert image tag to registry-prefixed tag."""
+    def get_registry_tag(self, image_tag: str, for_host: bool = False) -> str:
+        """Convert image tag to registry-prefixed tag.
+
+        Args:
+            image_tag: Image tag like 'myimage:v1.0'
+            for_host: If True, use localhost (for host Docker push).
+                      If False, use internal IP (for DinD pull).
+
+        Returns:
+            Registry-prefixed tag
+        """
         image, tag = self._parse_image_tag(image_tag)
         # Strip any existing registry prefix
         if '/' in image:
@@ -55,7 +65,8 @@ class RegistryService:
             if '.' in parts[0] or ':' in parts[0]:
                 # Has registry prefix, remove it
                 image = '/'.join(parts[1:])
-        return f"{self.REGISTRY_IP}:{self.REGISTRY_PORT}/{image}:{tag}"
+        host = self.REGISTRY_LOCALHOST if for_host else self.REGISTRY_IP
+        return f"{host}:{self.REGISTRY_PORT}/{image}:{tag}"
 
     async def image_exists(self, image_tag: str) -> bool:
         """Check if image exists in local registry.
@@ -121,16 +132,16 @@ class RegistryService:
                 logger.error(f"Image not found locally: {image_tag}")
                 return False
 
-            # Tag for registry
-            registry_tag = self.get_registry_tag(image_tag)
-            image.tag(registry_tag)
+            # Tag for registry - use localhost for host Docker to push
+            push_tag = self.get_registry_tag(image_tag, for_host=True)
+            image.tag(push_tag)
 
             if progress_callback:
                 progress_callback("Pushing to registry...", 10)
 
-            # Push to registry
+            # Push to registry via localhost
             push_output = docker_client.images.push(
-                registry_tag,
+                push_tag,
                 stream=True,
                 decode=True
             )
@@ -150,7 +161,9 @@ class RegistryService:
             if progress_callback:
                 progress_callback("Push complete", 100)
 
-            logger.info(f"Successfully pushed {image_tag} to registry as {registry_tag}")
+            # Log both the push tag (localhost) and what DinD will use (internal IP)
+            pull_tag = self.get_registry_tag(image_tag, for_host=False)
+            logger.info(f"Successfully pushed {image_tag} to registry as {push_tag} (DinD can pull as {pull_tag})")
             return True
 
         except docker.errors.APIError as e:

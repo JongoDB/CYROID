@@ -186,6 +186,8 @@ services:
   registry:
     image: registry:2
     restart: unless-stopped
+    ports:
+      - "127.0.0.1:5000:5000"  # Expose on localhost for host Docker to push images
     environment:
       REGISTRY_STORAGE_DELETE_ENABLED: "true"
     volumes:
