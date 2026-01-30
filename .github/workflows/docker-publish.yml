@@ -12,25 +12,40 @@ env:
   REGISTRY: ghcr.io
   IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}
 
+# Prevent concurrent pushes to the same ref (branch/tag)
+concurrency:
+  group: docker-build-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
-  build-and-push:
-    runs-on: ubuntu-latest
+  # Build application images using native runners for each architecture
+  build-app-images:
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - name: cyroid-api
+            context: ./backend
+            dockerfile: ./backend/Dockerfile
+          - name: cyroid-frontend
+            context: ./frontend
+            dockerfile: ./frontend/Dockerfile.prod
+          - name: cyroid-worker
+            context: ./backend
+            dockerfile: ./backend/Dockerfile
+        platform:
+          - runner: ubuntu-latest
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+
+    runs-on: ${{ matrix.platform.runner }}
     permissions:
       contents: read
       packages: write
 
-    strategy:
-      matrix:
-        include:
-          - image: cyroid-api
-            context: ./backend
-            dockerfile: ./backend/Dockerfile
-          - image: cyroid-frontend
-            context: ./frontend
-            dockerfile: ./frontend/Dockerfile
-          - image: cyroid-worker
-            context: ./backend
-            dockerfile: ./backend/Dockerfile
+    outputs:
+      version: ${{ steps.version.outputs.VERSION }}
 
     steps:
       - name: Checkout repository
@@ -39,9 +54,6 @@ jobs:
       - name: Read version from VERSION file
         id: version
         run: echo "VERSION=$(cat VERSION)" >> $GITHUB_OUTPUT
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -58,50 +70,44 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.IMAGE_PREFIX }}/${{ matrix.image }}
+          images: ${{ env.IMAGE_PREFIX }}/${{ matrix.image.name }}
           tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=raw,value=${{ steps.version.outputs.VERSION }},enable={{is_default_branch}}
+            type=ref,event=branch,suffix=-${{ matrix.platform.arch }}
+            type=ref,event=pr,suffix=-${{ matrix.platform.arch }}
+            type=semver,pattern={{version}},suffix=-${{ matrix.platform.arch }}
+            type=raw,value=${{ steps.version.outputs.VERSION }}-${{ matrix.platform.arch }},enable=${{ github.ref == format('refs/heads/{0}', 'master') }}
 
-      - name: Build and push ${{ matrix.image }}
+      - name: Build and push ${{ matrix.image.name }} (${{ matrix.platform.arch }})
         uses: docker/build-push-action@v5
         with:
-          context: ${{ matrix.context }}
-          file: ${{ matrix.dockerfile }}
+          context: ${{ matrix.image.context }}
+          file: ${{ matrix.image.dockerfile }}
           build-args: |
             APP_VERSION=${{ steps.version.outputs.VERSION }}
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/${{ matrix.platform.arch }}
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=${{ matrix.image.name }}-${{ matrix.platform.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image.name }}-${{ matrix.platform.arch }}
+          provenance: false
 
-  # Build infrastructure image wrappers (thin layers over upstream images)
-  build-infrastructure:
+  # Create multi-arch manifests after all platform builds complete
+  create-manifests:
+    needs: build-app-images
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
 
     strategy:
+      fail-fast: false
       matrix:
-        include:
-          - image: cyroid-proxy
-            base: traefik:v2.11
-          - image: cyroid-dind
-            dockerfile: docker/Dockerfile.dind-base
-            context: docker
-          - image: cyroid-storage
-            base: minio/minio:latest
-          - image: cyroid-db
-            base: postgres:16-alpine
-          - image: cyroid-redis
-            base: redis:7-alpine
+        image:
+          - cyroid-api
+          - cyroid-frontend
+          - cyroid-worker
 
     steps:
       - name: Checkout repository
@@ -111,8 +117,102 @@ jobs:
         id: version
         run: echo "VERSION=$(cat VERSION)" >> $GITHUB_OUTPUT
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create and push multi-arch manifest
+        env:
+          IMAGE: ${{ env.IMAGE_PREFIX }}/${{ matrix.image }}
+          VERSION: ${{ steps.version.outputs.VERSION }}
+          GIT_REF: ${{ github.ref }}
+          GIT_REF_NAME: ${{ github.ref_name }}
+        run: |
+          # Determine tags based on event type
+          if [[ "$GIT_REF" == refs/tags/v* ]]; then
+            # Tag push - create version tags
+            VERSION_TAG="${GIT_REF_NAME#v}"
+            MAJOR_MINOR=$(echo "$VERSION_TAG" | cut -d. -f1,2)
+
+            # Create manifest for semver tag
+            docker buildx imagetools create -t "${IMAGE}:${VERSION_TAG}" \
+              "${IMAGE}:${VERSION_TAG}-amd64" \
+              "${IMAGE}:${VERSION_TAG}-arm64"
+
+            # Create manifest for major.minor tag
+            docker buildx imagetools create -t "${IMAGE}:${MAJOR_MINOR}" \
+              "${IMAGE}:${VERSION_TAG}-amd64" \
+              "${IMAGE}:${VERSION_TAG}-arm64"
+
+          elif [[ "$GIT_REF" == refs/heads/master ]]; then
+            # Master branch push - create latest and version tags
+            docker buildx imagetools create -t "${IMAGE}:latest" \
+              "${IMAGE}:master-amd64" \
+              "${IMAGE}:master-arm64"
+
+            docker buildx imagetools create -t "${IMAGE}:master" \
+              "${IMAGE}:master-amd64" \
+              "${IMAGE}:master-arm64"
+
+            docker buildx imagetools create -t "${IMAGE}:${VERSION}" \
+              "${IMAGE}:${VERSION}-amd64" \
+              "${IMAGE}:${VERSION}-arm64"
+          fi
+
+      - name: Verify multi-arch manifest
+        env:
+          IMAGE: ${{ env.IMAGE_PREFIX }}/${{ matrix.image }}
+          VERSION: ${{ steps.version.outputs.VERSION }}
+          GIT_REF: ${{ github.ref }}
+          GIT_REF_NAME: ${{ github.ref_name }}
+        run: |
+          if [[ "$GIT_REF" == refs/heads/master ]]; then
+            echo "Inspecting ${IMAGE}:latest"
+            docker buildx imagetools inspect "${IMAGE}:latest"
+          elif [[ "$GIT_REF" == refs/tags/v* ]]; then
+            VERSION_TAG="${GIT_REF_NAME#v}"
+            echo "Inspecting ${IMAGE}:${VERSION_TAG}"
+            docker buildx imagetools inspect "${IMAGE}:${VERSION_TAG}"
+          fi
+
+  # Build infrastructure image wrappers (thin layers over upstream images)
+  build-infrastructure:
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - name: cyroid-proxy
+            base: traefik:v2.11
+          - name: cyroid-dind
+            dockerfile: docker/Dockerfile.dind-base
+            context: docker
+          - name: cyroid-storage
+            base: minio/minio:latest
+          - name: cyroid-db
+            base: postgres:16-alpine
+          - name: cyroid-redis
+            base: redis:7-alpine
+        platform:
+          - runner: ubuntu-latest
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+
+    runs-on: ${{ matrix.platform.runner }}
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Read version from VERSION file
+        id: version
+        run: echo "VERSION=$(cat VERSION)" >> $GITHUB_OUTPUT
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -129,57 +229,125 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.IMAGE_PREFIX }}/${{ matrix.image }}
+          images: ${{ env.IMAGE_PREFIX }}/${{ matrix.image.name }}
           tags: |
-            type=ref,event=branch
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=raw,value=${{ steps.version.outputs.VERSION }},enable={{is_default_branch}}
+            type=ref,event=branch,suffix=-${{ matrix.platform.arch }}
+            type=semver,pattern={{version}},suffix=-${{ matrix.platform.arch }}
+            type=raw,value=${{ steps.version.outputs.VERSION }}-${{ matrix.platform.arch }},enable=${{ github.ref == format('refs/heads/{0}', 'master') }}
 
       # Create a thin wrapper Dockerfile for images that use base (not custom dockerfile)
       - name: Create wrapper Dockerfile
-        if: matrix.base != ''
+        if: matrix.image.base != ''
         env:
-          COMPONENT_NAME: ${{ matrix.image }}
+          COMPONENT_NAME: ${{ matrix.image.name }}
+          GITHUB_REPO: ${{ github.repository }}
         run: |
           cat > /tmp/Dockerfile.wrapper << DOCKERFILE
           ARG BASE_IMAGE
           FROM \${BASE_IMAGE}
           ARG COMPONENT_NAME
-          LABEL org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}
+          LABEL org.opencontainers.image.source=https://github.com/${GITHUB_REPO}
           LABEL org.opencontainers.image.description="CYROID infrastructure component"
           LABEL org.opencontainers.image.licenses=MIT
           LABEL io.cyroid.component=\${COMPONENT_NAME}
           DOCKERFILE
 
       # Build using thin wrapper for base images
-      - name: Build and push ${{ matrix.image }} (wrapper)
-        if: github.event_name != 'pull_request' && matrix.base != ''
+      - name: Build and push ${{ matrix.image.name }} (wrapper)
+        if: github.event_name != 'pull_request' && matrix.image.base != ''
         uses: docker/build-push-action@v5
         with:
           context: .
           file: /tmp/Dockerfile.wrapper
           build-args: |
-            BASE_IMAGE=${{ matrix.base }}
-            COMPONENT_NAME=${{ matrix.image }}
-          platforms: linux/amd64,linux/arm64
+            BASE_IMAGE=${{ matrix.image.base }}
+            COMPONENT_NAME=${{ matrix.image.name }}
+          platforms: linux/${{ matrix.platform.arch }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=${{ matrix.image.name }}-${{ matrix.platform.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image.name }}-${{ matrix.platform.arch }}
+          provenance: false
 
       # Build using custom Dockerfile for images that have one
-      - name: Build and push ${{ matrix.image }} (custom)
-        if: github.event_name != 'pull_request' && matrix.dockerfile != ''
+      - name: Build and push ${{ matrix.image.name }} (custom)
+        if: github.event_name != 'pull_request' && matrix.image.dockerfile != ''
         uses: docker/build-push-action@v5
         with:
-          context: ${{ matrix.context }}
-          file: ${{ matrix.dockerfile }}
-          platforms: linux/amd64,linux/arm64
+          context: ${{ matrix.image.context }}
+          file: ${{ matrix.image.dockerfile }}
+          platforms: linux/${{ matrix.platform.arch }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=${{ matrix.image.name }}-${{ matrix.platform.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image.name }}-${{ matrix.platform.arch }}
+          provenance: false
+
+  # Create multi-arch manifests for infrastructure images
+  create-infrastructure-manifests:
+    needs: build-infrastructure
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - cyroid-proxy
+          - cyroid-dind
+          - cyroid-storage
+          - cyroid-db
+          - cyroid-redis
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Read version from VERSION file
+        id: version
+        run: echo "VERSION=$(cat VERSION)" >> $GITHUB_OUTPUT
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create and push multi-arch manifest
+        env:
+          IMAGE: ${{ env.IMAGE_PREFIX }}/${{ matrix.image }}
+          VERSION: ${{ steps.version.outputs.VERSION }}
+          GIT_REF: ${{ github.ref }}
+          GIT_REF_NAME: ${{ github.ref_name }}
+        run: |
+          if [[ "$GIT_REF" == refs/tags/v* ]]; then
+            VERSION_TAG="${GIT_REF_NAME#v}"
+            MAJOR_MINOR=$(echo "$VERSION_TAG" | cut -d. -f1,2)
+
+            docker buildx imagetools create -t "${IMAGE}:${VERSION_TAG}" \
+              "${IMAGE}:${VERSION_TAG}-amd64" \
+              "${IMAGE}:${VERSION_TAG}-arm64"
+
+            docker buildx imagetools create -t "${IMAGE}:${MAJOR_MINOR}" \
+              "${IMAGE}:${VERSION_TAG}-amd64" \
+              "${IMAGE}:${VERSION_TAG}-arm64"
+
+          elif [[ "$GIT_REF" == refs/heads/master ]]; then
+            docker buildx imagetools create -t "${IMAGE}:latest" \
+              "${IMAGE}:master-amd64" \
+              "${IMAGE}:master-arm64"
+
+            docker buildx imagetools create -t "${IMAGE}:master" \
+              "${IMAGE}:master-amd64" \
+              "${IMAGE}:master-arm64"
+
+            docker buildx imagetools create -t "${IMAGE}:${VERSION}" \
+              "${IMAGE}:${VERSION}-amd64" \
+              "${IMAGE}:${VERSION}-arm64"
+          fi

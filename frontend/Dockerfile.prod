@@ -1,0 +1,51 @@
+# frontend/Dockerfile.prod
+# Multi-stage production build for the CYROID frontend
+
+# Stage 1: Build the React application
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+
+# Version passed from CI build
+ARG APP_VERSION=dev
+ENV VITE_APP_VERSION=${APP_VERSION}
+
+# Copy package files
+COPY package.json package-lock.json* ./
+
+# Install dependencies (use npm ci if lock file exists, otherwise npm install)
+RUN if [ -f package-lock.json ]; then \
+      npm ci --ignore-scripts; \
+    else \
+      npm install --ignore-scripts; \
+    fi
+
+# Copy source code
+COPY . .
+
+# Build the production bundle
+RUN npm run build
+
+# Stage 2: Serve with nginx
+FROM nginx:alpine
+
+# Add labels for container registry
+LABEL org.opencontainers.image.source=https://github.com/JongoDB/CYROID
+LABEL org.opencontainers.image.description="CYROID Frontend"
+LABEL org.opencontainers.image.licenses=MIT
+
+# Copy custom nginx configuration
+COPY nginx.conf /etc/nginx/nginx.conf
+
+# Copy built assets from builder stage
+COPY --from=builder /app/dist /usr/share/nginx/html
+
+# Expose port 80
+EXPOSE 80
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD wget --no-verbose --tries=1 --spider http://localhost/health || exit 1
+
+# Start nginx
+CMD ["nginx", "-g", "daemon off;"]
