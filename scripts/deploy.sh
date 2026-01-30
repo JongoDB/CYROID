@@ -2343,7 +2343,12 @@ api:
   insecure: false
   dashboard: false
 
+ping:
+  entryPoint: ping
+
 entryPoints:
+  ping:
+    address: ":8082"
   web:
     address: ":80"
     http:
