@@ -257,6 +257,32 @@ class DinDService:
             else:
                 logger.warning(f"Skipping {description} mount - path does not exist: {host_path}")
 
+        # Get registry IP for insecure registry config
+        registry_ip = None
+        try:
+            registry_container = self.host_client.containers.get("test-deploy-registry-1")
+            registry_networks = registry_container.attrs["NetworkSettings"]["Networks"]
+            registry_ip = registry_networks.get(self.mgmt_network, {}).get("IPAddress")
+        except Exception:
+            pass
+
+        if not registry_ip:
+            # Fallback: try to find any registry container on mgmt network
+            try:
+                for container in self.host_client.containers.list():
+                    if "registry" in container.name.lower():
+                        networks = container.attrs["NetworkSettings"]["Networks"]
+                        registry_ip = networks.get(self.mgmt_network, {}).get("IPAddress")
+                        if registry_ip:
+                            break
+            except Exception:
+                pass
+
+        # Build insecure-registries list for DinD Docker daemon
+        insecure_registries = ["registry:5000"]  # DNS name fallback
+        if registry_ip:
+            insecure_registries.append(f"{registry_ip}:5000")
+
         container_config = {
             "image": actual_dind_image,
             "name": container_name,
@@ -265,6 +291,8 @@ class DinDService:
             "environment": {
                 "DOCKER_TLS_CERTDIR": "",  # Disable TLS for internal communication
             },
+            # Pass insecure-registry flags to Docker daemon inside DinD
+            "command": [f"--insecure-registry={reg}" for reg in insecure_registries],
             "volumes": volumes_config,
             "network": self.ranges_network,
             "labels": {
