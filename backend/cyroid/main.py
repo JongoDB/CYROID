@@ -92,10 +92,16 @@ Include it in the `Authorization` header: `Bearer <token>`
 
 ## API Documentation
 
-- **OpenAPI JSON**: `/openapi.json`
-- **Swagger UI**: `/docs`
-- **ReDoc**: `/redoc`
+- **Swagger UI**: `/docs` (interactive API explorer)
+- **ReDoc**: `/redoc` (alternative documentation view)
+- **OpenAPI JSON**: `/openapi.json` (machine-readable schema)
 - **AI Context**: `/api/v1/schema/ai-context` (condensed guide for AI assistants)
+
+## Health Checks
+
+- `/health` - Basic health check
+- `/api/health` - API health check (alias)
+- `/api/v1/health` - Versioned health check (alias)
 """
 
 app = FastAPI(
@@ -103,6 +109,9 @@ app = FastAPI(
     description=API_DESCRIPTION,
     version=settings.app_version,
     lifespan=lifespan,
+    docs_url="/docs",
+    redoc_url="/redoc",
+    openapi_url="/openapi.json",
     openapi_tags=[
         {"name": "auth", "description": "Authentication and user management"},
         {"name": "users", "description": "User account management"},
@@ -160,7 +169,10 @@ app.include_router(registry_router, prefix="/api/v1")
 
 
 @app.get("/health")
+@app.get("/api/health")
+@app.get("/api/v1/health")
 async def health_check():
+    """Health check endpoint for load balancers and monitoring."""
     return {"status": "healthy", "app": settings.app_name}
 
 

@@ -203,6 +203,7 @@ bootstrap_standalone() {
         "docker-compose.prod.yml"
         "traefik/dynamic/base.yml"
         "traefik/dynamic/production.yml"
+        "config/registry-config.yml"
     )
 
     for file in "${files_to_download[@]}"; do
