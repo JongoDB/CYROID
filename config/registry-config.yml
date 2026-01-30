@@ -14,7 +14,15 @@ http:
   headers:
     X-Content-Type-Options: [nosniff]
 
-proxy:
-  remoteurl: https://registry-1.docker.io
-  username: ""
-  password: ""
+# NOTE: Proxy mode is disabled because it prevents pushing custom images.
+# Docker Registry in proxy mode can only cache images FROM the upstream registry,
+# it cannot store locally-built images. When proxy is enabled, push operations
+# fail with "denied: requested access to the resource is denied" because the
+# registry tries to verify blobs against Docker Hub.
+#
+# To enable pull-through caching, you would need a separate registry instance.
+#
+# proxy:
+#   remoteurl: https://registry-1.docker.io
+#   username: ""
+#   password: ""
