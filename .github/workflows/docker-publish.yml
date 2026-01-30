@@ -94,7 +94,8 @@ jobs:
           - image: cyroid-proxy
             base: traefik:v2.11
           - image: cyroid-dind
-            base: docker:24-dind
+            dockerfile: docker/Dockerfile.dind-base
+            context: docker
           - image: cyroid-storage
             base: minio/minio:latest
           - image: cyroid-db
@@ -136,24 +137,25 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
             type=raw,value=${{ steps.version.outputs.VERSION }},enable={{is_default_branch}}
 
-      # Create a thin wrapper Dockerfile that just adds labels
+      # Create a thin wrapper Dockerfile for images that use base (not custom dockerfile)
       - name: Create wrapper Dockerfile
+        if: matrix.base != ''
         env:
-          BASE_IMAGE: ${{ matrix.base }}
           COMPONENT_NAME: ${{ matrix.image }}
         run: |
-          cat > /tmp/Dockerfile.wrapper << 'DOCKERFILE'
+          cat > /tmp/Dockerfile.wrapper << DOCKERFILE
           ARG BASE_IMAGE
-          FROM ${BASE_IMAGE}
+          FROM \${BASE_IMAGE}
           ARG COMPONENT_NAME
-          LABEL org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          LABEL org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}
           LABEL org.opencontainers.image.description="CYROID infrastructure component"
           LABEL org.opencontainers.image.licenses=MIT
-          LABEL io.cyroid.component=${COMPONENT_NAME}
+          LABEL io.cyroid.component=\${COMPONENT_NAME}
           DOCKERFILE
 
-      - name: Build and push ${{ matrix.image }}
-        if: github.event_name != 'pull_request'
+      # Build using thin wrapper for base images
+      - name: Build and push ${{ matrix.image }} (wrapper)
+        if: github.event_name != 'pull_request' && matrix.base != ''
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -161,6 +163,20 @@ jobs:
           build-args: |
             BASE_IMAGE=${{ matrix.base }}
             COMPONENT_NAME=${{ matrix.image }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Build using custom Dockerfile for images that have one
+      - name: Build and push ${{ matrix.image }} (custom)
+        if: github.event_name != 'pull_request' && matrix.dockerfile != ''
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
