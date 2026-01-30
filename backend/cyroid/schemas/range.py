@@ -15,6 +15,18 @@ if TYPE_CHECKING:
 # ============ Range Schemas ============
 
 
+class BlueprintInstanceInfo(BaseModel):
+    """Information about the blueprint this range was deployed from."""
+    instance_id: UUID
+    blueprint_id: UUID
+    blueprint_name: str
+    blueprint_version: int
+    current_blueprint_version: int  # To show if outdated
+
+    class Config:
+        from_attributes = True
+
+
 class RouterResponse(BaseModel):
     """VyOS router status for a range."""
     id: UUID
@@ -97,6 +109,7 @@ class RangeDetailResponse(RangeResponse):
     networks: List["NetworkResponse"] = []
     vms: List["VMResponse"] = []
     router: Optional[RouterResponse] = None
+    blueprint_instance: Optional[BlueprintInstanceInfo] = None
 
 
 # Import and rebuild for forward references

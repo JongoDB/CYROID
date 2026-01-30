@@ -192,6 +192,7 @@ services:
       REGISTRY_STORAGE_DELETE_ENABLED: "true"
     volumes:
       - ${CYROID_DATA_DIR:-/data/cyroid}/registry:/var/lib/registry
+      - ./config/registry-config.yml:/etc/docker/registry/config.yml:ro
     networks:
       cyroid-mgmt:
         ipv4_address: 172.30.0.16

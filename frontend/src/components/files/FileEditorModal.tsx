@@ -1,8 +1,9 @@
 // frontend/src/components/files/FileEditorModal.tsx
 import { useState, useEffect, useRef, useCallback } from 'react';
 import Editor from '@monaco-editor/react';
-import { X, Save, AlertTriangle, Loader2, Lock } from 'lucide-react';
+import { Save, AlertTriangle, Loader2, Lock } from 'lucide-react';
 import clsx from 'clsx';
+import { Modal, ModalFooter } from '../common/Modal';
 import { filesApi } from '../../services/api';
 import { toast } from '../../stores/toastStore';
 
@@ -217,7 +218,8 @@ export function FileEditorModal({
     }
   }, [filePath, content, lockToken, readOnly, lockedBy, onSaved, onClose]);
 
-  // Keyboard shortcuts
+  // Keyboard shortcut for save (Ctrl/Cmd + S)
+  // Note: Escape is handled by the Modal component
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (!isOpen) return;
@@ -229,168 +231,147 @@ export function FileEditorModal({
           handleSave(false);
         }
       }
-
-      // Escape to close
-      if (e.key === 'Escape') {
-        handleClose();
-      }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, handleSave, handleClose, readOnly, lockedBy]);
-
-  if (!isOpen) return null;
+  }, [isOpen, handleSave, readOnly, lockedBy]);
 
   const isReadOnly = readOnly || !!lockedBy;
 
   return (
-    <div className="fixed inset-0 z-50 overflow-hidden">
-      {/* Backdrop */}
-      <div
-        className="absolute inset-0 bg-gray-900 bg-opacity-75"
-        onClick={handleClose}
-      />
+    <Modal
+      isOpen={isOpen}
+      onClose={handleClose}
+      title={fileName}
+      description={`Edit file: ${filePath}`}
+      size="full"
+      closeOnBackdrop={!hasChanges}
+      className="!max-w-none mx-4 md:mx-8 lg:mx-12 h-[calc(100vh-2rem)] md:h-[calc(100vh-4rem)] lg:h-[calc(100vh-6rem)] flex flex-col"
+    >
+      {/* Status bar */}
+      <div className="flex items-center gap-3 px-4 py-2 bg-gray-100 border-b text-sm">
+        {hasChanges && (
+          <span className="px-2 py-0.5 text-xs font-medium bg-yellow-100 text-yellow-700 rounded">
+            Unsaved
+          </span>
+        )}
+        {isReadOnly && (
+          <span className="px-2 py-0.5 text-xs font-medium bg-gray-200 text-gray-600 rounded flex items-center gap-1">
+            <Lock className="h-3 w-3" />
+            {lockedBy ? `Locked by ${lockedBy}` : 'Read-only'}
+          </span>
+        )}
+        <span className="text-xs text-gray-500 hidden sm:block ml-auto">
+          {language} | Ctrl+S to save | Esc to close
+        </span>
+      </div>
 
-      {/* Modal */}
-      <div className="absolute inset-4 md:inset-8 lg:inset-12 bg-white rounded-lg shadow-2xl flex flex-col overflow-hidden">
-        {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b bg-gray-50">
-          <div className="flex items-center gap-3">
-            <h3 className="text-lg font-semibold text-gray-900 truncate max-w-md">
-              {fileName}
-            </h3>
-            {hasChanges && (
-              <span className="px-2 py-0.5 text-xs font-medium bg-yellow-100 text-yellow-700 rounded">
-                Unsaved
-              </span>
-            )}
-            {isReadOnly && (
-              <span className="px-2 py-0.5 text-xs font-medium bg-gray-100 text-gray-600 rounded flex items-center gap-1">
-                <Lock className="h-3 w-3" />
-                {lockedBy ? `Locked by ${lockedBy}` : 'Read-only'}
-              </span>
-            )}
+      {/* Editor */}
+      <div className="flex-1 relative min-h-0">
+        {loading ? (
+          <div className="absolute inset-0 flex items-center justify-center bg-gray-50">
+            <Loader2 className="h-8 w-8 animate-spin text-primary-600" />
           </div>
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-gray-500 hidden sm:block">
-              {language} • Ctrl+S to save • Esc to close
-            </span>
-            <button
-              onClick={handleClose}
-              className="p-1 text-gray-400 hover:text-gray-600 rounded"
-            >
-              <X className="h-5 w-5" />
-            </button>
+        ) : error ? (
+          <div className="absolute inset-0 flex items-center justify-center bg-gray-50">
+            <div className="text-center">
+              <AlertTriangle className="h-12 w-12 text-red-500 mx-auto mb-3" />
+              <p className="text-gray-900 font-medium">{error}</p>
+            </div>
+          </div>
+        ) : (
+          <Editor
+            height="100%"
+            language={language}
+            value={content}
+            onChange={handleEditorChange}
+            theme="vs-dark"
+            options={{
+              readOnly: isReadOnly,
+              minimap: { enabled: true },
+              fontSize: 14,
+              lineNumbers: 'on',
+              wordWrap: 'on',
+              scrollBeyondLastLine: false,
+              automaticLayout: true,
+              tabSize: 2,
+              insertSpaces: true,
+            }}
+          />
+        )}
+      </div>
+
+      {/* Validation Warnings */}
+      {validationWarnings.length > 0 && (
+        <div className="px-4 py-2 bg-yellow-50 border-t border-yellow-100">
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="h-4 w-4 text-yellow-600 mt-0.5 flex-shrink-0" />
+            <div className="text-sm text-yellow-800">
+              {validationWarnings.length === 1 ? (
+                validationWarnings[0]
+              ) : (
+                <ul className="list-disc list-inside">
+                  {validationWarnings.slice(0, 3).map((w, i) => (
+                    <li key={i}>{w}</li>
+                  ))}
+                  {validationWarnings.length > 3 && (
+                    <li>...and {validationWarnings.length - 3} more</li>
+                  )}
+                </ul>
+              )}
+            </div>
           </div>
         </div>
+      )}
 
-        {/* Editor */}
-        <div className="flex-1 relative">
-          {loading ? (
-            <div className="absolute inset-0 flex items-center justify-center bg-gray-50">
-              <Loader2 className="h-8 w-8 animate-spin text-primary-600" />
-            </div>
-          ) : error ? (
-            <div className="absolute inset-0 flex items-center justify-center bg-gray-50">
-              <div className="text-center">
-                <AlertTriangle className="h-12 w-12 text-red-500 mx-auto mb-3" />
-                <p className="text-gray-900 font-medium">{error}</p>
-              </div>
-            </div>
-          ) : (
-            <Editor
-              height="100%"
-              language={language}
-              value={content}
-              onChange={handleEditorChange}
-              theme="vs-dark"
-              options={{
-                readOnly: isReadOnly,
-                minimap: { enabled: true },
-                fontSize: 14,
-                lineNumbers: 'on',
-                wordWrap: 'on',
-                scrollBeyondLastLine: false,
-                automaticLayout: true,
-                tabSize: 2,
-                insertSpaces: true,
-              }}
-            />
+      {/* Footer */}
+      <ModalFooter className="justify-between">
+        <div className="text-xs text-gray-500">
+          {filePath}
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleClose}
+            className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+          >
+            Cancel
+          </button>
+          {!isReadOnly && (
+            <>
+              <button
+                onClick={() => handleSave(false)}
+                disabled={saving || !hasChanges}
+                className={clsx(
+                  'inline-flex items-center px-4 py-2 text-sm font-medium rounded-md',
+                  saving || !hasChanges
+                    ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                    : 'bg-primary-600 text-white hover:bg-primary-700'
+                )}
+              >
+                {saving ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <Save className="h-4 w-4 mr-2" />
+                )}
+                Save
+              </button>
+              <button
+                onClick={() => handleSave(true)}
+                disabled={saving || !hasChanges}
+                className={clsx(
+                  'inline-flex items-center px-4 py-2 text-sm font-medium rounded-md',
+                  saving || !hasChanges
+                    ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                    : 'bg-green-600 text-white hover:bg-green-700'
+                )}
+              >
+                Save & Close
+              </button>
+            </>
           )}
         </div>
-
-        {/* Validation Warnings */}
-        {validationWarnings.length > 0 && (
-          <div className="px-4 py-2 bg-yellow-50 border-t border-yellow-100">
-            <div className="flex items-start gap-2">
-              <AlertTriangle className="h-4 w-4 text-yellow-600 mt-0.5 flex-shrink-0" />
-              <div className="text-sm text-yellow-800">
-                {validationWarnings.length === 1 ? (
-                  validationWarnings[0]
-                ) : (
-                  <ul className="list-disc list-inside">
-                    {validationWarnings.slice(0, 3).map((w, i) => (
-                      <li key={i}>{w}</li>
-                    ))}
-                    {validationWarnings.length > 3 && (
-                      <li>...and {validationWarnings.length - 3} more</li>
-                    )}
-                  </ul>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Footer */}
-        <div className="flex items-center justify-between px-4 py-3 border-t bg-gray-50">
-          <div className="text-xs text-gray-500">
-            {filePath}
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={handleClose}
-              className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
-            >
-              Cancel
-            </button>
-            {!isReadOnly && (
-              <>
-                <button
-                  onClick={() => handleSave(false)}
-                  disabled={saving || !hasChanges}
-                  className={clsx(
-                    'inline-flex items-center px-4 py-2 text-sm font-medium rounded-md',
-                    saving || !hasChanges
-                      ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                      : 'bg-primary-600 text-white hover:bg-primary-700'
-                  )}
-                >
-                  {saving ? (
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  ) : (
-                    <Save className="h-4 w-4 mr-2" />
-                  )}
-                  Save
-                </button>
-                <button
-                  onClick={() => handleSave(true)}
-                  disabled={saving || !hasChanges}
-                  className={clsx(
-                    'inline-flex items-center px-4 py-2 text-sm font-medium rounded-md',
-                    saving || !hasChanges
-                      ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                      : 'bg-green-600 text-white hover:bg-green-700'
-                  )}
-                >
-                  Save & Close
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
+      </ModalFooter>
+    </Modal>
   );
 }

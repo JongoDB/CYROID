@@ -23,10 +23,13 @@ from cyroid.models.base_image import BaseImage
 from cyroid.models.golden_image import GoldenImage
 from cyroid.models.snapshot import Snapshot
 from cyroid.models.event_log import EventType
+from cyroid.models.vm_network import VMNetwork
 from cyroid.services.event_service import EventService
 from cyroid.services.dind_service import DinDService, get_dind_service
 from cyroid.services.docker_service import DockerService, get_docker_service
 from cyroid.services.traefik_route_service import get_traefik_route_service
+from cyroid.services.notification_service import notify_range_users
+from cyroid.models.notification import NotificationType, NotificationSeverity
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -305,13 +308,25 @@ class RangeDeploymentService:
                         event_service.log_event(
                             range_id=range_uuid,
                             event_type=EventType.DEPLOYMENT_STEP,
-                            message=f"Image {idx}/{len(unique_images)}: {image} found on host ({size_mb:.1f} MB)",
+                            message=f"Image {idx}/{len(unique_images)}: {image} ({size_mb:.1f} MB)",
+                        )
+                    elif status == 'pushing_to_registry':
+                        event_service.log_event(
+                            range_id=range_uuid,
+                            event_type=EventType.DEPLOYMENT_STEP,
+                            message=f"Ensuring {image} is in registry...",
+                        )
+                    elif status == 'pulling_from_registry':
+                        event_service.log_event(
+                            range_id=range_uuid,
+                            event_type=EventType.DEPLOYMENT_STEP,
+                            message=f"Pulling {image} from registry into DinD...",
                         )
                     elif status == 'transferring':
                         event_service.log_event(
                             range_id=range_uuid,
                             event_type=EventType.DEPLOYMENT_STEP,
-                            message=f"Copying {image} into DinD container (0%)...",
+                            message=f"Transferring {image} via tar (fallback)...",
                         )
                     elif status == 'already_exists':
                         event_service.log_event(
@@ -323,16 +338,38 @@ class RangeDeploymentService:
                         event_service.log_event(
                             range_id=range_uuid,
                             event_type=EventType.DEPLOYMENT_STEP,
-                            message=f"Pulling {image} from registry to host...",
+                            message=f"Pulling {image} to host...",
                         )
 
             try:
-                await self.docker_service.pull_image_to_dind(
+                pull_result = await self.docker_service.pull_image_to_dind(
                     range_id=range_id,
                     docker_url=docker_url,
                     image=image,
                     progress_callback=image_progress_callback,
                 )
+
+                # Notify users if image was pulled from internet (not from local registry)
+                if pull_result["source"] == "internet":
+                    event_service.log_event(
+                        range_id=range_uuid,
+                        event_type=EventType.DEPLOYMENT_STEP,
+                        message=f"WARNING: Image {image} pulled from internet (not from local registry)",
+                    )
+                    cache_msg = (
+                        "Cached to registry for future deployments."
+                        if pull_result["cached_to_registry"]
+                        else "Failed to cache - future deployments may also pull from internet."
+                    )
+                    notify_range_users(
+                        db=db,
+                        range_id=range_uuid,
+                        title="Image Pulled from Internet",
+                        message=f"Image {image} was pulled from the internet (not cached locally). {cache_msg}",
+                        notification_type=NotificationType.SYSTEM_ALERT,
+                        severity=NotificationSeverity.WARNING,
+                    )
+
                 event_service.log_event(
                     range_id=range_uuid,
                     event_type=EventType.DEPLOYMENT_STEP,
@@ -410,8 +447,24 @@ class RangeDeploymentService:
                     failed_vms.append(vm.hostname)
                     continue
 
-                network = db.query(Network).filter(Network.id == vm.network_id).first()
-                if not network:
+                # Get all network interfaces for this VM (multi-NIC support)
+                interfaces = db.query(VMNetwork).filter(VMNetwork.vm_id == vm.id).order_by(
+                    VMNetwork.is_primary.desc()  # Primary first
+                ).all()
+
+                if interfaces:
+                    # New multi-NIC path: use VMNetwork records
+                    primary_iface = interfaces[0]
+                    primary_network = db.query(Network).filter(Network.id == primary_iface.network_id).first()
+                    primary_ip = primary_iface.ip_address
+                    secondary_interfaces = interfaces[1:]
+                else:
+                    # Legacy fallback: use vm.network_id directly for backwards compatibility
+                    primary_network = db.query(Network).filter(Network.id == vm.network_id).first()
+                    primary_ip = vm.ip_address
+                    secondary_interfaces = []
+
+                if not primary_network:
                     error_msg = f"VM {vm.hostname} has no network assigned"
                     logger.warning(error_msg)
                     vm.status = VMStatus.ERROR
@@ -473,19 +526,39 @@ class RangeDeploymentService:
                     docker_url=docker_url,
                     name=vm.hostname,
                     image=container_image,
-                    network_name=network.name,
-                    ip_address=vm.ip_address,
+                    network_name=primary_network.name,
+                    ip_address=primary_ip,
                     cpu_limit=vm.cpu or 2,
                     memory_limit_mb=vm.ram_mb or 2048,
                     hostname=vm.hostname,
                     labels=labels,
-                    dns_servers=network.dns_servers,
-                    dns_search=network.dns_search,
+                    dns_servers=primary_network.dns_servers,
+                    dns_search=primary_network.dns_search,
                     environment=environment if environment else None,
                     privileged=privileged,
                 )
 
                 vm.container_id = container_id
+
+                # Attach secondary networks before starting (multi-NIC support)
+                if secondary_interfaces:
+                    event_service.log_event(
+                        range_id=range_uuid,
+                        event_type=EventType.DEPLOYMENT_STEP,
+                        message=f"Attaching {len(secondary_interfaces)} additional network(s) to '{vm.hostname}'...",
+                        vm_id=vm.id,
+                    )
+                    for iface in secondary_interfaces:
+                        sec_network = db.query(Network).filter(Network.id == iface.network_id).first()
+                        if sec_network:
+                            self.docker_service.connect_container_to_network_dind(
+                                range_id=range_id,
+                                docker_url=docker_url,
+                                container_id=container_id,
+                                network_name=sec_network.name,
+                                ip_address=iface.ip_address,
+                            )
+                            logger.info(f"Attached secondary NIC to {vm.hostname}: {sec_network.name} ({iface.ip_address})")
 
                 event_service.log_event(
                     range_id=range_uuid,
@@ -504,10 +577,18 @@ class RangeDeploymentService:
                 # Mark VM as running after successful start (Issue #75)
                 vm.status = VMStatus.RUNNING
 
+                # Build network info for the event message
+                network_info = f"{primary_network.name} ({primary_ip})"
+                if secondary_interfaces:
+                    for iface in secondary_interfaces:
+                        sec_network = db.query(Network).filter(Network.id == iface.network_id).first()
+                        if sec_network:
+                            network_info += f", {sec_network.name} ({iface.ip_address})"
+
                 event_service.log_event(
                     range_id=range_uuid,
                     event_type=EventType.VM_STARTED,
-                    message=f"VM '{vm.hostname}' running on {network.name} ({vm.ip_address})",
+                    message=f"VM '{vm.hostname}' running on {network_info}",
                     vm_id=vm.id,
                 )
 
@@ -538,38 +619,50 @@ class RangeDeploymentService:
         # 5. Set up VNC port forwarding using iptables DNAT (replaces nginx proxy)
         vm_ports = []
         for vm in vms:
-            if vm.container_id and vm.ip_address:
-                # Determine VNC port based on VM type and image
-                vnc_port = 8006  # Default for QEMU/Windows
+            if not vm.container_id:
+                continue
 
-                # Get base image name for VNC port detection
-                base_image = ""
-                vm_type = None
-                if vm.base_image_id and vm.base_image:
-                    base_image = vm.base_image.docker_image_tag or ""
-                    vm_type = vm.base_image.vm_type
-                elif vm.golden_image_id and vm.golden_image:
-                    base_image = vm.golden_image.docker_image_tag or ""
-                    vm_type = vm.golden_image.vm_type
-                elif vm.snapshot_id and vm.snapshot:
-                    base_image = vm.snapshot.docker_image_tag or ""
-                    vm_type = vm.snapshot.vm_type
+            # Get primary IP for VNC (multi-NIC support)
+            primary_iface = db.query(VMNetwork).filter(
+                VMNetwork.vm_id == vm.id,
+                VMNetwork.is_primary == True
+            ).first()
+            vnc_ip = primary_iface.ip_address if primary_iface else vm.ip_address
 
-                # Check if it's a container type for VNC port detection
-                if vm_type == "container" or vm_type == VMType.CONTAINER:
-                    if "kasmweb" in base_image:
-                        vnc_port = 6901
-                    elif "linuxserver/" in base_image or "lscr.io/linuxserver" in base_image:
-                        vnc_port = 3000
-                    else:
-                        vnc_port = 6901  # Default for containers
+            if not vnc_ip:
+                continue
 
-                vm_ports.append({
-                    "vm_id": str(vm.id),
-                    "hostname": vm.hostname,
-                    "vnc_port": vnc_port,
-                    "ip_address": vm.ip_address,
-                })
+            # Determine VNC port based on VM type and image
+            vnc_port = 8006  # Default for QEMU/Windows
+
+            # Get base image name for VNC port detection
+            base_image = ""
+            vm_type = None
+            if vm.base_image_id and vm.base_image:
+                base_image = vm.base_image.docker_image_tag or ""
+                vm_type = vm.base_image.vm_type
+            elif vm.golden_image_id and vm.golden_image:
+                base_image = vm.golden_image.docker_image_tag or ""
+                vm_type = vm.golden_image.vm_type
+            elif vm.snapshot_id and vm.snapshot:
+                base_image = vm.snapshot.docker_image_tag or ""
+                vm_type = vm.snapshot.vm_type
+
+            # Check if it's a container type for VNC port detection
+            if vm_type == "container" or vm_type == VMType.CONTAINER:
+                if "kasmweb" in base_image:
+                    vnc_port = 6901
+                elif "linuxserver/" in base_image or "lscr.io/linuxserver" in base_image:
+                    vnc_port = 3000
+                else:
+                    vnc_port = 6901  # Default for containers
+
+            vm_ports.append({
+                "vm_id": str(vm.id),
+                "hostname": vm.hostname,
+                "vnc_port": vnc_port,
+                "ip_address": vnc_ip,
+            })
 
         if vm_ports:
             event_service.log_event(
@@ -780,7 +873,25 @@ class RangeDeploymentService:
         # Pull images into DinD
         for image in unique_images:
             logger.info(f"Pulling image {image} into DinD for sync")
-            await self.docker_service.pull_image_to_dind(range_id_str, docker_url, image)
+            pull_result = await self.docker_service.pull_image_to_dind(range_id_str, docker_url, image)
+
+            # Notify users if image was pulled from internet (not from local registry)
+            if pull_result["source"] == "internet":
+                logger.warning(f"Image {image} pulled from internet (not from local registry) during sync")
+                cache_msg = (
+                    "Cached to registry for future deployments."
+                    if pull_result["cached_to_registry"]
+                    else "Failed to cache - future deployments may also pull from internet."
+                )
+                notify_range_users(
+                    db=db,
+                    range_id=range_id,
+                    title="Image Pulled from Internet",
+                    message=f"Image {image} was pulled from the internet (not cached locally). {cache_msg}",
+                    notification_type=NotificationType.SYSTEM_ALERT,
+                    severity=NotificationSeverity.WARNING,
+                )
+
             result["images_pulled"] += 1
 
         # 3. Create new VMs
@@ -830,9 +941,24 @@ class RangeDeploymentService:
                     vm.error_message = "No image configured"
                     continue
 
-                # Get network
-                vm_network = db.query(Network).filter(Network.id == vm.network_id).first()
-                if not vm_network or not vm_network.docker_network_id:
+                # Get all network interfaces for this VM (multi-NIC support)
+                interfaces = db.query(VMNetwork).filter(VMNetwork.vm_id == vm.id).order_by(
+                    VMNetwork.is_primary.desc()  # Primary first
+                ).all()
+
+                if interfaces:
+                    # New multi-NIC path: use VMNetwork records
+                    primary_iface = interfaces[0]
+                    primary_network = db.query(Network).filter(Network.id == primary_iface.network_id).first()
+                    primary_ip = primary_iface.ip_address
+                    secondary_interfaces = interfaces[1:]
+                else:
+                    # Legacy fallback: use vm.network_id directly for backwards compatibility
+                    primary_network = db.query(Network).filter(Network.id == vm.network_id).first()
+                    primary_ip = vm.ip_address
+                    secondary_interfaces = []
+
+                if not primary_network or not primary_network.docker_network_id:
                     logger.warning(f"Network not provisioned for VM {vm.hostname}, skipping")
                     vm.status = VMStatus.ERROR
                     vm.error_message = "Network not provisioned"
@@ -905,26 +1031,39 @@ class RangeDeploymentService:
                     privileged = True
                     labels["cyroid.vm_type"] = "linux"
 
-                # Create container (same pattern as deploy_range)
+                # Create container with primary network (same pattern as deploy_range)
                 container_id = await self.docker_service.create_range_container_dind(
                     range_id=range_id_str,
                     docker_url=docker_url,
                     name=vm.hostname,
                     image=image_tag,
-                    network_name=vm_network.name,
-                    ip_address=vm.ip_address,
+                    network_name=primary_network.name,
+                    ip_address=primary_ip,
                     cpu_limit=vm.cpu or 2,
                     memory_limit_mb=vm.ram_mb or 2048,
                     hostname=vm.hostname,
                     labels=labels,
-                    dns_servers=vm_network.dns_servers,
-                    dns_search=vm_network.dns_search,
+                    dns_servers=primary_network.dns_servers,
+                    dns_search=primary_network.dns_search,
                     environment=environment if environment else None,
                     privileged=privileged,
                     volumes=volumes if volumes else None,
                 )
 
                 vm.container_id = container_id
+
+                # Attach secondary networks before starting (multi-NIC support)
+                for iface in secondary_interfaces:
+                    sec_network = db.query(Network).filter(Network.id == iface.network_id).first()
+                    if sec_network and sec_network.docker_network_id:
+                        self.docker_service.connect_container_to_network_dind(
+                            range_id=range_id_str,
+                            docker_url=docker_url,
+                            container_id=container_id,
+                            network_name=sec_network.name,
+                            ip_address=iface.ip_address,
+                        )
+                        logger.info(f"Attached secondary NIC to {vm.hostname}: {sec_network.name} ({iface.ip_address})")
 
                 # Start the container
                 await self.docker_service.start_range_container_dind(
@@ -949,7 +1088,7 @@ class RangeDeploymentService:
                     "vm_id": str(vm.id),
                     "hostname": vm.hostname,
                     "vnc_port": vnc_port,
-                    "ip_address": vm.ip_address,
+                    "ip_address": primary_ip,  # Use primary IP for VNC
                     "container_id": container_id,
                 })
 

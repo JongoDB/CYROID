@@ -36,6 +36,15 @@ export interface VMTemplate {
   os_version?: string  // e.g., "2022", "22.04"
 }
 
+// Blueprint instance info for ranges created from blueprints
+export interface BlueprintInstanceInfo {
+  instance_id: string
+  blueprint_id: string
+  blueprint_name: string
+  blueprint_version: number
+  current_blueprint_version: number
+}
+
 export interface Range {
   id: string
   name: string
@@ -55,6 +64,8 @@ export interface Range {
   router?: RangeRouter | null
   // Training content link (from Content Library)
   student_guide_id?: string | null
+  // Blueprint instance info (populated if range was created from a blueprint)
+  blueprint_instance?: BlueprintInstanceInfo | null
 }
 
 export interface Network {
@@ -85,10 +96,26 @@ export interface RangeRouter {
   updated_at: string
 }
 
+// Multi-NIC Support Types
+export interface NetworkInterfaceCreate {
+  network_id: string
+  ip_address?: string | null
+}
+
+export interface NetworkInterfaceResponse {
+  network_id: string
+  network_name: string
+  ip_address: string
+  subnet: string
+  is_primary: boolean
+}
+
 export interface VM {
   id: string
   range_id: string
   network_id: string
+  // Multi-NIC support: array of network interfaces
+  networks?: NetworkInterfaceResponse[]
   // Image Library source fields (one of these will be set)
   base_image_id?: string | null
   golden_image_id?: string | null
@@ -1084,12 +1111,15 @@ export interface SyncResult {
  */
 export interface VMCreateWithImageLibrary {
   range_id: string
-  network_id: string
   hostname: string
-  ip_address: string
   cpu?: number
   ram_mb?: number
   disk_gb?: number
+  // NEW: Multiple network interfaces (first is primary)
+  networks?: NetworkInterfaceCreate[]
+  // DEPRECATED: Single network (kept for backwards compatibility)
+  network_id?: string
+  ip_address?: string
   // Image source - exactly one required
   base_image_id?: string | null
   golden_image_id?: string | null

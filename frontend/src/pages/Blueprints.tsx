@@ -1,7 +1,7 @@
 // frontend/src/pages/Blueprints.tsx
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { blueprintsApi, Blueprint, InstanceDeploy } from '../services/api';
+import { blueprintsApi, Blueprint, BlueprintDetail, InstanceDeploy } from '../services/api';
 import {
   LayoutTemplate,
   Loader2,
@@ -11,11 +11,12 @@ import {
   Server,
   Users,
   Upload,
+  Pencil,
 } from 'lucide-react';
 import { ConfirmDialog } from '../components/common/ConfirmDialog';
 import { toast } from '../stores/toastStore';
 import DeployInstanceModal from '../components/blueprints/DeployInstanceModal';
-import { ImportBlueprintModal } from '../components/blueprints';
+import { ImportBlueprintModal, VisualBlueprintEditor } from '../components/blueprints';
 
 export default function Blueprints() {
   const [blueprints, setBlueprints] = useState<Blueprint[]>([]);
@@ -26,6 +27,8 @@ export default function Blueprints() {
   }>({ blueprint: null, isLoading: false });
   const [deployModal, setDeployModal] = useState<Blueprint | null>(null);
   const [showImportModal, setShowImportModal] = useState(false);
+  const [editModal, setEditModal] = useState<BlueprintDetail | null>(null);
+  const [loadingEdit, setLoadingEdit] = useState<string | null>(null);
 
   const fetchBlueprints = async () => {
     try {
@@ -70,6 +73,18 @@ export default function Blueprints() {
       fetchBlueprints();
     } catch (err: any) {
       toast.error(err.response?.data?.detail || 'Failed to deploy instance');
+    }
+  };
+
+  const handleEdit = async (blueprint: Blueprint) => {
+    setLoadingEdit(blueprint.id);
+    try {
+      const response = await blueprintsApi.get(blueprint.id);
+      setEditModal(response.data);
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || 'Failed to load blueprint');
+    } finally {
+      setLoadingEdit(null);
     }
   };
 
@@ -173,6 +188,18 @@ export default function Blueprints() {
                     View
                   </Link>
                   <button
+                    onClick={() => handleEdit(blueprint)}
+                    disabled={loadingEdit === blueprint.id}
+                    className="inline-flex items-center px-3 py-1.5 text-xs font-medium rounded-md text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50"
+                    title="Edit Blueprint"
+                  >
+                    {loadingEdit === blueprint.id ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Pencil className="h-3.5 w-3.5" />
+                    )}
+                  </button>
+                  <button
                     onClick={() => setDeployModal(blueprint)}
                     className="inline-flex items-center px-3 py-1.5 text-xs font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700"
                   >
@@ -222,6 +249,16 @@ export default function Blueprints() {
             fetchBlueprints();
             toast.success('Blueprint imported successfully');
           }}
+        />
+      )}
+
+      {/* Visual Blueprint Editor */}
+      {editModal && (
+        <VisualBlueprintEditor
+          blueprint={editModal}
+          isOpen={true}
+          onClose={() => setEditModal(null)}
+          onSaved={fetchBlueprints}
         />
       )}
     </div>

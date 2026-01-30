@@ -1,13 +1,23 @@
 # Docker Compose overrides for macOS development
 #
-# Usage: Copy this file to docker-compose.override.yml
-#   cp docker-compose.override.macos.yml docker-compose.override.yml
+# Usage: Run ./scripts/dev-setup.sh to automatically copy this file
+#   Or manually: cp docker-compose.override.macos.yml docker-compose.override.yml
 #
-# This maps volume paths to local ./data/cyroid instead of /data/cyroid
-# which is required on macOS since /data is not writable.
+# This file:
+#   1. Maps volume paths to local ./data/cyroid instead of /data/cyroid
+#      (required on macOS since /data is not writable)
+#   2. Sets DIND_HOST_* env vars so DinD containers mount from the correct
+#      macOS host paths (not the container paths)
 
 services:
   api:
+    environment:
+      # Tell DinD service where the data directories are on the Docker host
+      # These are used when creating DinD containers (which mount from the host, not this container)
+      DIND_HOST_ISO_CACHE: ${PWD}/data/cyroid/iso-cache
+      DIND_HOST_VM_STORAGE: ${PWD}/data/cyroid/vm-storage
+      DIND_HOST_TEMPLATE_STORAGE: ${PWD}/data/cyroid/template-storage
+      DIND_HOST_SHARED: ${PWD}/data/cyroid/shared
     volumes:
       - ./backend:/app
       - /var/run/docker.sock:/var/run/docker.sock
@@ -21,6 +31,12 @@ services:
       - ./data/cyroid/images:/data/images
 
   worker:
+    environment:
+      # Tell DinD service where the data directories are on the Docker host
+      DIND_HOST_ISO_CACHE: ${PWD}/data/cyroid/iso-cache
+      DIND_HOST_VM_STORAGE: ${PWD}/data/cyroid/vm-storage
+      DIND_HOST_TEMPLATE_STORAGE: ${PWD}/data/cyroid/template-storage
+      DIND_HOST_SHARED: ${PWD}/data/cyroid/shared
     volumes:
       - ./backend:/app
       - /var/run/docker.sock:/var/run/docker.sock

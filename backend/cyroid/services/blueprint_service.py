@@ -13,7 +13,8 @@ from sqlalchemy.orm import Session
 
 from cyroid.models import Range, Network, VM, MSEL, RangeRouter
 from cyroid.models.base_image import BaseImage
-from cyroid.schemas.blueprint import BlueprintConfig, NetworkConfig, VMConfig, RouterConfig, MSELConfig
+from cyroid.models.vm_network import VMNetwork
+from cyroid.schemas.blueprint import BlueprintConfig, NetworkConfig, VMConfig, RouterConfig, MSELConfig, NetworkInterfaceConfig
 
 
 def extract_config_from_range(db: Session, range_id: UUID) -> BlueprintConfig:
@@ -50,11 +51,37 @@ def extract_config_from_range(db: Session, range_id: UUID) -> BlueprintConfig:
                 base_image_name = base_image.name
                 base_image_tag = base_image.docker_image_tag
 
+        # Check for multi-NIC configuration (VMNetwork records)
+        vm_networks = db.query(VMNetwork).filter(VMNetwork.vm_id == vm.id).order_by(
+            VMNetwork.is_primary.desc()  # Primary first
+        ).all()
+
+        if vm_networks:
+            # Multi-NIC path: export all network interfaces
+            network_interfaces = [
+                NetworkInterfaceConfig(
+                    network_name=network_lookup.get(vn.network_id, "unknown"),
+                    ip_address=vn.ip_address,
+                    is_primary=vn.is_primary,
+                )
+                for vn in vm_networks
+            ]
+            # Primary interface also populates legacy fields for backward compatibility
+            primary = vm_networks[0]
+            ip_address = primary.ip_address
+            network_name = network_lookup.get(primary.network_id, "unknown")
+        else:
+            # Legacy single-NIC path (VMs created before multi-NIC support)
+            network_interfaces = None
+            ip_address = vm.ip_address
+            network_name = network_lookup.get(vm.network_id, "unknown")
+
         vm_configs.append(
             VMConfig(
                 hostname=vm.hostname,
-                ip_address=vm.ip_address,
-                network_name=network_lookup.get(vm.network_id, "unknown"),
+                ip_address=ip_address,
+                network_name=network_name,
+                network_interfaces=network_interfaces,
                 base_image_id=str(vm.base_image_id) if vm.base_image_id else None,
                 golden_image_id=str(vm.golden_image_id) if vm.golden_image_id else None,
                 snapshot_id=str(vm.snapshot_id) if vm.snapshot_id else None,
@@ -182,7 +209,20 @@ def create_range_from_blueprint(
 
     # Create VMs with exact blueprint IPs
     for vm_config in config.vms:
-        network_id = network_lookup.get(vm_config.network_name)
+        # Determine primary network assignment
+        if vm_config.network_interfaces:
+            # Multi-NIC path: find primary interface
+            primary_iface = next(
+                (i for i in vm_config.network_interfaces if i.is_primary),
+                vm_config.network_interfaces[0]  # Default to first if no primary marked
+            )
+            network_id = network_lookup.get(primary_iface.network_name)
+            ip_address = primary_iface.ip_address
+        else:
+            # Legacy single-NIC path
+            network_id = network_lookup.get(vm_config.network_name)
+            ip_address = vm_config.ip_address
+
         if not network_id:
             continue  # Skip VMs with missing networks
 
@@ -244,7 +284,7 @@ def create_range_from_blueprint(
             golden_image_id=golden_image_id,
             snapshot_id=snapshot_id,
             hostname=vm_config.hostname,
-            ip_address=vm_config.ip_address,
+            ip_address=ip_address,
             cpu=vm_config.cpu,
             ram_mb=vm_config.ram_mb,
             disk_gb=vm_config.disk_gb,
@@ -252,6 +292,32 @@ def create_range_from_blueprint(
             position_y=vm_config.position_y,
         )
         db.add(vm)
+        db.flush()  # Get VM ID for VMNetwork records
+
+        # Create VMNetwork records for multi-NIC VMs
+        if vm_config.network_interfaces:
+            # Track which networks we've already added to prevent duplicates
+            seen_network_ids = set()
+            for idx, iface in enumerate(vm_config.network_interfaces):
+                iface_network_id = network_lookup.get(iface.network_name)
+                if not iface_network_id:
+                    continue  # Skip interfaces with missing networks
+
+                # Skip duplicate network assignments (same network can only be connected once per VM)
+                if iface_network_id in seen_network_ids:
+                    continue
+                seen_network_ids.add(iface_network_id)
+
+                # Determine if this is the primary interface
+                is_primary = iface.is_primary or (idx == 0 and not any(i.is_primary for i in vm_config.network_interfaces))
+
+                vm_network = VMNetwork(
+                    vm_id=vm.id,
+                    network_id=iface_network_id,
+                    ip_address=iface.ip_address,  # May be None for auto-assign on deploy
+                    is_primary=is_primary,
+                )
+                db.add(vm_network)
 
     # Create MSEL if present
     if config.msel and (config.msel.content or config.msel.walkthrough):

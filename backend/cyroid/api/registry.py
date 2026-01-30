@@ -3,11 +3,12 @@
 import logging
 from typing import List
 
+import docker
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from cyroid.api.deps import CurrentUser
-from cyroid.services.registry_service import get_registry_service
+from cyroid.api.deps import CurrentUser, AdminUser
+from cyroid.services.registry_service import get_registry_service, RegistryPushError
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/registry", tags=["registry"])
@@ -33,6 +34,20 @@ class PushRequest(BaseModel):
 
 class PushResponse(BaseModel):
     """Response from push operation."""
+    success: bool
+    message: str
+
+
+class ImageStatusResponse(BaseModel):
+    """Response for image status check."""
+    image_tag: str
+    in_registry: bool
+    on_host: bool
+    needs_push: bool
+
+
+class DeleteResponse(BaseModel):
+    """Response from delete operation."""
     success: bool
     message: str
 
@@ -72,12 +87,49 @@ async def push_image_to_registry(
     if not await registry.is_healthy():
         raise HTTPException(status_code=503, detail="Registry is not healthy")
 
-    success = await registry.push_image(request.image_tag)
+    try:
+        await registry.push_and_cleanup(request.image_tag)
+        return PushResponse(success=True, message=f"Pushed {request.image_tag} to registry and cleaned up host")
+    except RegistryPushError as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-    if success:
-        return PushResponse(success=True, message=f"Successfully pushed {request.image_tag}")
-    else:
-        raise HTTPException(status_code=500, detail=f"Failed to push {request.image_tag}")
+
+@router.get("/status/{image_tag:path}", response_model=ImageStatusResponse)
+async def get_image_status(
+    image_tag: str,
+    current_user: CurrentUser
+):
+    """Check if an image exists in registry, on host, or both.
+
+    Args:
+        image_tag: The image tag to check (e.g., 'cyroid/kali:latest')
+
+    Returns:
+        ImageStatusResponse with location information and needs_push flag
+    """
+    registry = get_registry_service()
+
+    # Check registry
+    in_registry = await registry.image_exists(image_tag)
+
+    # Check host Docker
+    on_host = False
+    try:
+        docker_client = docker.from_env()
+        docker_client.images.get(image_tag)
+        on_host = True
+    except docker.errors.ImageNotFound:
+        on_host = False
+
+    # needs_push: image is on host but not in registry
+    needs_push = on_host and not in_registry
+
+    return ImageStatusResponse(
+        image_tag=image_tag,
+        in_registry=in_registry,
+        on_host=on_host,
+        needs_push=needs_push
+    )
 
 
 @router.get("/health")
@@ -86,3 +138,37 @@ async def registry_health():
     registry = get_registry_service()
     healthy = await registry.is_healthy()
     return {"healthy": healthy}
+
+
+@router.delete("/images/{image_tag:path}", response_model=DeleteResponse)
+async def delete_registry_image(
+    image_tag: str,
+    current_user: AdminUser
+):
+    """Delete image from registry (admin only).
+
+    Note: Requires registry garbage collection to reclaim disk space.
+
+    Args:
+        image_tag: The image tag to delete (e.g., 'cyroid/kali:latest')
+
+    Returns:
+        DeleteResponse with success status and message
+    """
+    registry = get_registry_service()
+
+    if not await registry.is_healthy():
+        raise HTTPException(status_code=503, detail="Registry is not healthy")
+
+    success = await registry.delete_image(image_tag)
+
+    if success:
+        return DeleteResponse(
+            success=True,
+            message=f"Successfully deleted {image_tag} from registry"
+        )
+    else:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to delete {image_tag} from registry"
+        )

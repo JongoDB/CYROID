@@ -11,6 +11,7 @@ from pydantic import BaseModel
 
 from cyroid.api.deps import DBSession, CurrentUser, AdminUser, require_role
 from cyroid.services.docker_service import get_docker_service
+from cyroid.services.registry_service import get_registry_service, RegistryPushError
 from cyroid.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -416,6 +417,58 @@ def _pull_docker_image_async(image: str):
             except Exception as e:
                 logger.warning(f"Failed to create BaseImage record for {image}: {e}")
 
+            # Auto-push to local registry and cleanup host Docker
+            try:
+                import asyncio
+                registry = get_registry_service()
+
+                # Create event loop for async calls in this thread
+                loop = asyncio.new_event_loop()
+                try:
+                    # Check if registry is healthy
+                    is_healthy = loop.run_until_complete(registry.is_healthy())
+                    if not is_healthy:
+                        logger.warning(f"Registry not healthy, skipping push for {image}")
+                        _active_docker_pulls[image_key].update({
+                            "pushed_to_registry": False,
+                            "registry_error": "Registry not healthy",
+                        })
+                    else:
+                        # Update status to pushing
+                        _active_docker_pulls[image_key].update({
+                            "status": "pushing_to_registry",
+                        })
+
+                        # Push to registry and cleanup host
+                        loop.run_until_complete(registry.push_and_cleanup(image))
+
+                        _active_docker_pulls[image_key].update({
+                            "status": "completed",
+                            "pushed_to_registry": True,
+                        })
+                        logger.info(f"Pushed {image} to registry and cleaned up host")
+                finally:
+                    loop.close()
+
+            except RegistryPushError as e:
+                logger.error(f"Failed to push {image} to registry: {e}")
+                _active_docker_pulls[image_key].update({
+                    "status": "failed",
+                    "pushed_to_registry": False,
+                    "registry_error": str(e),
+                    "error": f"Registry push failed: {e}",
+                })
+                return
+            except Exception as e:
+                logger.error(f"Unexpected error pushing {image} to registry: {e}")
+                _active_docker_pulls[image_key].update({
+                    "status": "failed",
+                    "pushed_to_registry": False,
+                    "registry_error": str(e),
+                    "error": f"Registry push failed: {e}",
+                })
+                return
+
         except Exception:
             _active_docker_pulls[image_key].update({
                 "status": "completed",
@@ -489,6 +542,8 @@ def get_docker_pull_status(image_key: str, current_user: CurrentUser):
             "error": pull_info.get("error"),
             "image_id": pull_info.get("image_id"),
             "size_bytes": pull_info.get("size_bytes"),
+            "pushed_to_registry": pull_info.get("pushed_to_registry"),
+            "registry_error": pull_info.get("registry_error"),
         }
 
     # Not in active pulls - check if image exists (completed before tracking started)
@@ -743,6 +798,62 @@ def _build_docker_image_async(image_name: str, tag: str, no_cache: bool):
 
                 # Create/update BaseImage record with image_project_name
                 _create_base_image_for_build(full_tag, image_id, image_name)
+
+                # Auto-push to local registry and cleanup host Docker
+                try:
+                    import asyncio
+                    registry = get_registry_service()
+
+                    # Create event loop for async calls in this thread
+                    loop = asyncio.new_event_loop()
+                    try:
+                        # Check if registry is healthy
+                        is_healthy = loop.run_until_complete(registry.is_healthy())
+                        if not is_healthy:
+                            logger.warning(f"Registry not healthy, skipping push for {full_tag}")
+                            _active_docker_builds[build_key].update({
+                                "status": "failed",
+                                "pushed_to_registry": False,
+                                "error": "Registry not healthy - image built but not pushed",
+                                "current_step_name": "Error: Registry not healthy",
+                            })
+                            return
+
+                        # Update status to pushing
+                        _active_docker_builds[build_key].update({
+                            "current_step_name": "Pushing to registry...",
+                        })
+
+                        # Push to registry and cleanup host
+                        loop.run_until_complete(registry.push_and_cleanup(full_tag))
+
+                        _active_docker_builds[build_key].update({
+                            "pushed_to_registry": True,
+                            "current_step_name": "Build complete and pushed to registry!",
+                        })
+                        logger.info(f"Pushed {full_tag} to registry and cleaned up host")
+                    finally:
+                        loop.close()
+
+                except RegistryPushError as e:
+                    logger.error(f"Failed to push {full_tag} to registry: {e}")
+                    _active_docker_builds[build_key].update({
+                        "status": "failed",
+                        "pushed_to_registry": False,
+                        "error": f"Registry push failed: {e}",
+                        "current_step_name": f"Error: Registry push failed - {e}",
+                    })
+                    return
+                except Exception as e:
+                    logger.error(f"Unexpected error pushing {full_tag} to registry: {e}")
+                    _active_docker_builds[build_key].update({
+                        "status": "failed",
+                        "pushed_to_registry": False,
+                        "error": f"Registry push failed: {e}",
+                        "current_step_name": f"Error: Registry push failed - {e}",
+                    })
+                    return
+
                 return
 
         # If we get here without aux, check if image exists
@@ -756,6 +867,62 @@ def _build_docker_image_async(image_name: str, tag: str, no_cache: bool):
             })
             # Create/update BaseImage record with image_project_name
             _create_base_image_for_build(full_tag, built_image.id, image_name)
+
+            # Auto-push to local registry and cleanup host Docker
+            try:
+                import asyncio
+                registry = get_registry_service()
+
+                # Create event loop for async calls in this thread
+                loop = asyncio.new_event_loop()
+                try:
+                    # Check if registry is healthy
+                    is_healthy = loop.run_until_complete(registry.is_healthy())
+                    if not is_healthy:
+                        logger.warning(f"Registry not healthy, skipping push for {full_tag}")
+                        _active_docker_builds[build_key].update({
+                            "status": "failed",
+                            "pushed_to_registry": False,
+                            "error": "Registry not healthy - image built but not pushed",
+                            "current_step_name": "Error: Registry not healthy",
+                        })
+                        return
+
+                    # Update status to pushing
+                    _active_docker_builds[build_key].update({
+                        "current_step_name": "Pushing to registry...",
+                    })
+
+                    # Push to registry and cleanup host
+                    loop.run_until_complete(registry.push_and_cleanup(full_tag))
+
+                    _active_docker_builds[build_key].update({
+                        "pushed_to_registry": True,
+                        "current_step_name": "Build complete and pushed to registry!",
+                    })
+                    logger.info(f"Pushed {full_tag} to registry and cleaned up host")
+                finally:
+                    loop.close()
+
+            except RegistryPushError as e:
+                logger.error(f"Failed to push {full_tag} to registry: {e}")
+                _active_docker_builds[build_key].update({
+                    "status": "failed",
+                    "pushed_to_registry": False,
+                    "error": f"Registry push failed: {e}",
+                    "current_step_name": f"Error: Registry push failed - {e}",
+                })
+                return
+            except Exception as e:
+                logger.error(f"Unexpected error pushing {full_tag} to registry: {e}")
+                _active_docker_builds[build_key].update({
+                    "status": "failed",
+                    "pushed_to_registry": False,
+                    "error": f"Registry push failed: {e}",
+                    "current_step_name": f"Error: Registry push failed - {e}",
+                })
+                return
+
         except Exception:
             _active_docker_builds[build_key].update({
                 "status": "completed",
@@ -833,6 +1000,7 @@ def get_docker_build_status(build_key: str, current_user: CurrentUser):
             "current_step_name": build_info.get("current_step_name", ""),
             "error": build_info.get("error"),
             "image_id": build_info.get("image_id"),
+            "pushed_to_registry": build_info.get("pushed_to_registry"),
             "logs": build_info.get("logs", [])[-20:],  # Last 20 log lines
         }
 
