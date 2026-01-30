@@ -5,9 +5,15 @@
 # Uses 'gum' for beautiful terminal interfaces (auto-installs on macOS).
 # Handles platform differences (macOS, Linux) automatically.
 #
-# BOOTSTRAP: This script can be run standalone to bootstrap a fresh install:
-#   curl -fsSL https://raw.githubusercontent.com/jongodb/CYROID/master/scripts/deploy.sh -o deploy.sh
-#   chmod +x deploy.sh && ./deploy.sh --dev
+# This script works TWO ways:
+#
+#   1. From git clone (recommended):
+#      git clone https://github.com/JongoDB/CYROID.git && cd CYROID
+#      ./scripts/deploy.sh
+#
+#   2. Standalone download (auto-downloads required files):
+#      curl -fsSL https://raw.githubusercontent.com/JongoDB/CYROID/master/scripts/deploy.sh -o deploy.sh
+#      chmod +x deploy.sh && ./deploy.sh
 #
 # Usage:
 #   ./scripts/deploy.sh                                    # Interactive TUI setup
@@ -43,6 +49,11 @@ set -euo pipefail
 REPO_URL="https://github.com/jongodb/CYROID.git"
 REPO_NAME="CYROID"
 
+# GitHub repository for standalone downloads (without git)
+GITHUB_REPO="JongoDB/CYROID"
+GITHUB_BRANCH="master"
+GITHUB_RAW_BASE="https://raw.githubusercontent.com/${GITHUB_REPO}/${GITHUB_BRANCH}"
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -56,8 +67,13 @@ BOLD='\033[1m'
 PLATFORM="$(uname -s)"
 ARCH="$(uname -m)"
 
-# Get script directory
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Get script directory - handle both normal execution and piped execution (curl | bash)
+if [ -n "${BASH_SOURCE[0]:-}" ] && [ "${BASH_SOURCE[0]}" != "/dev/stdin" ] && [ -f "${BASH_SOURCE[0]}" ]; then
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+else
+    # Running via curl | bash or similar - use current directory
+    SCRIPT_DIR="$(pwd)"
+fi
 
 # Determine PROJECT_ROOT: use current directory if not in a valid CYROID repo
 if [ -f "$SCRIPT_DIR/../docker-compose.yml" ] && [ -f "$SCRIPT_DIR/../VERSION" ]; then
@@ -421,6 +437,109 @@ check_and_install_curl() {
     esac
 }
 
+download_file() {
+    # Download a file via curl or wget (for standalone bootstrap)
+    local url="$1"
+    local dest="$2"
+    local desc="${3:-file}"
+
+    mkdir -p "$(dirname "$dest")"
+
+    if command -v curl &> /dev/null; then
+        if curl -fsSL "$url" -o "$dest" 2>/dev/null; then
+            return 0
+        fi
+    elif command -v wget &> /dev/null; then
+        if wget -q "$url" -O "$dest" 2>/dev/null; then
+            return 0
+        fi
+    fi
+
+    log_error "Failed to download $desc"
+    return 1
+}
+
+bootstrap_standalone() {
+    # Bootstrap for curl|bash execution - downloads compose files without git
+    # This is an alternative to bootstrap_repository() when git isn't available
+
+    local missing_files=()
+
+    # Check for required compose files
+    if [ ! -f "$PROJECT_ROOT/docker-compose.yml" ]; then
+        missing_files+=("docker-compose.yml")
+    fi
+    if [ ! -f "$PROJECT_ROOT/docker-compose.prod.yml" ]; then
+        missing_files+=("docker-compose.prod.yml")
+    fi
+
+    # If no files are missing, continue normally
+    if [ ${#missing_files[@]} -eq 0 ]; then
+        return 0
+    fi
+
+    print_banner
+    echo -e "${YELLOW}Standalone mode - downloading required files from GitHub...${NC}"
+    echo ""
+
+    # Check for curl or wget
+    if ! command -v curl &> /dev/null && ! command -v wget &> /dev/null; then
+        log_error "Neither curl nor wget found. Please install one of them."
+        exit 1
+    fi
+
+    # Create CYROID directory if needed
+    if [ ! -d "$PROJECT_ROOT" ] || [ "$PROJECT_ROOT" = "/" ]; then
+        PROJECT_ROOT="$HOME/cyroid"
+        SCRIPT_DIR="$PROJECT_ROOT/scripts"
+        ENV_FILE="$PROJECT_ROOT/.env.prod"
+        log_info "Creating CYROID directory at: $PROJECT_ROOT"
+        mkdir -p "$PROJECT_ROOT/scripts"
+    fi
+
+    # Download required files
+    local files_to_download=(
+        "docker-compose.yml"
+        "docker-compose.prod.yml"
+        "docker-compose.dev.yml"
+        "traefik/dynamic/base.yml"
+        "scripts/init-networks.sh"
+        "scripts/generate-certs.sh"
+    )
+
+    for file in "${files_to_download[@]}"; do
+        local dest="$PROJECT_ROOT/$file"
+        if [ ! -f "$dest" ]; then
+            log_info "Downloading $file..."
+            if ! download_file "${GITHUB_RAW_BASE}/$file" "$dest" "$file"; then
+                log_error "Failed to download $file"
+                log_info "Try: git clone https://github.com/${GITHUB_REPO}.git"
+                exit 1
+            fi
+            # Make scripts executable
+            if [[ "$file" == *.sh ]]; then
+                chmod +x "$dest"
+            fi
+        fi
+    done
+
+    # Copy this script to the project if not already there
+    if [ -n "${BASH_SOURCE[0]:-}" ] && [ "${BASH_SOURCE[0]}" != "/dev/stdin" ] && [ -f "${BASH_SOURCE[0]}" ]; then
+        if [ ! -f "$PROJECT_ROOT/scripts/deploy.sh" ]; then
+            cp "${BASH_SOURCE[0]}" "$PROJECT_ROOT/scripts/deploy.sh" 2>/dev/null || true
+            chmod +x "$PROJECT_ROOT/scripts/deploy.sh" 2>/dev/null || true
+        fi
+    fi
+
+    echo ""
+    log_info "Required files downloaded to: $PROJECT_ROOT"
+    log_info "Continuing with deployment..."
+    echo ""
+
+    # Update paths for the new location
+    cd "$PROJECT_ROOT"
+}
+
 bootstrap_repository() {
     local current_dir="$(pwd)"
 
@@ -430,6 +549,13 @@ bootstrap_repository() {
         SCRIPT_DIR="$PROJECT_ROOT/scripts"
         log_info "Already in CYROID repository"
         return 0
+    fi
+
+    # Try standalone bootstrap first if git isn't available
+    if ! command -v git &> /dev/null; then
+        log_info "Git not found, attempting standalone bootstrap..."
+        bootstrap_standalone
+        return $?
     fi
 
     # Need to clone the repository into current directory
