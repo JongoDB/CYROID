@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, patch, MagicMock
 import httpx
 import docker.errors
 
-from cyroid.services.registry_service import RegistryService
+from cyroid.services.registry_service import RegistryService, RegistryPushError
 
 
 class TestRegistryService:
@@ -245,6 +245,180 @@ class TestRegistryService:
                 assert result['image_count'] == 2
                 assert result['tag_count'] == 3
                 assert result['healthy'] is True
+
+    @pytest.mark.asyncio
+    async def test_push_and_cleanup_success(self, registry_service):
+        """Test push_and_cleanup pushes image, verifies, and removes from host."""
+        mock_docker = MagicMock()
+        mock_docker.images.remove.return_value = None
+
+        with patch.object(registry_service, 'push_image', new_callable=AsyncMock) as mock_push:
+            mock_push.return_value = True
+
+            with patch.object(registry_service, 'image_exists', new_callable=AsyncMock) as mock_exists:
+                mock_exists.return_value = True
+
+                with patch.object(registry_service, '_get_docker_client', return_value=mock_docker):
+                    result = await registry_service.push_and_cleanup("myimage:latest")
+
+                    assert result is True
+                    mock_push.assert_called_once()
+                    mock_exists.assert_called_once_with("myimage:latest")
+                    # Should try to remove both the registry tag and original tag
+                    assert mock_docker.images.remove.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_push_and_cleanup_raises_error_on_push_failure(self, registry_service):
+        """Test push_and_cleanup raises RegistryPushError when push fails."""
+        with patch.object(registry_service, 'push_image', new_callable=AsyncMock) as mock_push:
+            mock_push.return_value = False
+
+            with pytest.raises(RegistryPushError) as exc_info:
+                await registry_service.push_and_cleanup("myimage:latest")
+
+            assert "Failed to push image" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_push_and_cleanup_raises_error_on_verify_failure(self, registry_service):
+        """Test push_and_cleanup raises RegistryPushError when verification fails."""
+        with patch.object(registry_service, 'push_image', new_callable=AsyncMock) as mock_push:
+            mock_push.return_value = True
+
+            with patch.object(registry_service, 'image_exists', new_callable=AsyncMock) as mock_exists:
+                mock_exists.return_value = False
+
+                with pytest.raises(RegistryPushError) as exc_info:
+                    await registry_service.push_and_cleanup("myimage:latest")
+
+                assert "not found in registry after push" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_push_and_cleanup_succeeds_even_if_cleanup_fails(self, registry_service):
+        """Test push_and_cleanup returns True even if host cleanup fails."""
+        mock_docker = MagicMock()
+        mock_docker.images.remove.side_effect = docker.errors.APIError("Image in use")
+
+        with patch.object(registry_service, 'push_image', new_callable=AsyncMock) as mock_push:
+            mock_push.return_value = True
+
+            with patch.object(registry_service, 'image_exists', new_callable=AsyncMock) as mock_exists:
+                mock_exists.return_value = True
+
+                with patch.object(registry_service, '_get_docker_client', return_value=mock_docker):
+                    result = await registry_service.push_and_cleanup("myimage:latest")
+
+                    # Should still return True because image is in registry
+                    assert result is True
+
+    @pytest.mark.asyncio
+    async def test_push_and_cleanup_handles_image_not_found_on_cleanup(self, registry_service):
+        """Test push_and_cleanup handles ImageNotFound during cleanup."""
+        mock_docker = MagicMock()
+        mock_docker.images.remove.side_effect = docker.errors.ImageNotFound("not found")
+
+        with patch.object(registry_service, 'push_image', new_callable=AsyncMock) as mock_push:
+            mock_push.return_value = True
+
+            with patch.object(registry_service, 'image_exists', new_callable=AsyncMock) as mock_exists:
+                mock_exists.return_value = True
+
+                with patch.object(registry_service, '_get_docker_client', return_value=mock_docker):
+                    result = await registry_service.push_and_cleanup("myimage:latest")
+
+                    # Should still return True - image already removed is fine
+                    assert result is True
+
+    @pytest.mark.asyncio
+    async def test_push_and_cleanup_with_progress_callback(self, registry_service):
+        """Test push_and_cleanup calls progress callback at each stage."""
+        mock_docker = MagicMock()
+        mock_docker.images.remove.return_value = None
+        progress_calls = []
+
+        def track_progress(status, percent):
+            progress_calls.append((status, percent))
+
+        with patch.object(registry_service, 'push_image', new_callable=AsyncMock) as mock_push:
+            mock_push.return_value = True
+
+            with patch.object(registry_service, 'image_exists', new_callable=AsyncMock) as mock_exists:
+                mock_exists.return_value = True
+
+                with patch.object(registry_service, '_get_docker_client', return_value=mock_docker):
+                    await registry_service.push_and_cleanup("myimage:latest", progress_callback=track_progress)
+
+                    # Check that progress was tracked
+                    assert len(progress_calls) >= 4
+                    assert progress_calls[0][0] == "Pushing to registry..."
+                    assert progress_calls[-1][0] == "Push and cleanup complete"
+                    assert progress_calls[-1][1] == 100
+
+    @pytest.mark.asyncio
+    async def test_image_needs_push_returns_true_when_on_host_not_in_registry(self, registry_service):
+        """Test image_needs_push returns True when image is on host but not in registry."""
+        mock_docker = MagicMock()
+        mock_docker.images.get.return_value = MagicMock()  # Image exists on host
+
+        with patch.object(registry_service, 'image_exists', new_callable=AsyncMock) as mock_exists:
+            mock_exists.return_value = False  # Not in registry
+
+            with patch.object(registry_service, '_get_docker_client', return_value=mock_docker):
+                result = await registry_service.image_needs_push("myimage:latest")
+
+                assert result is True
+
+    @pytest.mark.asyncio
+    async def test_image_needs_push_returns_false_when_in_registry(self, registry_service):
+        """Test image_needs_push returns False when image is already in registry."""
+        with patch.object(registry_service, 'image_exists', new_callable=AsyncMock) as mock_exists:
+            mock_exists.return_value = True
+
+            result = await registry_service.image_needs_push("myimage:latest")
+
+            assert result is False
+            # Should not even check host Docker
+            mock_exists.assert_called_once_with("myimage:latest")
+
+    @pytest.mark.asyncio
+    async def test_image_needs_push_returns_false_when_not_on_host(self, registry_service):
+        """Test image_needs_push returns False when image is not on host."""
+        mock_docker = MagicMock()
+        mock_docker.images.get.side_effect = docker.errors.ImageNotFound("not found")
+
+        with patch.object(registry_service, 'image_exists', new_callable=AsyncMock) as mock_exists:
+            mock_exists.return_value = False
+
+            with patch.object(registry_service, '_get_docker_client', return_value=mock_docker):
+                result = await registry_service.image_needs_push("myimage:latest")
+
+                assert result is False
+
+    @pytest.mark.asyncio
+    async def test_image_needs_push_returns_false_on_docker_api_error(self, registry_service):
+        """Test image_needs_push returns False when Docker API fails."""
+        mock_docker = MagicMock()
+        mock_docker.images.get.side_effect = docker.errors.APIError("API error")
+
+        with patch.object(registry_service, 'image_exists', new_callable=AsyncMock) as mock_exists:
+            mock_exists.return_value = False
+
+            with patch.object(registry_service, '_get_docker_client', return_value=mock_docker):
+                result = await registry_service.image_needs_push("myimage:latest")
+
+                assert result is False
+
+
+class TestRegistryPushError:
+    """Test cases for RegistryPushError exception."""
+
+    def test_registry_push_error_is_exception(self):
+        """Test RegistryPushError is an Exception subclass."""
+        assert issubclass(RegistryPushError, Exception)
+
+    def test_registry_push_error_message(self):
+        """Test RegistryPushError stores error message."""
+        error = RegistryPushError("Push failed")
+        assert str(error) == "Push failed"
 
 
 class TestRegistryServiceSingleton:
