@@ -1238,8 +1238,8 @@ backup_images() {
             progress_bar_update "$current" "$image_count" "Backup" "Pulling: $img"
             echo "  [$current/$image_count] $img"
 
-            # First pull from registry to ensure we have it locally
-            if ! docker pull "$img" >/dev/null 2>&1; then
+            # First pull from registry to ensure we have it locally (with explicit platform)
+            if ! docker pull --platform "$DOCKER_PLATFORM" "$img" >/dev/null 2>&1; then
                 echo -e "    ${RED}✗${NC} Failed to pull from registry"
                 failed=$((failed + 1))
                 continue
@@ -2506,8 +2506,8 @@ pull_images() {
 
             echo "  [$current/$total] $name"
 
-            # Pull individual image (DOCKER_DEFAULT_PLATFORM is exported by detect_platform)
-            if docker pull "$img" >/dev/null 2>&1; then
+            # Pull individual image with explicit platform to avoid multi-arch issues
+            if docker pull --platform "$DOCKER_PLATFORM" "$img" >/dev/null 2>&1; then
                 echo -e "    ${GREEN}✓${NC} Pulled"
             else
                 echo -e "    ${YELLOW}⚠${NC} May already exist locally"

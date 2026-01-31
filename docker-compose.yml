@@ -244,6 +244,11 @@ services:
 
   traefik:
     image: ghcr.io/jongodb/cyroid-proxy:latest
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8082/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
     # Use static config file instead of command line args
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
