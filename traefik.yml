@@ -5,7 +5,14 @@ api:
   insecure: true
   dashboard: true
 
+# Health check ping endpoint
+ping:
+  entryPoint: traefik
+
 entryPoints:
+  # Internal entrypoint for health checks
+  traefik:
+    address: ":8082"
   web:
     address: ":80"
   websecure:
