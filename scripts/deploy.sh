@@ -2025,6 +2025,47 @@ docker_compose_cmd() {
     fi
 }
 
+# Clean shutdown of services with professional output
+# Usage: clean_shutdown [--volumes]
+clean_shutdown() {
+    local remove_volumes=false
+    if [ "$1" = "--volumes" ]; then
+        remove_volumes=true
+    fi
+
+    local compose_cmd="docker compose"
+    if ! docker compose version &> /dev/null 2>&1; then
+        compose_cmd="docker-compose"
+    fi
+    if [ -f "$ENV_FILE" ]; then
+        compose_cmd="$compose_cmd --env-file $ENV_FILE"
+    fi
+
+    # Get list of running containers
+    local containers=$($compose_cmd -f docker-compose.yml -f docker-compose.prod.yml ps -q 2>/dev/null | wc -l | tr -d ' ')
+
+    if [ "$containers" -eq 0 ]; then
+        echo -e "  ${GREEN}✓${NC} No services running"
+        return 0
+    fi
+
+    # Show what we're stopping
+    echo -e "  ${CYAN}▸${NC} Stopping $containers containers..."
+
+    # Run docker compose down with output suppressed
+    if [ "$remove_volumes" = true ]; then
+        $compose_cmd -f docker-compose.yml -f docker-compose.prod.yml down -v --remove-orphans >/dev/null 2>&1
+    else
+        $compose_cmd -f docker-compose.yml -f docker-compose.prod.yml down --remove-orphans >/dev/null 2>&1
+    fi
+
+    echo -e "  ${GREEN}✓${NC} Containers stopped"
+
+    if [ "$remove_volumes" = true ]; then
+        echo -e "  ${GREEN}✓${NC} Volumes removed"
+    fi
+}
+
 show_help() {
     echo "CYROID Production Deployment Script"
     echo ""
@@ -3180,8 +3221,8 @@ management_menu() {
                         fi
 
                         tui_info "Stopping CYROID services..."
-                        $compose_cmd -f docker-compose.yml -f docker-compose.prod.yml down -v
-                        tui_success "Services stopped and volumes removed"
+                        clean_shutdown --volumes
+                        tui_success "Services stopped"
 
                         # Remove CYROID management networks
                         if [ -n "$cyroid_networks" ]; then
@@ -3395,7 +3436,8 @@ management_menu() {
                             echo "Ranges removed"
                         fi
 
-                        $compose_cmd -f docker-compose.yml -f docker-compose.prod.yml down -v
+                        echo "Stopping CYROID services..."
+                        clean_shutdown --volumes
 
                         # Remove CYROID networks
                         if [ -n "$cyroid_networks" ]; then
@@ -3807,7 +3849,7 @@ do_stop() {
 
     echo ""
     tui_info "Stopping services..."
-    $compose_cmd -f docker-compose.yml -f docker-compose.prod.yml down 2>&1 || true
+    clean_shutdown
     tui_success "All services stopped"
     echo ""
 }
