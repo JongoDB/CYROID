@@ -2613,8 +2613,10 @@ wait_for_health() {
     local target_healthy=8  # All 8 services should be healthy
 
     while [ $attempt -lt $max_attempts ]; do
-        local healthy_count=$(docker_compose_cmd -f docker-compose.yml -f docker-compose.prod.yml ps 2>/dev/null | grep -c "(healthy)" || echo "0")
-        local running_count=$(docker_compose_cmd -f docker-compose.yml -f docker-compose.prod.yml ps 2>/dev/null | grep -c "Up" || echo "0")
+        local healthy_count
+        healthy_count=$(docker_compose_cmd -f docker-compose.yml -f docker-compose.prod.yml ps 2>/dev/null | grep -c "(healthy)") || healthy_count=0
+        local running_count
+        running_count=$(docker_compose_cmd -f docker-compose.yml -f docker-compose.prod.yml ps 2>/dev/null | grep -c "Up") || running_count=0
 
         # Update progress bar
         if [ "$TUI_FULLSCREEN" = true ]; then
