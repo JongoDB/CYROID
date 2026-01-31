@@ -2072,7 +2072,7 @@ show_help() {
     echo "  -y, --yes          Non-interactive mode (use defaults)"
     echo "  --admin-user USER  Admin username (default: admin)"
     echo "  --admin-password P Admin password (default: admin123)"
-    echo "  --admin-email E    Admin email (default: admin@cyroid.local)"
+    echo "  --admin-email E    Admin email (default: admin@example.com)"
     echo "  --help             Show this help message"
     echo ""
     echo "Examples:"
@@ -2381,12 +2381,20 @@ generate_traefik_config() {
 # - ACME (Let's Encrypt) automatic certificate management
 # - HTTP to HTTPS redirect
 # - Dashboard disabled for security
+# - Health check ping endpoint on :8082
 
 api:
   insecure: false
   dashboard: false
 
+# Health check ping endpoint
+ping:
+  entryPoint: traefik
+
 entryPoints:
+  # Internal entrypoint for health checks
+  traefik:
+    address: ":8082"
   web:
     address: ":80"
     http:
@@ -2605,7 +2613,7 @@ create_initial_admin() {
 
     # Default credentials
     local default_username="admin"
-    local default_email="admin@cyroid.local"
+    local default_email="admin@example.com"
     local default_password="admin123"
 
     echo ""
@@ -2624,7 +2632,7 @@ create_initial_admin() {
         tui_info "Using provided/default credentials (non-interactive mode)"
     elif [ "$USE_TUI" = true ] && command -v gum &> /dev/null; then
         admin_username=$(gum input --placeholder "admin" --value "$default_username" --header "Admin username:")
-        admin_email=$(gum input --placeholder "admin@cyroid.local" --value "$default_email" --header "Admin email:")
+        admin_email=$(gum input --placeholder "admin@example.com" --value "$default_email" --header "Admin email:")
         admin_password=$(gum input --placeholder "admin123" --value "$default_password" --password --header "Admin password:")
     else
         read -p "Admin username [$default_username]: " admin_username
