@@ -2044,25 +2044,49 @@ clean_shutdown() {
     # Get list of running containers
     local containers=$($compose_cmd -f docker-compose.yml -f docker-compose.prod.yml ps -q 2>/dev/null | wc -l | tr -d ' ')
 
-    if [ "$containers" -eq 0 ]; then
-        echo -e "  ${GREEN}✓${NC} No services running"
-        return 0
-    fi
+    if [ "$containers" -gt 0 ]; then
+        # Show what we're stopping
+        echo -e "  ${CYAN}▸${NC} Stopping $containers containers..."
 
-    # Show what we're stopping
-    echo -e "  ${CYAN}▸${NC} Stopping $containers containers..."
+        # Run docker compose down with output suppressed
+        if [ "$remove_volumes" = true ]; then
+            $compose_cmd -f docker-compose.yml -f docker-compose.prod.yml down -v --remove-orphans >/dev/null 2>&1
+        else
+            $compose_cmd -f docker-compose.yml -f docker-compose.prod.yml down --remove-orphans >/dev/null 2>&1
+        fi
 
-    # Run docker compose down with output suppressed
-    if [ "$remove_volumes" = true ]; then
-        $compose_cmd -f docker-compose.yml -f docker-compose.prod.yml down -v --remove-orphans >/dev/null 2>&1
+        echo -e "  ${GREEN}✓${NC} Containers stopped"
     else
-        $compose_cmd -f docker-compose.yml -f docker-compose.prod.yml down --remove-orphans >/dev/null 2>&1
+        echo -e "  ${GREEN}✓${NC} No services running"
     fi
 
-    echo -e "  ${GREEN}✓${NC} Containers stopped"
-
     if [ "$remove_volumes" = true ]; then
-        echo -e "  ${GREEN}✓${NC} Volumes removed"
+        echo -e "  ${GREEN}✓${NC} Compose volumes removed"
+
+        # Also remove any orphaned CYROID-related volumes
+        local cyroid_volumes=$(docker volume ls -q --filter "name=cyroid" 2>/dev/null)
+        if [ -n "$cyroid_volumes" ]; then
+            echo -e "  ${CYAN}▸${NC} Removing orphaned CYROID volumes..."
+            echo "$cyroid_volumes" | xargs -r docker volume rm 2>/dev/null || true
+            echo -e "  ${GREEN}✓${NC} Orphaned volumes removed"
+        fi
+
+        # Remove project-specific volumes by compose project name
+        local project_name=$(basename "$PROJECT_ROOT" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]//g')
+        local project_volumes=$(docker volume ls -q --filter "name=${project_name}_" 2>/dev/null)
+        if [ -n "$project_volumes" ]; then
+            echo -e "  ${CYAN}▸${NC} Removing project volumes..."
+            echo "$project_volumes" | xargs -r docker volume rm 2>/dev/null || true
+            echo -e "  ${GREEN}✓${NC} Project volumes removed"
+        fi
+
+        # Clean up dangling volumes (volumes not attached to any container)
+        local dangling=$(docker volume ls -q -f dangling=true 2>/dev/null | wc -l | tr -d ' ')
+        if [ "$dangling" -gt 0 ]; then
+            echo -e "  ${CYAN}▸${NC} Pruning $dangling dangling volumes..."
+            docker volume prune -f >/dev/null 2>&1 || true
+            echo -e "  ${GREEN}✓${NC} Dangling volumes pruned"
+        fi
     fi
 }
 
