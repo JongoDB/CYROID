@@ -250,7 +250,16 @@ def create_range_from_blueprint(
 
         # Fallback: lookup by docker image tag if name didn't work (Issue #80)
         if not base_image_id and hasattr(vm_config, 'base_image_tag') and vm_config.base_image_tag:
-            fallback_image = db.query(BaseImage).filter(BaseImage.docker_image_tag == vm_config.base_image_tag).first()
+            tag = vm_config.base_image_tag
+            # Try exact match first
+            fallback_image = db.query(BaseImage).filter(BaseImage.docker_image_tag == tag).first()
+            # If no match and tag has registry prefix, try without it (e.g., 127.0.0.1:5000/cyroid/kali -> cyroid/kali)
+            if not fallback_image and '/' in tag:
+                # Strip registry prefix (anything before first slash that contains a dot or colon)
+                parts = tag.split('/', 1)
+                if len(parts) == 2 and ('.' in parts[0] or ':' in parts[0]):
+                    tag_without_registry = parts[1]
+                    fallback_image = db.query(BaseImage).filter(BaseImage.docker_image_tag == tag_without_registry).first()
             if fallback_image:
                 base_image_id = fallback_image.id
 
