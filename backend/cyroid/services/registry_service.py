@@ -1,4 +1,5 @@
 """Service for managing the local Docker registry."""
+import asyncio
 import logging
 from typing import Optional, List, Callable
 import httpx
@@ -25,12 +26,28 @@ class RegistryService:
 
     def __init__(self):
         self._http_client: Optional[httpx.AsyncClient] = None
+        self._http_client_loop: Optional[asyncio.AbstractEventLoop] = None
         self._docker_client: Optional[docker.DockerClient] = None
 
     async def _get_http_client(self) -> httpx.AsyncClient:
-        """Get or create async HTTP client."""
+        """Get or create async HTTP client.
+
+        Handles event loop changes by recreating the client when called from
+        a different event loop than the one it was created in. This is necessary
+        because background build threads create their own event loops.
+        """
+        current_loop = asyncio.get_running_loop()
+
+        # If client exists but was created in a different loop, discard and recreate
+        # Don't try to close the old client - it's bound to a different loop and
+        # awaiting aclose() would fail. Let it be garbage collected instead.
+        if self._http_client is not None and self._http_client_loop != current_loop:
+            self._http_client = None
+            self._http_client_loop = None
+
         if self._http_client is None:
             self._http_client = httpx.AsyncClient(timeout=30.0)
+            self._http_client_loop = current_loop
         return self._http_client
 
     def _get_docker_client(self) -> docker.DockerClient:
@@ -44,6 +61,7 @@ class RegistryService:
         if self._http_client:
             await self._http_client.aclose()
             self._http_client = None
+            self._http_client_loop = None
 
     def _parse_image_tag(self, image_tag: str) -> tuple[str, str]:
         """Parse image:tag into (image, tag). Default tag is 'latest'."""
