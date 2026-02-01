@@ -225,7 +225,7 @@ bootstrap_standalone() {
     done
 
     # Copy this script to the project if not already there
-    if [ ! -f "$PROJECT_ROOT/scripts/deploy.sh" ]; then
+    if [ ! -f "$PROJECT_ROOT/scripts/deploy.sh" ] && [ -n "${BASH_SOURCE[0]:-}" ]; then
         cp "${BASH_SOURCE[0]}" "$PROJECT_ROOT/scripts/deploy.sh" 2>/dev/null || true
         chmod +x "$PROJECT_ROOT/scripts/deploy.sh" 2>/dev/null || true
     fi
