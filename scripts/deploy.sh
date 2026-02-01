@@ -49,7 +49,7 @@ BOLD='\033[1m'
 
 # Get script directory and project root
 # Handle both normal execution and piped execution (curl | bash)
-if [ -n "${BASH_SOURCE[0]}" ] && [ "${BASH_SOURCE[0]}" != "/dev/stdin" ] && [ -f "${BASH_SOURCE[0]}" ]; then
+if [ -n "${BASH_SOURCE[0]:-}" ] && [ "${BASH_SOURCE[0]:-}" != "/dev/stdin" ] && [ -f "${BASH_SOURCE[0]:-}" ]; then
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
     # Check if script is in a "scripts/" subdirectory (standard repo layout)
