@@ -972,6 +972,23 @@ def start_docker_build(
             "message": "Image is already being built",
         }
 
+    full_tag = f"cyroid/{image_name}:{tag}"
+
+    # Initialize build status BEFORE starting background task to prevent race condition
+    # where frontend polls and gets stale "completed" status from a previous build
+    _active_docker_builds[build_key] = {
+        "status": "building",
+        "image_name": image_name,
+        "tag": tag,
+        "full_tag": full_tag,
+        "progress_percent": 0,
+        "current_step": 0,
+        "total_steps": 0,
+        "current_step_name": "Starting build...",
+        "logs": [],
+        "cancelled": False,
+    }
+
     # Start background build
     background_tasks.add_task(_build_docker_image_async, image_name, tag, request.no_cache)
 
