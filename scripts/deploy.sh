@@ -20,6 +20,7 @@
 #   ./scripts/deploy.sh --status                          # Show service status
 #   ./scripts/deploy.sh --backup [name]                   # Backup Docker images
 #   ./scripts/deploy.sh --restore [name]                  # Restore Docker images
+#   ./scripts/deploy.sh --self-update                     # Update deploy.sh itself
 #
 # Options:
 #   --domain DOMAIN    Domain name for the server
@@ -34,6 +35,7 @@
 #   --status           Show service status and health
 #   --backup [NAME]    Backup Docker images to disk (optional name)
 #   --restore [NAME]   Restore Docker images from backup (optional name)
+#   --self-update      Update this script to the latest version
 #   --help             Show this help message
 
 set -euo pipefail
@@ -102,6 +104,10 @@ CLI_ADMIN_EMAIL=""
 GITHUB_REPO="JongoDB/CYROID"
 GITHUB_BRANCH="master"
 GITHUB_RAW_BASE="https://raw.githubusercontent.com/${GITHUB_REPO}/${GITHUB_BRANCH}"
+
+# Script version for self-update mechanism
+# Format: YYYYMMDD.N where N is revision number for same day
+SCRIPT_VERSION="20260202.1"
 
 # =============================================================================
 # Platform Detection (for multi-arch image pulls)
@@ -237,6 +243,182 @@ bootstrap_standalone() {
 
     # Update paths for the new location
     cd "$PROJECT_ROOT"
+}
+
+# =============================================================================
+# Self-Update Functions
+# =============================================================================
+
+get_remote_script_version() {
+    # Fetch the SCRIPT_VERSION from the remote deploy.sh
+    local remote_version=""
+    if command -v curl &> /dev/null; then
+        remote_version=$(curl -fsSL "${GITHUB_RAW_BASE}/scripts/deploy.sh" 2>/dev/null | \
+            grep '^SCRIPT_VERSION=' | head -1 | cut -d'"' -f2)
+    elif command -v wget &> /dev/null; then
+        remote_version=$(wget -qO- "${GITHUB_RAW_BASE}/scripts/deploy.sh" 2>/dev/null | \
+            grep '^SCRIPT_VERSION=' | head -1 | cut -d'"' -f2)
+    fi
+    echo "$remote_version"
+}
+
+compare_versions() {
+    # Compare two version strings (YYYYMMDD.N format)
+    # Returns: 0 if equal, 1 if $1 > $2, 2 if $1 < $2
+    local v1="$1"
+    local v2="$2"
+
+    if [ "$v1" = "$v2" ]; then
+        return 0
+    fi
+
+    # Extract date and revision
+    local v1_date="${v1%.*}"
+    local v1_rev="${v1#*.}"
+    local v2_date="${v2%.*}"
+    local v2_rev="${v2#*.}"
+
+    # Compare dates first
+    if [ "$v1_date" -gt "$v2_date" ] 2>/dev/null; then
+        return 1
+    elif [ "$v1_date" -lt "$v2_date" ] 2>/dev/null; then
+        return 2
+    fi
+
+    # Same date, compare revisions
+    if [ "$v1_rev" -gt "$v2_rev" ] 2>/dev/null; then
+        return 1
+    elif [ "$v1_rev" -lt "$v2_rev" ] 2>/dev/null; then
+        return 2
+    fi
+
+    return 0
+}
+
+check_for_script_update() {
+    # Check if a newer version of deploy.sh is available
+    # Returns 0 if update available, 1 if up to date, 2 if check failed
+    local remote_version
+    remote_version=$(get_remote_script_version)
+
+    if [ -z "$remote_version" ]; then
+        return 2  # Failed to fetch
+    fi
+
+    compare_versions "$remote_version" "$SCRIPT_VERSION"
+    local result=$?
+
+    if [ $result -eq 1 ]; then
+        # Remote is newer
+        echo "$remote_version"
+        return 0
+    fi
+
+    return 1  # Up to date
+}
+
+do_self_update() {
+    # Download and replace this script with the latest version
+    local script_path="${BASH_SOURCE[0]}"
+
+    # Can't update if running from stdin
+    if [ -z "$script_path" ] || [ "$script_path" = "/dev/stdin" ] || [ ! -f "$script_path" ]; then
+        echo -e "${RED}[ERROR]${NC} Cannot self-update: script path not available"
+        echo -e "${YELLOW}[HINT]${NC} Download manually:"
+        echo "  curl -fsSL ${GITHUB_RAW_BASE}/scripts/deploy.sh -o deploy.sh"
+        return 1
+    fi
+
+    echo -e "${CYAN}[INFO]${NC} Checking for updates..."
+
+    local remote_version
+    remote_version=$(get_remote_script_version)
+
+    if [ -z "$remote_version" ]; then
+        echo -e "${RED}[ERROR]${NC} Failed to fetch remote version"
+        return 1
+    fi
+
+    compare_versions "$remote_version" "$SCRIPT_VERSION"
+    local result=$?
+
+    if [ $result -ne 1 ]; then
+        echo -e "${GREEN}[INFO]${NC} Already running the latest version ($SCRIPT_VERSION)"
+        return 0
+    fi
+
+    echo -e "${YELLOW}[UPDATE]${NC} New version available: $remote_version (current: $SCRIPT_VERSION)"
+
+    # Create backup
+    local backup_path="${script_path}.backup"
+    cp "$script_path" "$backup_path"
+
+    # Download new version
+    local tmp_path="${script_path}.tmp"
+    echo -e "${CYAN}[INFO]${NC} Downloading update..."
+
+    if command -v curl &> /dev/null; then
+        if ! curl -fsSL "${GITHUB_RAW_BASE}/scripts/deploy.sh" -o "$tmp_path" 2>/dev/null; then
+            echo -e "${RED}[ERROR]${NC} Failed to download update"
+            rm -f "$tmp_path"
+            return 1
+        fi
+    elif command -v wget &> /dev/null; then
+        if ! wget -q "${GITHUB_RAW_BASE}/scripts/deploy.sh" -O "$tmp_path" 2>/dev/null; then
+            echo -e "${RED}[ERROR]${NC} Failed to download update"
+            rm -f "$tmp_path"
+            return 1
+        fi
+    fi
+
+    # Verify download
+    if [ ! -s "$tmp_path" ]; then
+        echo -e "${RED}[ERROR]${NC} Downloaded file is empty"
+        rm -f "$tmp_path"
+        return 1
+    fi
+
+    # Replace script
+    chmod +x "$tmp_path"
+    mv "$tmp_path" "$script_path"
+
+    echo -e "${GREEN}[SUCCESS]${NC} Updated to version $remote_version"
+    echo -e "${CYAN}[INFO]${NC} Backup saved to: $backup_path"
+    echo ""
+    echo -e "${YELLOW}[NOTE]${NC} Please re-run the script to use the new version."
+
+    return 0
+}
+
+prompt_for_update() {
+    # Prompt user if they want to update (used at startup)
+    local remote_version="$1"
+
+    echo ""
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${YELLOW}  A newer version of deploy.sh is available!${NC}"
+    echo -e "${YELLOW}  Current: $SCRIPT_VERSION  →  Latest: $remote_version${NC}"
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+
+    if [ "$USE_TUI" = true ] && command -v gum &> /dev/null; then
+        if gum confirm "Update deploy.sh to version $remote_version?"; then
+            do_self_update
+            exit 0
+        else
+            echo -e "${CYAN}[INFO]${NC} Continuing with current version..."
+            echo ""
+        fi
+    else
+        read -p "Update to version $remote_version? [Y/n]: " choice
+        if [[ ! "$choice" =~ ^[Nn] ]]; then
+            do_self_update
+            exit 0
+        else
+            echo -e "${CYAN}[INFO]${NC} Continuing with current version..."
+            echo ""
+        fi
+    fi
 }
 
 # =============================================================================
@@ -2127,6 +2309,9 @@ show_help() {
     echo "  --restore [NAME]   Restore Docker images from a backup"
     echo "                     NAME is optional - interactive selection if omitted"
     echo ""
+    echo "Script Maintenance:"
+    echo "  --self-update      Update this script to the latest version"
+    echo ""
     echo "Deploy Options:"
     echo "  --domain DOMAIN    Domain name for the server"
     echo "  --ip IP            IP address for the server"
@@ -2160,6 +2345,11 @@ show_help() {
     echo "  # Restore Docker images"
     echo "  $0 --restore                        # Interactive backup selection"
     echo "  $0 --restore my-backup              # Restore specific backup"
+    echo ""
+    echo "  # Update this script"
+    echo "  $0 --self-update                    # Check and update deploy.sh"
+    echo ""
+    echo "Script version: $SCRIPT_VERSION"
 }
 
 # =============================================================================
@@ -4400,6 +4590,10 @@ while [[ $# -gt 0 ]]; do
                 shift
             fi
             ;;
+        --self-update)
+            ACTION="self-update"
+            shift
+            ;;
         --help|-h)
             show_help
             exit 0
@@ -4448,6 +4642,13 @@ fi
 # Change to project root
 cd "$PROJECT_ROOT"
 
+# Check for script updates (unless running self-update or in non-interactive mode)
+if [ "$ACTION" != "self-update" ] && [ "$NON_INTERACTIVE" = false ]; then
+    if remote_version=$(check_for_script_update 2>/dev/null); then
+        prompt_for_update "$remote_version"
+    fi
+fi
+
 # Execute action
 case "$ACTION" in
     deploy)
@@ -4482,5 +4683,8 @@ case "$ACTION" in
         else
             restore_images
         fi
+        ;;
+    self-update)
+        do_self_update
         ;;
 esac
