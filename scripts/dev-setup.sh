@@ -58,17 +58,27 @@ else
 fi
 
 # -----------------------------------------------------------------------------
-# 2. Set up macOS docker-compose override (if on macOS)
+# 2. Set up docker-compose override for local development paths
 # -----------------------------------------------------------------------------
-if [[ "$(uname)" == "Darwin" ]]; then
-    if [ -f "$PROJECT_ROOT/docker-compose.override.yml" ]; then
-        echo -e "${GREEN}✓${NC} docker-compose.override.yml exists"
-    elif [ -f "$PROJECT_ROOT/docker-compose.override.macos.yml" ]; then
+if [ -f "$PROJECT_ROOT/docker-compose.override.yml" ]; then
+    echo -e "${GREEN}✓${NC} docker-compose.override.yml exists"
+elif [[ "$(uname)" == "Darwin" ]]; then
+    # macOS: Docker Desktop can't access /data, use local paths
+    if [ -f "$PROJECT_ROOT/docker-compose.override.macos.yml" ]; then
         echo -e "${YELLOW}→${NC} Copying macOS docker-compose override..."
         cp "$PROJECT_ROOT/docker-compose.override.macos.yml" "$PROJECT_ROOT/docker-compose.override.yml"
         echo -e "${GREEN}✓${NC} docker-compose.override.yml created from macOS template"
     else
         echo -e "${YELLOW}!${NC} No docker-compose.override.macos.yml template found"
+    fi
+elif [[ "$(uname)" == "Linux" ]]; then
+    # Linux: Use local paths for development convenience
+    if [ -f "$PROJECT_ROOT/docker-compose.override.linux.yml" ]; then
+        echo -e "${YELLOW}→${NC} Copying Linux docker-compose override..."
+        cp "$PROJECT_ROOT/docker-compose.override.linux.yml" "$PROJECT_ROOT/docker-compose.override.yml"
+        echo -e "${GREEN}✓${NC} docker-compose.override.yml created from Linux template"
+    else
+        echo -e "${YELLOW}!${NC} No docker-compose.override.linux.yml template found"
     fi
 fi
 
@@ -83,6 +93,7 @@ DATA_DIRS=(
     "data/cyroid/catalogs"
     "data/cyroid/scenarios"
     "data/cyroid/images"
+    "data/cyroid/registry"
 )
 
 echo -e "${YELLOW}→${NC} Ensuring data directories exist..."
@@ -99,11 +110,7 @@ echo -e "${GREEN}=== Setup Complete ===${NC}"
 echo ""
 echo "You can now start the development environment with:"
 echo ""
-if [[ "$(uname)" == "Darwin" ]]; then
-    echo "  docker compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.override.yml up -d --build"
-else
-    echo "  docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build"
-fi
+echo "  docker compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.override.yml up -d --build"
 echo ""
 echo "Access the application at: https://localhost"
 echo "(You'll see a browser warning for the self-signed certificate - this is expected)"

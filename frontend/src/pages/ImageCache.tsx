@@ -1,6 +1,6 @@
 // frontend/src/pages/ImageCache.tsx
 import { useState, useEffect, useRef } from 'react'
-import { cacheApi, registryApi, DockerPullStatus, DockerBuildStatus, BuildableImage, ImageStatusResponse } from '../services/api'
+import { cacheApi, registryApi, DockerPullStatus, DockerBuildStatus, BuildableImage, ImageStatusResponse, RegistryPushStatus } from '../services/api'
 import { useAuthStore } from '../stores/authStore'
 import type {
   CachedImage,
@@ -107,6 +107,19 @@ export default function ImageCache() {
   const [registryStatus, setRegistryStatus] = useState<Record<string, ImageStatusResponse>>({})
   const [registryStatusLoading, setRegistryStatusLoading] = useState<Record<string, boolean>>({})
 
+  // Registry push status (keyed by image tag) for progress tracking
+  const [registryPushStatus, setRegistryPushStatus] = useState<Record<string, {
+    operation_id: string
+    status: string
+    progress_percent: number
+    current_layer?: number
+    total_layers?: number
+    error_message?: string
+  }>>({})
+
+  // Selected images for batch push
+  const [selectedForPush, setSelectedForPush] = useState<Set<string>>(new Set())
+
   // Delete confirmation state
   const [deleteConfirm, setDeleteConfirm] = useState<{
     type: 'docker' | 'windows-iso' | 'linux-iso' | 'macos-iso' | 'custom-iso' | null
@@ -183,26 +196,55 @@ export default function ImageCache() {
     }
   }
 
-  // Handler for pushing an image to registry
+  // Handler for pushing an image to registry (async with progress)
   const handlePushToRegistry = async (imageTag: string) => {
-    setRegistryStatusLoading(prev => ({ ...prev, [imageTag]: true }))
     try {
       const res = await registryApi.pushImage(imageTag)
-      if (res.data.success) {
-        toast.success(`Pushed ${imageTag} to registry`)
-        // Update the registry status
-        setRegistryStatus(prev => ({
-          ...prev,
-          [imageTag]: { ...prev[imageTag], image_tag: imageTag, in_registry: true, needs_push: false, on_host: true }
-        }))
-      } else {
-        toast.error(res.data.message || 'Failed to push image')
-      }
+      // Initialize push status and start polling
+      setRegistryPushStatus(prev => ({
+        ...prev,
+        [imageTag]: {
+          operation_id: res.data.operation_id,
+          status: 'starting',
+          progress_percent: 0,
+        }
+      }))
+      startRegistryPushPolling(res.data.operation_id, imageTag)
     } catch (err: any) {
-      toast.error(err.response?.data?.detail || 'Failed to push image to registry')
-    } finally {
-      setRegistryStatusLoading(prev => ({ ...prev, [imageTag]: false }))
+      toast.error(err.response?.data?.detail || 'Failed to start push to registry')
     }
+  }
+
+  // Handler for batch pushing selected images to registry
+  const handleBatchPush = async () => {
+    const imagesToPush = Array.from(selectedForPush)
+    for (const imageTag of imagesToPush) {
+      await handlePushToRegistry(imageTag)
+    }
+  }
+
+  // Toggle selection for batch push
+  const togglePushSelection = (imageTag: string) => {
+    setSelectedForPush(prev => {
+      const newSet = new Set(prev)
+      if (newSet.has(imageTag)) {
+        newSet.delete(imageTag)
+      } else {
+        newSet.add(imageTag)
+      }
+      return newSet
+    })
+  }
+
+  // Select all pushable images
+  const selectAllPushable = (imageTags: string[]) => {
+    const pushable = imageTags.filter(tag => registryStatus[tag]?.needs_push && !registryPushStatus[tag])
+    setSelectedForPush(new Set(pushable))
+  }
+
+  // Clear selection
+  const clearPushSelection = () => {
+    setSelectedForPush(new Set())
   }
 
   // Handler for refreshing all data
@@ -578,6 +620,62 @@ export default function ImageCache() {
     pollingIntervalsRef.current[`build-${buildKey}`] = pollInterval
   }
 
+  // Start polling for registry push progress
+  const startRegistryPushPolling = (operationId: string, imageTag: string) => {
+    // Clear any existing interval for this image
+    if (pollingIntervalsRef.current[`push-${imageTag}`]) {
+      clearInterval(pollingIntervalsRef.current[`push-${imageTag}`])
+    }
+
+    const pollInterval = setInterval(async () => {
+      try {
+        const statusRes = await registryApi.getPushStatus(operationId)
+        setRegistryPushStatus(prev => ({ ...prev, [imageTag]: statusRes.data }))
+
+        if (statusRes.data.status === 'completed' || statusRes.data.status === 'failed') {
+          clearInterval(pollInterval)
+          delete pollingIntervalsRef.current[`push-${imageTag}`]
+
+          if (statusRes.data.status === 'completed') {
+            toast.success(`Pushed ${imageTag} to registry`)
+            // Update registry status to reflect the push
+            setRegistryStatus(prev => ({
+              ...prev,
+              [imageTag]: { image_tag: imageTag, in_registry: true, needs_push: false, on_host: false }
+            }))
+            // Preserve scroll position during refresh
+            const scrollY = window.scrollY
+            await loadData()
+            window.scrollTo(0, scrollY)
+          } else {
+            toast.error(statusRes.data.error_message || `Failed to push ${imageTag}`)
+          }
+
+          // Remove from selected set
+          setSelectedForPush(prev => {
+            const newSet = new Set(prev)
+            newSet.delete(imageTag)
+            return newSet
+          })
+
+          // Clear push status after delay
+          setTimeout(() => {
+            setRegistryPushStatus(prev => {
+              const newStatus = { ...prev }
+              delete newStatus[imageTag]
+              return newStatus
+            })
+          }, 5000)
+        }
+      } catch {
+        clearInterval(pollInterval)
+        delete pollingIntervalsRef.current[`push-${imageTag}`]
+      }
+    }, 1000) // Poll every second for push progress
+
+    pollingIntervalsRef.current[`push-${imageTag}`] = pollInterval
+  }
+
   const handleBuildImage = async (imageName: string, noCache = false) => {
     const buildKey = `${imageName}_latest`
     setActionLoading(`build-${buildKey}`)
@@ -657,9 +755,30 @@ export default function ImageCache() {
     }
   }
 
+  // Check for active registry pushes on mount
+  const checkActivePushes = async () => {
+    try {
+      const res = await registryApi.getActivePushes()
+      if (res.data.pushes && res.data.pushes.length > 0) {
+        for (const push of res.data.pushes) {
+          if (push.operation_id && push.image_tag) {
+            setRegistryPushStatus(prev => ({
+              ...prev,
+              [push.image_tag]: push
+            }))
+            startRegistryPushPolling(push.operation_id, push.image_tag)
+          }
+        }
+      }
+    } catch {
+      // Ignore errors checking for active pushes
+    }
+  }
+
   useEffect(() => {
     loadData()
     checkActiveBuilds()
+    checkActivePushes()
   }, [])
 
   // Check for active downloads after data is loaded
@@ -1468,6 +1587,24 @@ export default function ImageCache() {
             </div>
             {isAdmin && (
               <div className="flex gap-2">
+                {selectedForPush.size > 0 && (
+                  <>
+                    <button
+                      onClick={handleBatchPush}
+                      disabled={Object.values(registryPushStatus).some(s => ['starting', 'pushing', 'verifying', 'cleaning'].includes(s.status))}
+                      className="inline-flex items-center px-3 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 text-sm disabled:opacity-50"
+                    >
+                      <Upload className="h-4 w-4 mr-2" />
+                      Push Selected ({selectedForPush.size})
+                    </button>
+                    <button
+                      onClick={clearPushSelection}
+                      className="inline-flex items-center px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+                    >
+                      Clear Selection
+                    </button>
+                  </>
+                )}
                 <button
                   onClick={() => setShowCacheModal(true)}
                   className="inline-flex items-center px-3 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 text-sm"
@@ -1585,7 +1722,7 @@ export default function ImageCache() {
               <p className="text-xs text-blue-600 mt-1">Cached desktop images with GUI/VNC access</p>
             </div>
             {categorizedImages.desktop.length > 0 ? (
-              <ImageTable images={categorizedImages.desktop} onRemove={handleRemoveImage} onPush={handlePushToRegistry} actionLoading={actionLoading} isAdmin={isAdmin} registryStatus={registryStatus} registryStatusLoading={registryStatusLoading} />
+              <ImageTable images={categorizedImages.desktop} onRemove={handleRemoveImage} onPush={handlePushToRegistry} actionLoading={actionLoading} isAdmin={isAdmin} registryStatus={registryStatus} registryStatusLoading={registryStatusLoading} pushStatus={registryPushStatus} selectedForPush={selectedForPush} onToggleSelect={togglePushSelection} />
             ) : (
               <div className="px-6 py-8 text-center text-gray-500 text-sm">
                 No desktop images cached. Pull images with GUI environments (webtop, xfce, kde, etc.)
@@ -1603,7 +1740,7 @@ export default function ImageCache() {
               <p className="text-xs text-purple-600 mt-1">Cached headless server and CLI images</p>
             </div>
             {categorizedImages.server.length > 0 ? (
-              <ImageTable images={categorizedImages.server} onRemove={handleRemoveImage} onPush={handlePushToRegistry} actionLoading={actionLoading} isAdmin={isAdmin} registryStatus={registryStatus} registryStatusLoading={registryStatusLoading} />
+              <ImageTable images={categorizedImages.server} onRemove={handleRemoveImage} onPush={handlePushToRegistry} actionLoading={actionLoading} isAdmin={isAdmin} registryStatus={registryStatus} registryStatusLoading={registryStatusLoading} pushStatus={registryPushStatus} selectedForPush={selectedForPush} onToggleSelect={togglePushSelection} />
             ) : (
               <div className="px-6 py-8 text-center text-gray-500 text-sm">
                 No server/CLI images cached. Pull images like alpine, ubuntu, kali, etc.
@@ -1621,7 +1758,7 @@ export default function ImageCache() {
               <p className="text-xs text-green-600 mt-1">Cached database and service containers</p>
             </div>
             {categorizedImages.services.length > 0 ? (
-              <ImageTable images={categorizedImages.services} onRemove={handleRemoveImage} onPush={handlePushToRegistry} actionLoading={actionLoading} isAdmin={isAdmin} registryStatus={registryStatus} registryStatusLoading={registryStatusLoading} />
+              <ImageTable images={categorizedImages.services} onRemove={handleRemoveImage} onPush={handlePushToRegistry} actionLoading={actionLoading} isAdmin={isAdmin} registryStatus={registryStatus} registryStatusLoading={registryStatusLoading} pushStatus={registryPushStatus} selectedForPush={selectedForPush} onToggleSelect={togglePushSelection} />
             ) : (
               <div className="px-6 py-8 text-center text-gray-500 text-sm">
                 No service images cached. Pull images like nginx, mysql, postgres, redis, etc.
@@ -1639,7 +1776,7 @@ export default function ImageCache() {
               <p className="text-xs text-indigo-600 mt-1">Cached platform infrastructure images</p>
             </div>
             {categorizedImages.cyroid.length > 0 ? (
-              <ImageTable images={categorizedImages.cyroid} onRemove={handleRemoveImage} onPush={handlePushToRegistry} actionLoading={actionLoading} isAdmin={isAdmin} registryStatus={registryStatus} registryStatusLoading={registryStatusLoading} />
+              <ImageTable images={categorizedImages.cyroid} onRemove={handleRemoveImage} onPush={handlePushToRegistry} actionLoading={actionLoading} isAdmin={isAdmin} registryStatus={registryStatus} registryStatusLoading={registryStatusLoading} pushStatus={registryPushStatus} selectedForPush={selectedForPush} onToggleSelect={togglePushSelection} />
             ) : (
               <div className="px-6 py-8 text-center text-gray-500 text-sm">
                 No CYROID infrastructure images cached.
@@ -1657,7 +1794,7 @@ export default function ImageCache() {
               <p className="text-xs text-gray-600 mt-1">Additional cached images not in recommended list</p>
             </div>
             {categorizedImages.other.length > 0 ? (
-              <ImageTable images={categorizedImages.other} onRemove={handleRemoveImage} onPush={handlePushToRegistry} actionLoading={actionLoading} isAdmin={isAdmin} registryStatus={registryStatus} registryStatusLoading={registryStatusLoading} />
+              <ImageTable images={categorizedImages.other} onRemove={handleRemoveImage} onPush={handlePushToRegistry} actionLoading={actionLoading} isAdmin={isAdmin} registryStatus={registryStatus} registryStatusLoading={registryStatusLoading} pushStatus={registryPushStatus} selectedForPush={selectedForPush} onToggleSelect={togglePushSelection} />
             ) : (
               <div className="px-6 py-8 text-center text-gray-500 text-sm">
                 No other images cached.
@@ -2962,7 +3099,7 @@ function DockerImageSection({ title, description, images, cachedImages, icon: Ic
   )
 }
 
-function ImageTable({ images, onRemove, onPush, actionLoading, isAdmin, registryStatus, registryStatusLoading }: {
+function ImageTable({ images, onRemove, onPush, actionLoading, isAdmin, registryStatus, registryStatusLoading, pushStatus, selectedForPush, onToggleSelect }: {
   images: CachedImage[]
   onRemove: (id: string, tag: string) => void
   onPush: (imageTag: string) => void
@@ -2970,11 +3107,25 @@ function ImageTable({ images, onRemove, onPush, actionLoading, isAdmin, registry
   isAdmin: boolean
   registryStatus: Record<string, ImageStatusResponse>
   registryStatusLoading: Record<string, boolean>
+  pushStatus?: Record<string, { status: string; progress_percent: number; current_layer?: number; total_layers?: number }>
+  selectedForPush?: Set<string>
+  onToggleSelect?: (imageTag: string) => void
 }) {
+  // Count how many images need push
+  const pushableCount = images.filter(img => {
+    const tag = img.tags[0] || img.id.substring(0, 12)
+    return registryStatus[tag]?.needs_push && !pushStatus?.[tag]
+  }).length
+
   return (
     <table className="min-w-full divide-y divide-gray-200">
       <thead className="bg-gray-50">
         <tr>
+          {isAdmin && onToggleSelect && pushableCount > 0 && (
+            <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase w-10">
+              <span className="sr-only">Select</span>
+            </th>
+          )}
           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Image</th>
           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Registry</th>
           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Size</th>
@@ -2987,15 +3138,52 @@ function ImageTable({ images, onRemove, onPush, actionLoading, isAdmin, registry
           const imageTag = image.tags[0] || image.id.substring(0, 12)
           const status = registryStatus[imageTag]
           const isLoading = registryStatusLoading[imageTag]
+          const activePush = pushStatus?.[imageTag]
+          const isPushing = activePush && ['starting', 'pushing', 'verifying', 'cleaning'].includes(activePush.status)
+          const canSelect = status?.needs_push && !isPushing
+          const isSelected = selectedForPush?.has(imageTag)
 
           return (
-            <tr key={image.id}>
+            <tr key={image.id} className={isSelected ? 'bg-blue-50' : undefined}>
+              {isAdmin && onToggleSelect && pushableCount > 0 && (
+                <td className="px-3 py-4 whitespace-nowrap">
+                  {canSelect && (
+                    <input
+                      type="checkbox"
+                      checked={isSelected || false}
+                      onChange={() => onToggleSelect(imageTag)}
+                      className="h-4 w-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
+                    />
+                  )}
+                </td>
+              )}
               <td className="px-6 py-4 whitespace-nowrap">
                 <div className="text-sm font-medium text-gray-900">{imageTag}</div>
                 {image.tags.length > 1 && <div className="text-xs text-gray-500">+{image.tags.length - 1} more</div>}
               </td>
               <td className="px-6 py-4 whitespace-nowrap">
-                {isLoading ? (
+                {isPushing ? (
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1 min-w-[100px]">
+                      <div className="flex justify-between text-xs mb-1">
+                        <span className="text-blue-600 font-medium">
+                          {activePush.current_layer && activePush.total_layers
+                            ? `Layer ${activePush.current_layer}/${activePush.total_layers}`
+                            : activePush.status === 'verifying' ? 'Verifying...'
+                            : activePush.status === 'cleaning' ? 'Cleaning up...'
+                            : 'Pushing...'}
+                        </span>
+                        <span className="text-blue-700 font-semibold">{activePush.progress_percent}%</span>
+                      </div>
+                      <div className="w-full bg-blue-100 rounded-full h-1.5">
+                        <div
+                          className="bg-blue-600 h-1.5 rounded-full transition-all duration-300"
+                          style={{ width: `${activePush.progress_percent}%` }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ) : isLoading ? (
                   <Loader2 className="h-4 w-4 animate-spin text-gray-400" />
                 ) : status?.in_registry ? (
                   <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
@@ -3018,21 +3206,15 @@ function ImageTable({ images, onRemove, onPush, actionLoading, isAdmin, registry
               {isAdmin && (
                 <td className="px-6 py-4 whitespace-nowrap text-right">
                   <div className="flex items-center justify-end gap-2">
-                    {status?.needs_push && (
+                    {status?.needs_push && !isPushing && (
                       <button
                         onClick={() => onPush(imageTag)}
-                        disabled={isLoading}
+                        disabled={isLoading || isPushing}
                         className="inline-flex items-center px-2 py-1 text-xs font-medium rounded bg-blue-100 text-blue-700 hover:bg-blue-200 disabled:opacity-50"
                         title="Push to Registry"
                       >
-                        {isLoading ? (
-                          <Loader2 className="h-3 w-3 animate-spin" />
-                        ) : (
-                          <>
-                            <Upload className="h-3 w-3 mr-1" />
-                            Push
-                          </>
-                        )}
+                        <Upload className="h-3 w-3 mr-1" />
+                        Push
                       </button>
                     )}
                     <button

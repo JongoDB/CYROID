@@ -2208,14 +2208,14 @@ create_data_directories() {
     fi
 
     # All directories needed by CYROID
-    local dirs="iso-cache template-storage vm-storage shared catalogs scenarios images"
+    local dirs="iso-cache template-storage vm-storage shared catalogs scenarios images registry"
 
     if [ "$need_sudo" = true ]; then
         log_info "Need elevated permissions to create $DATA_DIR"
-        sudo mkdir -p "$DATA_DIR"/{iso-cache,template-storage,vm-storage,shared,catalogs,scenarios,images}
+        sudo mkdir -p "$DATA_DIR"/{iso-cache,template-storage,vm-storage,shared,catalogs,scenarios,images,registry}
         sudo chown -R "$(id -u):$(id -g)" "$DATA_DIR"
     else
-        mkdir -p "$DATA_DIR"/{iso-cache,template-storage,vm-storage,shared,catalogs,scenarios,images}
+        mkdir -p "$DATA_DIR"/{iso-cache,template-storage,vm-storage,shared,catalogs,scenarios,images,registry}
     fi
 
     log_info "Data directory: $DATA_DIR"

@@ -65,19 +65,13 @@ This creates required files that are gitignored (SSL certs, macOS overrides, dat
 
 ## CRITICAL: Local Development Commands
 
-**On macOS, ALWAYS use this command to rebuild/restart services locally:**
+**ALWAYS use this command to rebuild/restart services locally (both macOS and Linux):**
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.override.yml up -d --build
 ```
 
-**On Linux:**
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
-```
-
-**Why:** The base `docker-compose.yml` pulls pre-built images from GHCR with old versions baked in. The `docker-compose.dev.yml` overlay builds from local source code. The `docker-compose.override.yml` (macOS only) maps volume paths correctly for Docker Desktop.
+**Why:** The base `docker-compose.yml` pulls pre-built images from GHCR with old versions baked in. The `docker-compose.dev.yml` overlay builds from local source code. The `docker-compose.override.yml` maps volume paths to local `./data/cyroid` for development convenience.
 
 **NEVER use:** `docker compose up -d --build` alone - this will run stale code!
 
