@@ -629,7 +629,24 @@ class CatalogService:
         # Extract walkthrough -> create Content model if present
         content_id: Optional[UUID] = None
         walkthrough = blueprint_data.get("walkthrough")
-        if walkthrough:
+
+        # Check for standalone content.json first (preferred for rich content)
+        content_json_path = item_path / "content.json"
+        if content_json_path.exists():
+            try:
+                with open(content_json_path, "r", encoding="utf-8") as f:
+                    content_data = json.load(f)
+                content_id = self._create_content_from_json(
+                    content_data, detail.name, user_id
+                )
+                # Also extract walkthrough_data for MSEL config
+                if content_data.get("walkthrough_data"):
+                    walkthrough = content_data["walkthrough_data"]
+            except (IOError, json.JSONDecodeError) as e:
+                logger.warning(f"Could not read content.json: {e}")
+
+        # Fall back to walkthrough embedded in blueprint.yaml
+        if not content_id and walkthrough:
             content_id = self._create_content_from_walkthrough(
                 walkthrough, detail.name, user_id
             )
@@ -769,7 +786,7 @@ class CatalogService:
                 version=walkthrough.get("version", "1.0"),
                 tags=walkthrough.get("tags", []),
                 created_by_id=user_id,
-                is_published=False,
+                is_published=True,  # Auto-publish catalog content
             )
             self.db.add(content)
             self.db.flush()
@@ -779,6 +796,59 @@ class CatalogService:
 
         except Exception as e:
             logger.error(f"Failed to create content from walkthrough: {e}")
+            return None
+
+    def _create_content_from_json(
+        self,
+        content_data: dict,
+        blueprint_name: str,
+        user_id: UUID,
+    ) -> Optional[UUID]:
+        """Create a Content model from a content.json file.
+
+        Args:
+            content_data: The parsed content.json data.
+            blueprint_name: Name of the parent blueprint (for title fallback).
+            user_id: User performing the install.
+
+        Returns:
+            UUID of the created Content, or None on failure.
+        """
+        title = content_data.get("title", f"{blueprint_name} - Student Guide")
+
+        # Check if content with this title already exists
+        existing = self.db.query(Content).filter(Content.title == title).first()
+        if existing:
+            logger.info(f"Content '{title}' already exists (id={existing.id})")
+            return existing.id
+
+        try:
+            # Determine content type
+            content_type_str = content_data.get("content_type", "student_guide")
+            try:
+                content_type = ContentType(content_type_str)
+            except ValueError:
+                content_type = ContentType.STUDENT_GUIDE
+
+            content = Content(
+                title=title,
+                description=content_data.get("description"),
+                content_type=content_type,
+                body_markdown=content_data.get("body_markdown", ""),
+                walkthrough_data=content_data.get("walkthrough_data"),
+                version=content_data.get("version", "1.0"),
+                tags=content_data.get("tags", []),
+                created_by_id=user_id,
+                is_published=True,  # Auto-publish catalog content
+            )
+            self.db.add(content)
+            self.db.flush()
+
+            logger.info(f"Created content from content.json '{title}' (id={content.id})")
+            return content.id
+
+        except Exception as e:
+            logger.error(f"Failed to create content from content.json: {e}")
             return None
 
     def _build_msel_from_events(self, events: List[dict]) -> str:
