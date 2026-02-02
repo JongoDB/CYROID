@@ -1,0 +1,39 @@
+# Docker Compose overrides for Linux development
+#
+# Usage: Run ./scripts/dev-setup.sh to automatically copy this file
+#   Or manually: cp docker-compose.override.linux.yml docker-compose.override.yml
+#
+# This file maps volume paths to local ./data/cyroid instead of /data/cyroid
+# for development convenience (no need for system-wide directories).
+
+services:
+  api:
+    volumes:
+      - ./backend:/app
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./data/cyroid/iso-cache:/data/cyroid/iso-cache
+      - ./data/cyroid/template-storage:/data/cyroid/template-storage
+      - ./data/cyroid/vm-storage:/data/cyroid/vm-storage
+      - ./data/cyroid/shared:/data/cyroid/shared
+      - ./data/cyroid/catalogs:/data/cyroid/catalogs
+      # Runtime directories for catalog-installed content
+      - ./data/cyroid/scenarios:/data/scenarios
+      - ./data/cyroid/images:/data/images
+
+  worker:
+    volumes:
+      - ./backend:/app
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./data/cyroid/iso-cache:/data/cyroid/iso-cache
+      - ./data/cyroid/template-storage:/data/cyroid/template-storage
+      - ./data/cyroid/vm-storage:/data/cyroid/vm-storage
+      - ./data/cyroid/shared:/data/cyroid/shared
+      - ./data/cyroid/catalogs:/data/cyroid/catalogs
+      # Runtime directories for catalog-installed content
+      - ./data/cyroid/scenarios:/data/scenarios
+      - ./data/cyroid/images:/data/images
+
+  registry:
+    volumes:
+      - ./data/cyroid/registry:/var/lib/registry
+      - ./config/registry-config.yml:/etc/docker/registry/config.yml:ro
