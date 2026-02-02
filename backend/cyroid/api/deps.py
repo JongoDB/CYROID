@@ -2,7 +2,7 @@
 from typing import Annotated, List
 from uuid import UUID
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_
@@ -273,17 +273,26 @@ DBSession = Annotated[Session, Depends(get_db)]
 
 
 def get_current_user_from_token_param(
+    request: Request,
     token: str = None,
     db: Session = Depends(get_db),
 ) -> User:
     """
-    Extract and validate user from JWT token passed as query parameter.
+    Extract and validate user from JWT token passed as query parameter OR Authorization header.
     Used for browser download endpoints where headers can't be set.
+    Falls back to Authorization header for AJAX requests.
     """
+    # First try query parameter
+    if not token:
+        # Fall back to Authorization header
+        auth_header = request.headers.get("Authorization")
+        if auth_header and auth_header.startswith("Bearer "):
+            token = auth_header[7:]  # Remove "Bearer " prefix
+
     if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token required",
+            detail="Token required (pass as ?token= query param or Authorization header)",
         )
 
     user_id = decode_access_token(token)
