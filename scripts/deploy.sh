@@ -3524,19 +3524,23 @@ get_available_releases() {
 }
 
 get_available_tags() {
-    # Fetch tags from GitHub API
+    # Fetch tags from GitHub API (primary source for versions)
+    # Tags are the authoritative source since not all versions have releases
     if command -v curl &> /dev/null; then
-        curl -s "https://api.github.com/repos/JongoDB/CYROID/tags?per_page=15" 2>/dev/null | \
-            grep '"name"' | sed 's/.*"name": "\(.*\)".*/\1/' | head -15
+        curl -s "https://api.github.com/repos/JongoDB/CYROID/tags?per_page=20" 2>/dev/null | \
+            grep '"name"' | sed 's/.*"name": "\(.*\)".*/\1/' | head -20
     elif command -v wget &> /dev/null; then
-        wget -qO- "https://api.github.com/repos/JongoDB/CYROID/tags?per_page=15" 2>/dev/null | \
-            grep '"name"' | sed 's/.*"name": "\(.*\)".*/\1/' | head -15
+        wget -qO- "https://api.github.com/repos/JongoDB/CYROID/tags?per_page=20" 2>/dev/null | \
+            grep '"name"' | sed 's/.*"name": "\(.*\)".*/\1/' | head -20
     fi
 }
 
 select_version_interactive() {
     # Interactive version selection - sets VERSION variable
     # Returns the selected version
+    #
+    # NOTE: Tags are the primary source for versions since not all versions
+    # have GitHub releases. The developer often just tags without creating a release.
 
     if [ "$USE_TUI" = true ] && command -v gum &> /dev/null; then
         tui_info "Fetching available versions from GitHub..."
@@ -3545,13 +3549,14 @@ select_version_interactive() {
         local releases=$(get_available_releases)
         local tags=$(get_available_tags)
 
-        if [ -n "$releases" ] || [ -n "$tags" ]; then
-            # Get the latest version to display
+        if [ -n "$tags" ] || [ -n "$releases" ]; then
+            # Get the latest version from tags (primary) or releases (fallback)
+            # Tags are authoritative since not all versions have releases
             local latest_version=""
-            if [ -n "$releases" ]; then
-                latest_version=$(echo "$releases" | head -1)
-            elif [ -n "$tags" ]; then
+            if [ -n "$tags" ]; then
                 latest_version=$(echo "$tags" | head -1)
+            elif [ -n "$releases" ]; then
+                latest_version=$(echo "$releases" | head -1)
             fi
 
             local latest_label="Latest (recommended)"
@@ -3559,17 +3564,34 @@ select_version_interactive() {
                 latest_label="Latest (recommended) - $latest_version"
             fi
 
+            # Build menu options - tags first since they're more complete
             local version_choice
             version_choice=$(gum choose --header "Select version to deploy:" \
                 "$latest_label" \
-                "Choose from releases" \
-                "Choose from all tags" \
+                "Choose from tags (all versions)" \
+                "Choose from releases only" \
                 "Enter version manually")
 
             case "$version_choice" in
                 "Latest"*)
                     VERSION="latest"
                     tui_success "Using latest version${latest_version:+ ($latest_version)}"
+                    ;;
+                "Choose from tags"*)
+                    if [ -n "$tags" ]; then
+                        echo ""
+                        tui_info "Available versions (from tags):"
+                        VERSION=$(echo "$tags" | gum choose --header "Select a version:")
+                        if [ -n "$VERSION" ]; then
+                            tui_success "Selected: $VERSION"
+                        else
+                            VERSION="latest"
+                            tui_warn "No selection made, using latest"
+                        fi
+                    else
+                        tui_warn "No tags found, using latest"
+                        VERSION="latest"
+                    fi
                     ;;
                 "Choose from releases"*)
                     if [ -n "$releases" ]; then
@@ -3584,23 +3606,7 @@ select_version_interactive() {
                             tui_warn "No selection made, using latest"
                         fi
                     else
-                        tui_warn "No releases found, using latest"
-                        VERSION="latest"
-                    fi
-                    ;;
-                "Choose from all tags"*)
-                    if [ -n "$tags" ]; then
-                        echo ""
-                        tui_info "Available tags:"
-                        VERSION=$(echo "$tags" | gum choose --header "Select a tag:")
-                        if [ -n "$VERSION" ]; then
-                            tui_success "Selected: $VERSION"
-                        else
-                            VERSION="latest"
-                            tui_warn "No selection made, using latest"
-                        fi
-                    else
-                        tui_warn "No tags found, using latest"
+                        tui_warn "No releases found. Try 'Choose from tags' instead."
                         VERSION="latest"
                     fi
                     ;;
@@ -3623,15 +3629,39 @@ select_version_interactive() {
             VERSION="latest"
         fi
     else
-        # Non-TUI fallback
+        # Non-TUI fallback - also prioritize tags
+        echo "Fetching available versions..."
+        local tags=$(get_available_tags)
+
+        echo ""
         echo "Version options:"
         echo "  1) Latest (recommended)"
-        echo "  2) Enter specific version"
+        if [ -n "$tags" ]; then
+            echo "  2) Choose from available versions"
+        fi
+        echo "  3) Enter specific version"
         echo ""
         read -p "Choice [1]: " choice
 
         case "$choice" in
             2)
+                if [ -n "$tags" ]; then
+                    echo ""
+                    echo "Available versions:"
+                    local i=1
+                    echo "$tags" | while read -r tag; do
+                        echo "  $i) $tag"
+                        i=$((i + 1))
+                    done
+                    echo ""
+                    read -p "Select version number: " tag_choice
+                    VERSION=$(echo "$tags" | sed -n "${tag_choice}p")
+                    VERSION="${VERSION:-latest}"
+                else
+                    VERSION="latest"
+                fi
+                ;;
+            3)
                 read -p "Enter version (e.g., v0.32.0): " VERSION
                 VERSION="${VERSION:-latest}"
                 ;;
