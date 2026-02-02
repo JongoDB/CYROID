@@ -486,6 +486,18 @@ class RangeDeploymentService:
                 # Set up environment variables based on image type
                 environment = {}
                 privileged = False
+                cap_add = None
+
+                # Apply container_config from BaseImage (VM Library settings)
+                # This allows users to set privileged, cap_add, etc. per-image
+                if vm.base_image and vm.base_image.container_config:
+                    config = vm.base_image.container_config
+                    if config.get("privileged"):
+                        privileged = True
+                        logger.info(f"VM {vm.hostname}: privileged=True from base_image.container_config")
+                    if config.get("cap_add"):
+                        cap_add = config["cap_add"]
+                        logger.info(f"VM {vm.hostname}: cap_add={cap_add} from base_image.container_config")
 
                 # macOS VM (dockur/macos) - requires VERSION env and privileged mode for KVM
                 if "dockur/macos" in container_image.lower():
@@ -536,6 +548,7 @@ class RangeDeploymentService:
                     dns_search=primary_network.dns_search,
                     environment=environment if environment else None,
                     privileged=privileged,
+                    cap_add=cap_add,
                 )
 
                 vm.container_id = container_id
