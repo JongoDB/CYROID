@@ -4401,6 +4401,12 @@ done
 # Bootstrap: download required files if running standalone
 bootstrap_standalone
 
+# Reconnect stdin to terminal if piped (for curl | bash support)
+# This allows interactive TUI features to work when run via: curl ... | bash
+if [ ! -t 0 ] && [ -e /dev/tty ]; then
+    exec < /dev/tty
+fi
+
 # Check for gum (TUI tool) early - before any TUI functions are called
 check_gum
 
