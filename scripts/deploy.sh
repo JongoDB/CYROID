@@ -439,6 +439,8 @@ print_banner() {
 }
 
 log_info() {
+    # Suppress output in fullscreen TUI mode - status bar shows progress
+    [ "$TUI_FULLSCREEN" = true ] && return
     if [ "$PROGRESS_BAR_ACTIVE" = true ]; then
         # Use simpler output that works within scroll region
         printf "\033[32m[INFO]\033[0m %s\n" "$1"
@@ -448,6 +450,8 @@ log_info() {
 }
 
 log_warn() {
+    # Suppress output in fullscreen TUI mode - status bar shows progress
+    [ "$TUI_FULLSCREEN" = true ] && return
     if [ "$PROGRESS_BAR_ACTIVE" = true ]; then
         printf "\033[33m[WARN]\033[0m %s\n" "$1"
     else
@@ -456,7 +460,8 @@ log_warn() {
 }
 
 log_error() {
-    if [ "$PROGRESS_BAR_ACTIVE" = true ]; then
+    # Always show errors, even in fullscreen mode
+    if [ "$PROGRESS_BAR_ACTIVE" = true ] || [ "$TUI_FULLSCREEN" = true ]; then
         printf "\033[31m[ERROR]\033[0m %s\n" "$1"
     else
         echo -e "${RED}[ERROR]${NC} $1"
@@ -464,6 +469,8 @@ log_error() {
 }
 
 log_step() {
+    # Suppress output in fullscreen TUI mode - status bar shows progress
+    [ "$TUI_FULLSCREEN" = true ] && return
     if [ "$PROGRESS_BAR_ACTIVE" = true ]; then
         printf "\n\033[34m==>\033[0m \033[1m%s\033[0m\n" "$1"
     else
@@ -668,7 +675,11 @@ tui_choose() {
     local prompt="$1"
     shift
     if [ "$USE_TUI" = true ]; then
+        tui_suspend_scroll_region
         gum choose --header "$prompt" "$@"
+        local result=$?
+        tui_restore_scroll_region
+        return $result
     else
         echo "$prompt"
         select opt in "$@"; do
@@ -683,7 +694,11 @@ tui_input() {
     local placeholder="${2:-}"
     local default="${3:-}"
     if [ "$USE_TUI" = true ]; then
-        gum input --placeholder "$placeholder" --value "$default" --header "$prompt"
+        tui_suspend_scroll_region
+        local value
+        value=$(gum input --placeholder "$placeholder" --value "$default" --header "$prompt")
+        tui_restore_scroll_region
+        echo "$value"
     else
         read -p "$prompt [$default]: " value
         echo "${value:-$default}"
@@ -693,7 +708,11 @@ tui_input() {
 tui_confirm() {
     local prompt="$1"
     if [ "$USE_TUI" = true ]; then
+        tui_suspend_scroll_region
         gum confirm "$prompt"
+        local result=$?
+        tui_restore_scroll_region
+        return $result
     else
         read -p "$prompt [Y/n]: " choice
         [[ ! "$choice" =~ ^[Nn] ]]
@@ -712,6 +731,8 @@ tui_spin() {
 }
 
 tui_success() {
+    # Suppress in fullscreen mode - status bar shows progress
+    [ "$TUI_FULLSCREEN" = true ] && return
     if [ "$USE_TUI" = true ]; then
         if [ "$PROGRESS_BAR_ACTIVE" = true ]; then
             # Use printf instead of gum to avoid scroll region issues
@@ -725,8 +746,9 @@ tui_success() {
 }
 
 tui_error() {
+    # Always show errors, even in fullscreen mode
     if [ "$USE_TUI" = true ]; then
-        if [ "$PROGRESS_BAR_ACTIVE" = true ]; then
+        if [ "$PROGRESS_BAR_ACTIVE" = true ] || [ "$TUI_FULLSCREEN" = true ]; then
             printf "\033[38;5;196m\033[1m✗ %s\033[0m\n" "$1"
         else
             gum style --foreground 196 --bold "✗ $1"
@@ -737,6 +759,8 @@ tui_error() {
 }
 
 tui_warn() {
+    # Suppress in fullscreen mode - status bar shows progress
+    [ "$TUI_FULLSCREEN" = true ] && return
     if [ "$USE_TUI" = true ]; then
         if [ "$PROGRESS_BAR_ACTIVE" = true ]; then
             printf "\033[38;5;214m⚠ %s\033[0m\n" "$1"
@@ -749,6 +773,8 @@ tui_warn() {
 }
 
 tui_info() {
+    # Suppress in fullscreen mode - status bar shows progress
+    [ "$TUI_FULLSCREEN" = true ] && return
     if [ "$USE_TUI" = true ]; then
         if [ "$PROGRESS_BAR_ACTIVE" = true ]; then
             printf "\033[38;5;39m→ %s\033[0m\n" "$1"
@@ -785,6 +811,8 @@ STATUS_TYPE="info"  # info, success, warn, error, progress
 DEPLOYMENT_PHASE=""
 DEPLOYMENT_PROGRESS=0
 TUI_FULLSCREEN=false
+TUI_SCROLL_REGION_SET=false
+TUI_LAST_HEIGHT=0
 
 # Save terminal state for cleanup
 ORIGINAL_STTY=""
@@ -806,14 +834,29 @@ tui_init_fullscreen() {
     # Hide cursor during redraws
     tput civis 2>/dev/null || true
 
+    # Set up scroll region to protect the bottom status bar line
+    # This prevents normal output from overwriting the status bar
+    tput csr 0 $((TERM_LINES - 2)) 2>/dev/null || true
+    TUI_SCROLL_REGION_SET=true
+    TUI_LAST_HEIGHT=$TERM_LINES
+
     TUI_FULLSCREEN=true
 
     # Initial draw
     tui_draw_screen
+
+    # Position cursor at the end of the scroll region for subsequent output
+    tput cup $((TERM_LINES - 2)) 0 2>/dev/null || true
 }
 
 tui_cleanup_fullscreen() {
     if [ "$TUI_FULLSCREEN" = true ]; then
+        # Reset scroll region to full terminal before cleanup
+        if [ "$TUI_SCROLL_REGION_SET" = true ]; then
+            tput csr 0 $((TERM_LINES - 1)) 2>/dev/null || true
+            TUI_SCROLL_REGION_SET=false
+        fi
+
         # Show cursor
         tput cnorm 2>/dev/null || true
 
@@ -833,6 +876,32 @@ tui_cleanup_fullscreen() {
 tui_update_dimensions() {
     TERM_LINES=$(tput lines 2>/dev/null || echo 24)
     TERM_COLS=$(tput cols 2>/dev/null || echo 80)
+}
+
+# Temporarily suspend scroll region for interactive gum commands
+# Call this before gum input/choose/etc that take over the terminal
+tui_suspend_scroll_region() {
+    if [ "$TUI_SCROLL_REGION_SET" = true ]; then
+        # Reset scroll region to full terminal
+        tput csr 0 $((TERM_LINES - 1)) 2>/dev/null || true
+        # Show cursor for interactive input
+        tput cnorm 2>/dev/null || true
+    fi
+}
+
+# Restore scroll region after interactive gum commands
+tui_restore_scroll_region() {
+    if [ "$TUI_SCROLL_REGION_SET" = true ]; then
+        # Update dimensions in case terminal was resized during input
+        tui_update_dimensions
+        TUI_LAST_HEIGHT=$TERM_LINES
+        # Restore scroll region
+        tput csr 0 $((TERM_LINES - 2)) 2>/dev/null || true
+        # Hide cursor again
+        tput civis 2>/dev/null || true
+        # Redraw status bar
+        tui_draw_status_bar
+    fi
 }
 
 tui_set_status() {
@@ -877,8 +946,19 @@ tui_draw_status_bar() {
     # Update dimensions in case terminal was resized
     tui_update_dimensions
 
+    # Handle terminal resize - update scroll region if height changed
+    if [ "$TUI_SCROLL_REGION_SET" = true ] && [ "$TERM_LINES" != "$TUI_LAST_HEIGHT" ]; then
+        TUI_LAST_HEIGHT=$TERM_LINES
+        tput csr 0 $((TERM_LINES - 2)) 2>/dev/null || true
+    fi
+
     # Save cursor position
     tput sc 2>/dev/null || true
+
+    # Temporarily expand scroll region to draw status bar at the very bottom
+    if [ "$TUI_SCROLL_REGION_SET" = true ]; then
+        tput csr 0 $((TERM_LINES - 1)) 2>/dev/null || true
+    fi
 
     # Move to bottom line (leave 1 line for status bar)
     local status_line=$((TERM_LINES - 1))
@@ -932,6 +1012,11 @@ tui_draw_status_bar() {
     # Right-align timestamp
     printf "%*s" "$padding" ""
     printf "\033[38;5;245m%s \033[0m" "$right_content"
+
+    # Restore scroll region to protect status bar again
+    if [ "$TUI_SCROLL_REGION_SET" = true ]; then
+        tput csr 0 $((TERM_LINES - 2)) 2>/dev/null || true
+    fi
 
     # Restore cursor position
     tput rc 2>/dev/null || true
@@ -2836,8 +2921,12 @@ pull_images() {
 
     if [ -n "$images" ]; then
         local total=$(echo "$images" | wc -l | tr -d ' ')
-        printf "\n"
-        tui_info "Pulling $total images for $DOCKER_PLATFORM:"
+
+        # Only print detailed output if not in fullscreen TUI mode
+        if [ "$TUI_FULLSCREEN" != true ]; then
+            printf "\n"
+            tui_info "Pulling $total images for $DOCKER_PLATFORM:"
+        fi
 
         local current=0
         # Store images to temp file for reliable iteration
@@ -2853,20 +2942,19 @@ pull_images() {
                 tui_set_status "Pulling ($current/$total): $name" "progress"
             else
                 progress_bar_update "$current" "$total" "Pull Images" "$img"
+                printf "  [%d/%d] %s\n" "$current" "$total" "$name"
             fi
-
-            printf "  [%d/%d] %s\n" "$current" "$total" "$name"
 
             # Pull individual image with explicit platform to avoid multi-arch issues
             if docker pull --platform "$DOCKER_PLATFORM" "$img" >/dev/null 2>&1; then
-                printf "    \033[32m✓\033[0m Pulled\n"
+                [ "$TUI_FULLSCREEN" != true ] && printf "    \033[32m✓\033[0m Pulled\n"
             else
-                printf "    \033[33m⚠\033[0m May already exist locally\n"
+                [ "$TUI_FULLSCREEN" != true ] && printf "    \033[33m⚠\033[0m May already exist locally\n"
             fi
         done < "$temp_images"
 
         rm -f "$temp_images"
-        printf "\n"
+        [ "$TUI_FULLSCREEN" != true ] && printf "\n"
     else
         # Fallback to compose pull if we can't parse images
         $compose_cmd -f docker-compose.yml -f docker-compose.prod.yml pull
@@ -2891,11 +2979,16 @@ start_services() {
     fi
 
     # Start services (don't use gum spin - it can fail silently)
-    $compose_cmd -f docker-compose.yml -f docker-compose.prod.yml up -d 2>&1 | while read -r line; do
-        if [ -n "$line" ]; then
-            echo "  $line"
-        fi
-    done || true
+    if [ "$TUI_FULLSCREEN" = true ]; then
+        # Suppress output in fullscreen mode - status bar shows progress
+        $compose_cmd -f docker-compose.yml -f docker-compose.prod.yml up -d >/dev/null 2>&1 || true
+    else
+        $compose_cmd -f docker-compose.yml -f docker-compose.prod.yml up -d 2>&1 | while read -r line; do
+            if [ -n "$line" ]; then
+                echo "  $line"
+            fi
+        done || true
+    fi
 
     # Verify all containers started (retry any stuck in "Created" state)
     sleep 2
@@ -2908,8 +3001,6 @@ start_services() {
 }
 
 wait_for_health() {
-    tui_info "Waiting for services to be healthy..."
-
     local max_attempts=60
     local attempt=0
     local target_healthy=8  # All 8 services should be healthy
@@ -2976,9 +3067,13 @@ create_initial_admin() {
         admin_password="${CLI_ADMIN_PASSWORD:-$default_password}"
         tui_info "Using provided/default credentials (non-interactive mode)"
     elif [ "$USE_TUI" = true ] && command -v gum &> /dev/null; then
+        # Suspend scroll region for interactive gum input
+        tui_suspend_scroll_region
         admin_username=$(gum input --placeholder "admin" --value "$default_username" --header "Admin username:")
         admin_email=$(gum input --placeholder "admin@example.com" --value "$default_email" --header "Admin email:")
         admin_password=$(gum input --placeholder "admin123" --value "$default_password" --password --header "Admin password:")
+        # Restore scroll region after input
+        tui_restore_scroll_region
     else
         read -p "Admin username [$default_username]: " admin_username
         admin_username="${admin_username:-$default_username}"
@@ -3194,10 +3289,13 @@ do_deploy() {
         progress_bar_init
     fi
 
-    tui_main_area
-    tui_header
-    tui_title "Deploying CYROID"
-    echo ""
+    # Show header only in non-fullscreen mode (fullscreen uses status bar only)
+    if [ "$TUI_FULLSCREEN" != true ]; then
+        tui_main_area
+        tui_header
+        tui_title "Deploying CYROID"
+        echo ""
+    fi
 
     # Pre-flight checks
     if [ "$TUI_FULLSCREEN" = true ]; then
@@ -3210,39 +3308,27 @@ do_deploy() {
 
     # Create directories and config (Step 1/7)
     tui_set_progress "Creating data directories..." 14
-    tui_info "Creating data directories..."
     create_data_directories
-    tui_success "Data directories ready"
 
     # Generate config (Step 2/7)
     tui_set_progress "Generating configuration..." 28
-    tui_info "Generating configuration..."
     create_env_file
-    tui_success "Configuration saved"
 
     # Setup SSL (Step 3/7)
     tui_set_progress "Setting up SSL certificates..." 42
-    tui_info "Setting up SSL certificates..."
     setup_ssl
-    tui_success "SSL configured"
 
     # Init networks (Step 4/7)
     tui_set_progress "Initializing Docker networks..." 56
-    tui_info "Initializing Docker networks..."
     init_networks
-    tui_success "Networks ready"
 
     # Pull images (Step 5/7)
     tui_set_progress "Pulling Docker images..." 70
-    tui_info "Pulling Docker images (this may take a while)..."
     pull_images
-    tui_success "Images pulled"
 
     # Start services (Step 6/7)
     tui_set_progress "Starting services..." 85
-    tui_info "Starting services..."
     start_services
-    tui_success "Services started"
 
     # Wait for health (Step 7/7)
     tui_set_progress "Waiting for services to be healthy..." 92
