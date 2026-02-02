@@ -971,11 +971,21 @@ class BlueprintExportService:
             content_data: Optional[ContentExportData] = None
             content_files: List[str] = []
 
-            if options.include_content and content_id:
-                result = self._collect_content_data(content_id, temp_path, db)
-                if result:
-                    content_data, content_files = result
-                    logger.info(f"Collected content '{content_data.title}' with {len(content_data.assets)} assets")
+            if options.include_content:
+                # Use explicit content_id if provided, otherwise use first from blueprint's content_ids
+                export_content_id = content_id
+                if not export_content_id and blueprint.content_ids:
+                    try:
+                        export_content_id = UUID(blueprint.content_ids[0])
+                        logger.info(f"Using content_id from blueprint.content_ids: {export_content_id}")
+                    except (ValueError, IndexError) as e:
+                        logger.warning(f"Could not parse content_id from blueprint.content_ids: {e}")
+
+                if export_content_id:
+                    result = self._collect_content_data(export_content_id, temp_path, db)
+                    if result:
+                        content_data, content_files = result
+                        logger.info(f"Collected content '{content_data.title}' with {len(content_data.assets)} assets")
 
             # ============================================================
             # Export Docker Images (v4.0)
