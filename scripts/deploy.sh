@@ -439,20 +439,37 @@ print_banner() {
 }
 
 log_info() {
-    echo -e "${GREEN}[INFO]${NC} $1"
+    if [ "$PROGRESS_BAR_ACTIVE" = true ]; then
+        # Use simpler output that works within scroll region
+        printf "\033[32m[INFO]\033[0m %s\n" "$1"
+    else
+        echo -e "${GREEN}[INFO]${NC} $1"
+    fi
 }
 
 log_warn() {
-    echo -e "${YELLOW}[WARN]${NC} $1"
+    if [ "$PROGRESS_BAR_ACTIVE" = true ]; then
+        printf "\033[33m[WARN]\033[0m %s\n" "$1"
+    else
+        echo -e "${YELLOW}[WARN]${NC} $1"
+    fi
 }
 
 log_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
+    if [ "$PROGRESS_BAR_ACTIVE" = true ]; then
+        printf "\033[31m[ERROR]\033[0m %s\n" "$1"
+    else
+        echo -e "${RED}[ERROR]${NC} $1"
+    fi
 }
 
 log_step() {
-    echo ""
-    echo -e "${BLUE}==>${NC} ${BOLD}$1${NC}"
+    if [ "$PROGRESS_BAR_ACTIVE" = true ]; then
+        printf "\n\033[34m==>\033[0m \033[1m%s\033[0m\n" "$1"
+    else
+        echo ""
+        echo -e "${BLUE}==>${NC} ${BOLD}$1${NC}"
+    fi
 }
 
 generate_secret() {
@@ -696,7 +713,12 @@ tui_spin() {
 
 tui_success() {
     if [ "$USE_TUI" = true ]; then
-        gum style --foreground 82 --bold "✓ $1"
+        if [ "$PROGRESS_BAR_ACTIVE" = true ]; then
+            # Use printf instead of gum to avoid scroll region issues
+            printf "\033[38;5;82m\033[1m✓ %s\033[0m\n" "$1"
+        else
+            gum style --foreground 82 --bold "✓ $1"
+        fi
     else
         log_info "$1"
     fi
@@ -704,7 +726,11 @@ tui_success() {
 
 tui_error() {
     if [ "$USE_TUI" = true ]; then
-        gum style --foreground 196 --bold "✗ $1"
+        if [ "$PROGRESS_BAR_ACTIVE" = true ]; then
+            printf "\033[38;5;196m\033[1m✗ %s\033[0m\n" "$1"
+        else
+            gum style --foreground 196 --bold "✗ $1"
+        fi
     else
         log_error "$1"
     fi
@@ -712,7 +738,11 @@ tui_error() {
 
 tui_warn() {
     if [ "$USE_TUI" = true ]; then
-        gum style --foreground 214 "⚠ $1"
+        if [ "$PROGRESS_BAR_ACTIVE" = true ]; then
+            printf "\033[38;5;214m⚠ %s\033[0m\n" "$1"
+        else
+            gum style --foreground 214 "⚠ $1"
+        fi
     else
         log_warn "$1"
     fi
@@ -720,7 +750,11 @@ tui_warn() {
 
 tui_info() {
     if [ "$USE_TUI" = true ]; then
-        gum style --foreground 39 "→ $1"
+        if [ "$PROGRESS_BAR_ACTIVE" = true ]; then
+            printf "\033[38;5;39m→ %s\033[0m\n" "$1"
+        else
+            gum style --foreground 39 "→ $1"
+        fi
     else
         log_info "$1"
     fi
@@ -1179,6 +1213,8 @@ REGISTRY_URL="http://127.0.0.1:5000"
 
 # Progress bar state
 PROGRESS_BAR_ACTIVE=false
+PROGRESS_BAR_SCROLL_REGION_SET=false
+PROGRESS_BAR_LAST_HEIGHT=0
 
 # Initialize progress bar
 progress_bar_init() {
@@ -1187,6 +1223,18 @@ progress_bar_init() {
     fi
     PROGRESS_BAR_ACTIVE=true
     tput civis 2>/dev/null || true  # Hide cursor
+
+    # Set up scroll region to protect the bottom status bar line
+    local term_height=$(tput lines 2>/dev/null || echo 24)
+    PROGRESS_BAR_LAST_HEIGHT=$term_height
+
+    # Create scroll region from line 0 to second-to-last line
+    # This prevents normal output from overwriting the status bar
+    tput csr 0 $((term_height - 2)) 2>/dev/null || true
+    PROGRESS_BAR_SCROLL_REGION_SET=true
+
+    # Position cursor at the end of the scroll region
+    tput cup $((term_height - 2)) 0 2>/dev/null || true
 }
 
 # Update and draw progress bar at bottom of screen
@@ -1203,6 +1251,12 @@ progress_bar_update() {
 
     local term_width=$(tput cols 2>/dev/null || echo 80)
     local term_height=$(tput lines 2>/dev/null || echo 24)
+
+    # Handle terminal resize - update scroll region if height changed
+    if [ "$PROGRESS_BAR_SCROLL_REGION_SET" = true ] && [ "$term_height" != "$PROGRESS_BAR_LAST_HEIGHT" ]; then
+        PROGRESS_BAR_LAST_HEIGHT=$term_height
+        tput csr 0 $((term_height - 2)) 2>/dev/null || true
+    fi
 
     # Calculate percentage
     local percent=0
@@ -1233,13 +1287,38 @@ progress_bar_update() {
         info="${info:0:$((max_info - 3))}..."
     fi
 
-    # Save cursor, move to bottom, draw, restore cursor
+    # Add timestamp
+    local timestamp=$(date '+%H:%M:%S')
+
+    # Save cursor position
     tput sc 2>/dev/null || true
+
+    # Temporarily exit scroll region to draw status bar
+    if [ "$PROGRESS_BAR_SCROLL_REGION_SET" = true ]; then
+        tput csr 0 $((term_height - 1)) 2>/dev/null || true
+    fi
+
+    # Move to bottom line and draw status bar
     tput cup $((term_height - 1)) 0 2>/dev/null || true
 
-    # Clear line and draw progress bar
-    echo -ne "\033[2K ${GREEN}${bar}${NC} ${percent}% │ ${CYAN}${info}${NC}"
+    # Clear line and draw progress bar with dark background
+    printf "\033[48;5;236m\033[2K"  # Dark gray background, clear line
+    printf " \033[38;5;82m%s\033[0m\033[48;5;236m %d%% │ \033[38;5;39m%s\033[0m\033[48;5;236m" "$bar" "$percent" "$info"
 
+    # Right-align timestamp
+    local content_len=$((${#bar} + ${#info} + 10))
+    local padding=$((term_width - content_len - ${#timestamp} - 2))
+    if [ $padding -gt 0 ]; then
+        printf "%*s" "$padding" ""
+    fi
+    printf "\033[38;5;245m%s \033[0m" "$timestamp"
+
+    # Restore scroll region
+    if [ "$PROGRESS_BAR_SCROLL_REGION_SET" = true ]; then
+        tput csr 0 $((term_height - 2)) 2>/dev/null || true
+    fi
+
+    # Restore cursor position
     tput rc 2>/dev/null || true
 }
 
@@ -1253,9 +1332,18 @@ progress_bar_cleanup() {
 
     local term_height=$(tput lines 2>/dev/null || echo 24)
 
+    # Reset scroll region to full terminal before cleanup
+    if [ "$PROGRESS_BAR_SCROLL_REGION_SET" = true ]; then
+        tput csr 0 $((term_height - 1)) 2>/dev/null || true
+        PROGRESS_BAR_SCROLL_REGION_SET=false
+    fi
+
     # Clear the progress bar line
     tput cup $((term_height - 1)) 0 2>/dev/null || true
     echo -ne "\033[2K"
+
+    # Move cursor to a sensible position
+    tput cup $((term_height - 2)) 0 2>/dev/null || true
 
     tput cnorm 2>/dev/null || true  # Show cursor
 }
@@ -2748,7 +2836,7 @@ pull_images() {
 
     if [ -n "$images" ]; then
         local total=$(echo "$images" | wc -l | tr -d ' ')
-        echo ""
+        printf "\n"
         tui_info "Pulling $total images for $DOCKER_PLATFORM:"
 
         local current=0
@@ -2767,18 +2855,18 @@ pull_images() {
                 progress_bar_update "$current" "$total" "Pull Images" "$img"
             fi
 
-            echo "  [$current/$total] $name"
+            printf "  [%d/%d] %s\n" "$current" "$total" "$name"
 
             # Pull individual image with explicit platform to avoid multi-arch issues
             if docker pull --platform "$DOCKER_PLATFORM" "$img" >/dev/null 2>&1; then
-                echo -e "    ${GREEN}✓${NC} Pulled"
+                printf "    \033[32m✓\033[0m Pulled\n"
             else
-                echo -e "    ${YELLOW}⚠${NC} May already exist locally"
+                printf "    \033[33m⚠\033[0m May already exist locally\n"
             fi
         done < "$temp_images"
 
         rm -f "$temp_images"
-        echo ""
+        printf "\n"
     else
         # Fallback to compose pull if we can't parse images
         $compose_cmd -f docker-compose.yml -f docker-compose.prod.yml pull
