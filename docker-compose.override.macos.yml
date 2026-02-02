@@ -48,3 +48,8 @@ services:
       # Runtime directories for catalog-installed content
       - ./data/cyroid/scenarios:/data/scenarios
       - ./data/cyroid/images:/data/images
+
+  registry:
+    volumes:
+      - ./data/cyroid/registry:/var/lib/registry
+      - ./config/registry-config.yml:/etc/docker/registry/config.yml:ro

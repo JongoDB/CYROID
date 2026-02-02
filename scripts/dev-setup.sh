@@ -83,6 +83,7 @@ DATA_DIRS=(
     "data/cyroid/catalogs"
     "data/cyroid/scenarios"
     "data/cyroid/images"
+    "data/cyroid/registry"
 )
 
 echo -e "${YELLOW}→${NC} Ensuring data directories exist..."
