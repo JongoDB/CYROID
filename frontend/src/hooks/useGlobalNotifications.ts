@@ -8,7 +8,7 @@ import { useAuthStore } from '../stores/authStore'
 import { useNotificationStore } from '../stores/notificationStore'
 import { RealtimeEvent } from '../types'
 
-const WS_BASE_URL = (import.meta as unknown as { env: Record<string, string> }).env?.VITE_WS_URL || `ws://${window.location.host}`
+const WS_BASE_URL = (import.meta as unknown as { env: Record<string, string> }).env?.VITE_WS_URL || `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}`
 const MAX_RECONNECT_ATTEMPTS = 10
 const INITIAL_RECONNECT_DELAY = 1000
 
