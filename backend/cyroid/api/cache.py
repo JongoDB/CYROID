@@ -785,6 +785,23 @@ def _build_docker_image_async(image_name: str, tag: str, no_cache: bool):
                 logger.error(f"Docker build failed: {error_msg}")
                 return
 
+            elif "message" in chunk:
+                # Docker returns parse errors and other messages in 'message' key
+                msg = chunk.get("message", "")
+                if "error" in msg.lower() or "unknown instruction" in msg.lower():
+                    _active_docker_builds[build_key].update({
+                        "status": "failed",
+                        "error": msg,
+                        "current_step_name": f"Error: {msg}",
+                    })
+                    logger.error(f"Docker build failed: {msg}")
+                    return
+                else:
+                    # Log non-error messages
+                    logs = _active_docker_builds[build_key].get("logs", [])
+                    logs.append(msg)
+                    _active_docker_builds[build_key]["logs"] = logs[-100:]
+
             elif "aux" in chunk:
                 # Build complete - aux contains the image ID
                 image_id = chunk.get("aux", {}).get("ID", "")
@@ -923,11 +940,13 @@ def _build_docker_image_async(image_name: str, tag: str, no_cache: bool):
                 })
                 return
 
-        except Exception:
+        except Exception as e:
+            # Image doesn't exist - build failed silently or was never completed
+            logger.error(f"Build verification failed for {full_tag}: {e}")
             _active_docker_builds[build_key].update({
-                "status": "completed",
-                "progress_percent": 100,
-                "current_step_name": "Build complete!",
+                "status": "failed",
+                "error": f"Build failed - image not found: {e}",
+                "current_step_name": "Error: Build failed - image not created",
             })
 
     except Exception as e:
