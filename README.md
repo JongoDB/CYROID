@@ -366,19 +366,15 @@ Each range runs inside a DinD container with iptables-based routing (VyOS option
 
 ## Quick Start
 
-### One-Line Deployment
+### Easy Install (3 Commands)
 
-**Interactive (recommended for first-time setup):**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/JongoDB/CYROID/master/scripts/deploy.sh | bash
+curl -fsSL https://raw.githubusercontent.com/JongoDB/CYROID/master/scripts/deploy.sh -o deploy.sh
+chmod +x deploy.sh
+./deploy.sh
 ```
 
-**Fully Automated (for CI/CD or scripted deployments):**
-```bash
-curl -fsSL https://raw.githubusercontent.com/JongoDB/CYROID/master/scripts/deploy.sh | bash -s -- \
-  -y --ip $(hostname -I | awk '{print $1}') --ssl selfsigned \
-  --admin-user admin --admin-password YourSecurePassword123 --admin-email admin@example.com
-```
+The deploy script provides a TUI-based installation wizard that handles everything automatically.
 
 ### Prerequisites
 
@@ -391,17 +387,15 @@ curl -fsSL https://raw.githubusercontent.com/JongoDB/CYROID/master/scripts/deplo
 
 #### Option 1: Deploy Script (Recommended)
 
-The deploy script handles everything automatically:
-
+**Interactive mode (with TUI wizard):**
 ```bash
-# Download and run the deploy script
 curl -fsSL https://raw.githubusercontent.com/JongoDB/CYROID/master/scripts/deploy.sh -o deploy.sh
 chmod +x deploy.sh
-
-# Interactive deployment with TUI
 ./deploy.sh
+```
 
-# Or non-interactive with all options
+**Non-interactive mode (for CI/CD or scripted deployments):**
+```bash
 ./deploy.sh -y --ip 192.168.1.100 --ssl selfsigned --admin-user admin --admin-password admin123
 ```
 
