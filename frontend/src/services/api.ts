@@ -1243,6 +1243,11 @@ export const blueprintsApi = {
   },
   export: async (id: string, options: BlueprintExportOptions = {}): Promise<Blob> => {
     const params = new URLSearchParams();
+    // Add token as query param for download endpoints (backend expects this)
+    const token = localStorage.getItem('token');
+    if (token) {
+      params.append('token', token);
+    }
     if (options.include_msel !== undefined) {
       params.append('include_msel', String(options.include_msel));
     }
