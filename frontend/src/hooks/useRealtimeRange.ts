@@ -12,7 +12,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { useAuthStore } from '../stores/authStore'
 import { RealtimeEvent, WebSocketConnectionState } from '../types'
 
-const WS_BASE_URL = (import.meta as unknown as { env: Record<string, string> }).env?.VITE_WS_URL || `ws://${window.location.host}`
+const WS_BASE_URL = (import.meta as unknown as { env: Record<string, string> }).env?.VITE_WS_URL || `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}`
 const MAX_RECONNECT_ATTEMPTS = 5
 const INITIAL_RECONNECT_DELAY = 1000
 
