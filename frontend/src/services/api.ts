@@ -2238,6 +2238,22 @@ export interface PushResponse {
   message: string
 }
 
+export interface PushStartResponse {
+  operation_id: string
+  image_tag: string
+  message: string
+}
+
+export interface RegistryPushStatus {
+  operation_id: string
+  image_tag: string
+  status: 'starting' | 'pushing' | 'verifying' | 'cleaning' | 'completed' | 'failed'
+  progress_percent: number
+  current_layer?: number
+  total_layers?: number
+  error_message?: string
+}
+
 export interface ImageStatusResponse {
   image_tag: string
   in_registry: boolean
@@ -2261,7 +2277,13 @@ export const registryApi = {
     api.get<ImageStatusResponse>(`/registry/status/${encodeURIComponent(imageTag)}`),
 
   pushImage: (imageTag: string) =>
-    api.post<PushResponse>('/registry/push', { image_tag: imageTag }),
+    api.post<PushStartResponse>('/registry/push', { image_tag: imageTag }),
+
+  getPushStatus: (operationId: string) =>
+    api.get<RegistryPushStatus>(`/registry/push/${operationId}/status`),
+
+  getActivePushes: () =>
+    api.get<{ pushes: RegistryPushStatus[] }>('/registry/pushes/active'),
 
   deleteImage: (imageTag: string) =>
     api.delete<DeleteResponse>(`/registry/images/${encodeURIComponent(imageTag)}`),
