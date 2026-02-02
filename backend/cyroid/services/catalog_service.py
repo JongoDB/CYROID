@@ -65,14 +65,29 @@ def build_config_from_yaml(blueprint_data: dict) -> dict:
     for vm in blueprint_data.get("vms", []):
         vm_config = {
             "hostname": vm.get("hostname"),
-            "ip_address": vm.get("ip_address"),
-            "network_name": vm.get("network_name"),
             "cpu": vm.get("cpu", 1),
             "ram_mb": vm.get("ram_mb", 1024),
             "disk_gb": vm.get("disk_gb", 20),
             "position_x": vm.get("position_x"),
             "position_y": vm.get("position_y"),
         }
+
+        # Handle network interfaces - prefer multi-NIC format, fall back to legacy
+        if vm.get("network_interfaces"):
+            # Multi-NIC format: list of network interface objects
+            vm_config["network_interfaces"] = [
+                {
+                    "network_name": iface.get("network_name"),
+                    "ip_address": iface.get("ip_address"),
+                    "is_primary": iface.get("is_primary", False),
+                }
+                for iface in vm.get("network_interfaces", [])
+            ]
+        else:
+            # Legacy single-NIC format
+            vm_config["ip_address"] = vm.get("ip_address")
+            vm_config["network_name"] = vm.get("network_name")
+
         # Prefer base_image_tag (new format), fall back to template_name (deprecated)
         if vm.get("base_image_tag"):
             vm_config["base_image_tag"] = vm.get("base_image_tag")
