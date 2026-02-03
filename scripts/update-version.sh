@@ -6,7 +6,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-VERSION_FILE="$PROJECT_ROOT/backend/VERSION"
+VERSION_FILE="$PROJECT_ROOT/VERSION"
 
 # Get latest tag
 TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
