@@ -1,7 +1,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Status-Active%20Development-brightgreen" alt="Status">
   <img src="https://img.shields.io/badge/Phase-5%20of%207-blue" alt="Phase">
-  <img src="https://img.shields.io/badge/Version-0.35.5-orange" alt="Version">
+  <img src="https://img.shields.io/badge/Version-0.35.35-orange" alt="Version">
   <img src="https://img.shields.io/badge/License-Proprietary-red" alt="License">
   <img src="https://github.com/JongoDB/CYROID/actions/workflows/docker-publish.yml/badge.svg" alt="Docker Build">
 </p>
@@ -21,6 +21,16 @@
   <a href="#api-reference">API</a> •
   <a href="#contributing">Contributing</a>
 </p>
+
+---
+
+## Quick Install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/JongoDB/CYROID/master/scripts/deploy.sh -o deploy.sh
+chmod +x deploy.sh
+./deploy.sh
+```
 
 ---
 
