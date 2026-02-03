@@ -13,14 +13,14 @@ fi
 VERSION="$1"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-VERSION_FILE="$PROJECT_ROOT/backend/VERSION"
+VERSION_FILE="$PROJECT_ROOT/VERSION"
 
 # Update VERSION file
 echo "$VERSION" > "$VERSION_FILE"
-echo "Updated backend/VERSION to $VERSION"
+echo "Updated VERSION to $VERSION"
 
 # Commit the version change
-git add backend/VERSION
+git add VERSION
 git commit -m "chore: bump version to $VERSION" || echo "No changes to commit"
 
 # Create and push tag

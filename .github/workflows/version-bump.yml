@@ -1,0 +1,75 @@
+name: Auto Version Bump
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [master]
+
+# Prevent concurrent version bumps
+concurrency:
+  group: version-bump
+  cancel-in-progress: false
+
+jobs:
+  bump-version:
+    # Only run if PR was merged (not just closed)
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Bump patch version
+        id: version
+        run: |
+          # Read current version
+          CURRENT_VERSION=$(cat VERSION)
+          echo "Current version: $CURRENT_VERSION"
+
+          # Parse version components
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
+
+          # Bump patch version
+          PATCH=$((PATCH + 1))
+          NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}"
+          echo "New version: $NEW_VERSION"
+
+          # Write new version
+          echo "$NEW_VERSION" > VERSION
+
+          # Output for next steps
+          echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Commit version bump
+        run: |
+          NEW_VERSION="${{ steps.version.outputs.version }}"
+          git add VERSION
+          git commit -m "chore: bump version to $NEW_VERSION"
+
+      - name: Create and push tag
+        run: |
+          NEW_VERSION="${{ steps.version.outputs.version }}"
+          git tag "v$NEW_VERSION"
+          git push origin master
+          git push origin "v$NEW_VERSION"
+
+      - name: Summary
+        run: |
+          echo "### Version Bumped :rocket:" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **New Version:** ${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Tag:** v${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Docker images will be built automatically from the new tag." >> $GITHUB_STEP_SUMMARY
