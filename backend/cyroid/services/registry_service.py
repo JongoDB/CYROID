@@ -1,7 +1,8 @@
 """Service for managing the local Docker registry."""
 import asyncio
 import logging
-from typing import Optional, List, Callable
+import threading
+from typing import Optional, List, Callable, Dict
 import httpx
 import docker
 import docker.errors
@@ -25,32 +26,39 @@ class RegistryService:
     REGISTRY_LOCALHOST = "127.0.0.1"  # For host Docker daemon to push (no insecure-registries needed)
 
     def __init__(self):
-        self._http_client: Optional[httpx.AsyncClient] = None
-        self._http_client_loop: Optional[asyncio.AbstractEventLoop] = None
+        # Thread-safe per-event-loop HTTP clients
+        # Key: id(event_loop), Value: httpx.AsyncClient
+        self._http_clients: Dict[int, httpx.AsyncClient] = {}
+        self._http_clients_lock = threading.Lock()
         self._docker_client: Optional[docker.DockerClient] = None
 
     async def _get_http_client(self) -> httpx.AsyncClient:
-        """Get or create async HTTP client.
+        """Get or create async HTTP client for the current event loop.
 
-        Handles event loop changes by recreating the client when called from
-        a different event loop than the one it was created in. This is necessary
-        because background build threads create their own event loops.
+        Each event loop gets its own HTTP client to avoid race conditions
+        when multiple threads (e.g., Dramatiq workers) access the registry
+        concurrently. Clients are stored per-loop and reused within that loop.
         """
         current_loop = asyncio.get_running_loop()
+        loop_id = id(current_loop)
 
-        # If client exists but was created in a different loop, close and recreate
-        if self._http_client is not None and self._http_client_loop != current_loop:
-            try:
-                await self._http_client.aclose()
-            except Exception:
-                pass  # Best effort cleanup
-            self._http_client = None
-            self._http_client_loop = None
+        # Fast path: check if client exists without lock
+        client = self._http_clients.get(loop_id)
+        if client is not None:
+            return client
 
-        if self._http_client is None:
-            self._http_client = httpx.AsyncClient(timeout=30.0)
-            self._http_client_loop = current_loop
-        return self._http_client
+        # Slow path: create new client with lock
+        with self._http_clients_lock:
+            # Double-check after acquiring lock
+            client = self._http_clients.get(loop_id)
+            if client is not None:
+                return client
+
+            # Create new client for this event loop
+            client = httpx.AsyncClient(timeout=30.0)
+            self._http_clients[loop_id] = client
+            logger.debug(f"Created new HTTP client for event loop {loop_id}")
+            return client
 
     def _get_docker_client(self) -> docker.DockerClient:
         """Get or create Docker client."""
@@ -59,11 +67,32 @@ class RegistryService:
         return self._docker_client
 
     async def close(self):
-        """Close HTTP client."""
-        if self._http_client:
-            await self._http_client.aclose()
-            self._http_client = None
-            self._http_client_loop = None
+        """Close HTTP client for the current event loop."""
+        current_loop = asyncio.get_running_loop()
+        loop_id = id(current_loop)
+
+        with self._http_clients_lock:
+            client = self._http_clients.pop(loop_id, None)
+
+        if client:
+            try:
+                await client.aclose()
+                logger.debug(f"Closed HTTP client for event loop {loop_id}")
+            except Exception:
+                pass  # Best effort cleanup
+
+    def close_all_sync(self):
+        """Synchronously close all HTTP clients (for shutdown)."""
+        with self._http_clients_lock:
+            clients = list(self._http_clients.values())
+            self._http_clients.clear()
+
+        for client in clients:
+            try:
+                # Use a new event loop for cleanup if needed
+                asyncio.get_event_loop().run_until_complete(client.aclose())
+            except Exception:
+                pass  # Best effort cleanup
 
     def _parse_image_tag(self, image_tag: str) -> tuple[str, str]:
         """Parse image:tag into (image, tag). Default tag is 'latest'."""
