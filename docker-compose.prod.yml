@@ -17,6 +17,7 @@
 
 services:
   db:
+    image: ghcr.io/jongodb/cyroid-db:${VERSION:-latest}
     environment:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     restart: always
@@ -24,10 +25,12 @@ services:
     # Note: localhost-only bindings (127.0.0.1:port) cause issues on Docker Desktop macOS
 
   redis:
+    image: ghcr.io/jongodb/cyroid-redis:${VERSION:-latest}
     restart: always
     # Inherit port bindings from base compose (internal services accessible via Docker network)
 
   minio:
+    image: ghcr.io/jongodb/cyroid-storage:${VERSION:-latest}
     environment:
       MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY}
     restart: always
@@ -107,7 +110,7 @@ services:
       - "traefik.http.routers.frontend-secure.tls.certresolver=${SSL_RESOLVER:-}"
 
   traefik:
-    image: ghcr.io/jongodb/cyroid-proxy:latest
+    image: ghcr.io/jongodb/cyroid-proxy:${VERSION:-latest}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./traefik-prod.yml:/etc/traefik/traefik.yml:ro

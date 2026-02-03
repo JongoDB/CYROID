@@ -2677,11 +2677,11 @@ MINIO_SECRET_KEY=$minio_password
 
 # Settings
 DEBUG=false
-VERSION=$VERSION
+VERSION=${VERSION#v}
 CYROID_DATA_DIR=$DATA_DIR
 
 # DinD Configuration
-DIND_IMAGE=ghcr.io/jongodb/cyroid-dind:latest
+DIND_IMAGE=ghcr.io/jongodb/cyroid-dind:${VERSION#v}
 DIND_STARTUP_TIMEOUT=60
 DIND_DOCKER_PORT=2375
 
