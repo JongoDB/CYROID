@@ -190,7 +190,7 @@ export default function StudentPortal() {
                     </span>
                     {range.status === 'running' && (
                       <Link
-                        to={`/ranges/${range.id}`}
+                        to={`/lab/${range.id}`}
                         className="inline-flex items-center px-3 py-1.5 text-sm font-medium text-white bg-green-600 rounded-md hover:bg-green-700 transition-colors"
                       >
                         <Monitor className="h-4 w-4 mr-1" />
@@ -199,7 +199,7 @@ export default function StudentPortal() {
                     )}
                     {range.status !== 'running' && (
                       <Link
-                        to={`/ranges/${range.id}`}
+                        to={`/lab/${range.id}`}
                         className="text-sm text-primary-600 hover:text-primary-700 font-medium"
                       >
                         View Details
