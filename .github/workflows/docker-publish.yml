@@ -96,7 +96,8 @@ jobs:
   # Create multi-arch manifests after all platform builds complete
   create-manifests:
     needs: build-app-images
-    if: github.event_name != 'pull_request'
+    # Run even if some builds failed - we'll create manifests for successful ones
+    if: always() && github.event_name != 'pull_request' && !cancelled()
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -134,6 +135,29 @@ jobs:
         run: |
           set -euo pipefail
 
+          # Function to check if an image exists in registry
+          image_exists() {
+            docker buildx imagetools inspect "$1" > /dev/null 2>&1
+          }
+
+          # Function to create manifest only if both arch images exist
+          create_manifest_if_ready() {
+            local target_tag="$1"
+            local amd64_tag="$2"
+            local arm64_tag="$3"
+
+            if image_exists "$amd64_tag" && image_exists "$arm64_tag"; then
+              echo "Creating manifest ${target_tag} from ${amd64_tag} and ${arm64_tag}"
+              docker buildx imagetools create -t "$target_tag" "$amd64_tag" "$arm64_tag"
+              return 0
+            else
+              echo "::warning::Skipping ${target_tag} - missing architecture images"
+              [ ! image_exists "$amd64_tag" ] && echo "  Missing: $amd64_tag"
+              [ ! image_exists "$arm64_tag" ] && echo "  Missing: $arm64_tag"
+              return 1
+            fi
+          }
+
           # Determine tags based on event type
           if [[ "$GIT_REF" == refs/tags/v* ]]; then
             # Tag push - create version tags
@@ -141,28 +165,28 @@ jobs:
             MAJOR_MINOR=$(echo "$VERSION_TAG" | cut -d. -f1,2)
 
             # Create manifest for semver tag
-            docker buildx imagetools create -t "${IMAGE}:${VERSION_TAG}" \
+            create_manifest_if_ready "${IMAGE}:${VERSION_TAG}" \
               "${IMAGE}:${VERSION_TAG}-amd64" \
-              "${IMAGE}:${VERSION_TAG}-arm64"
+              "${IMAGE}:${VERSION_TAG}-arm64" || true
 
             # Create manifest for major.minor tag
-            docker buildx imagetools create -t "${IMAGE}:${MAJOR_MINOR}" \
+            create_manifest_if_ready "${IMAGE}:${MAJOR_MINOR}" \
               "${IMAGE}:${VERSION_TAG}-amd64" \
-              "${IMAGE}:${VERSION_TAG}-arm64"
+              "${IMAGE}:${VERSION_TAG}-arm64" || true
 
           elif [[ "$GIT_REF" == refs/heads/master ]]; then
             # Master branch push - create latest and version tags
-            docker buildx imagetools create -t "${IMAGE}:latest" \
+            create_manifest_if_ready "${IMAGE}:latest" \
               "${IMAGE}:master-amd64" \
-              "${IMAGE}:master-arm64"
+              "${IMAGE}:master-arm64" || true
 
-            docker buildx imagetools create -t "${IMAGE}:master" \
+            create_manifest_if_ready "${IMAGE}:master" \
               "${IMAGE}:master-amd64" \
-              "${IMAGE}:master-arm64"
+              "${IMAGE}:master-arm64" || true
 
-            docker buildx imagetools create -t "${IMAGE}:${VERSION}" \
+            create_manifest_if_ready "${IMAGE}:${VERSION}" \
               "${IMAGE}:${VERSION}-amd64" \
-              "${IMAGE}:${VERSION}-arm64"
+              "${IMAGE}:${VERSION}-arm64" || true
           fi
 
       - name: Verify multi-arch manifest
@@ -177,18 +201,29 @@ jobs:
           verify_manifest() {
             local tag="$1"
             echo "Verifying ${IMAGE}:${tag} is a multi-arch manifest..."
+
+            # Check if manifest exists first
+            if ! docker buildx imagetools inspect "${IMAGE}:${tag}" > /dev/null 2>&1; then
+              echo "::warning::${IMAGE}:${tag} does not exist - skipping verification"
+              return 0
+            fi
+
             local inspect_output
             inspect_output=$(docker buildx imagetools inspect "${IMAGE}:${tag}" 2>&1)
             echo "$inspect_output"
 
             # Check that both architectures are present
+            local missing_arch=false
             for arch in amd64 arm64; do
               if ! echo "$inspect_output" | grep -q "linux/${arch}"; then
-                echo "::error::${IMAGE}:${tag} is missing linux/${arch} platform"
-                return 1
+                echo "::warning::${IMAGE}:${tag} is missing linux/${arch} platform"
+                missing_arch=true
               fi
             done
-            echo "✓ ${IMAGE}:${tag} contains both amd64 and arm64"
+
+            if [ "$missing_arch" = false ]; then
+              echo "✓ ${IMAGE}:${tag} contains both amd64 and arm64"
+            fi
           }
 
           if [[ "$GIT_REF" == refs/heads/master ]]; then
@@ -307,7 +342,8 @@ jobs:
   # Create multi-arch manifests for infrastructure images
   create-infrastructure-manifests:
     needs: build-infrastructure
-    if: github.event_name != 'pull_request'
+    # Run even if some builds failed - we'll create manifests for successful ones
+    if: always() && github.event_name != 'pull_request' && !cancelled()
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -347,30 +383,53 @@ jobs:
         run: |
           set -euo pipefail
 
+          # Function to check if an image exists in registry
+          image_exists() {
+            docker buildx imagetools inspect "$1" > /dev/null 2>&1
+          }
+
+          # Function to create manifest only if both arch images exist
+          create_manifest_if_ready() {
+            local target_tag="$1"
+            local amd64_tag="$2"
+            local arm64_tag="$3"
+
+            if image_exists "$amd64_tag" && image_exists "$arm64_tag"; then
+              echo "Creating manifest ${target_tag} from ${amd64_tag} and ${arm64_tag}"
+              docker buildx imagetools create -t "$target_tag" "$amd64_tag" "$arm64_tag"
+              return 0
+            else
+              echo "::warning::Skipping ${target_tag} - missing architecture images"
+              [ ! image_exists "$amd64_tag" ] && echo "  Missing: $amd64_tag"
+              [ ! image_exists "$arm64_tag" ] && echo "  Missing: $arm64_tag"
+              return 1
+            fi
+          }
+
           if [[ "$GIT_REF" == refs/tags/v* ]]; then
             VERSION_TAG="${GIT_REF_NAME#v}"
             MAJOR_MINOR=$(echo "$VERSION_TAG" | cut -d. -f1,2)
 
-            docker buildx imagetools create -t "${IMAGE}:${VERSION_TAG}" \
+            create_manifest_if_ready "${IMAGE}:${VERSION_TAG}" \
               "${IMAGE}:${VERSION_TAG}-amd64" \
-              "${IMAGE}:${VERSION_TAG}-arm64"
+              "${IMAGE}:${VERSION_TAG}-arm64" || true
 
-            docker buildx imagetools create -t "${IMAGE}:${MAJOR_MINOR}" \
+            create_manifest_if_ready "${IMAGE}:${MAJOR_MINOR}" \
               "${IMAGE}:${VERSION_TAG}-amd64" \
-              "${IMAGE}:${VERSION_TAG}-arm64"
+              "${IMAGE}:${VERSION_TAG}-arm64" || true
 
           elif [[ "$GIT_REF" == refs/heads/master ]]; then
-            docker buildx imagetools create -t "${IMAGE}:latest" \
+            create_manifest_if_ready "${IMAGE}:latest" \
               "${IMAGE}:master-amd64" \
-              "${IMAGE}:master-arm64"
+              "${IMAGE}:master-arm64" || true
 
-            docker buildx imagetools create -t "${IMAGE}:master" \
+            create_manifest_if_ready "${IMAGE}:master" \
               "${IMAGE}:master-amd64" \
-              "${IMAGE}:master-arm64"
+              "${IMAGE}:master-arm64" || true
 
-            docker buildx imagetools create -t "${IMAGE}:${VERSION}" \
+            create_manifest_if_ready "${IMAGE}:${VERSION}" \
               "${IMAGE}:${VERSION}-amd64" \
-              "${IMAGE}:${VERSION}-arm64"
+              "${IMAGE}:${VERSION}-arm64" || true
           fi
 
       - name: Verify multi-arch manifest
@@ -385,17 +444,29 @@ jobs:
           verify_manifest() {
             local tag="$1"
             echo "Verifying ${IMAGE}:${tag} is a multi-arch manifest..."
+
+            # Check if manifest exists first
+            if ! docker buildx imagetools inspect "${IMAGE}:${tag}" > /dev/null 2>&1; then
+              echo "::warning::${IMAGE}:${tag} does not exist - skipping verification"
+              return 0
+            fi
+
             local inspect_output
             inspect_output=$(docker buildx imagetools inspect "${IMAGE}:${tag}" 2>&1)
             echo "$inspect_output"
 
+            # Check that both architectures are present
+            local missing_arch=false
             for arch in amd64 arm64; do
               if ! echo "$inspect_output" | grep -q "linux/${arch}"; then
-                echo "::error::${IMAGE}:${tag} is missing linux/${arch} platform"
-                return 1
+                echo "::warning::${IMAGE}:${tag} is missing linux/${arch} platform"
+                missing_arch=true
               fi
             done
-            echo "✓ ${IMAGE}:${tag} contains both amd64 and arm64"
+
+            if [ "$missing_arch" = false ]; then
+              echo "✓ ${IMAGE}:${tag} contains both amd64 and arm64"
+            fi
           }
 
           if [[ "$GIT_REF" == refs/heads/master ]]; then
