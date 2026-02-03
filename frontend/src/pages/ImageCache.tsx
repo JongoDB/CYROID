@@ -236,12 +236,6 @@ export default function ImageCache() {
     })
   }
 
-  // Select all pushable images (for future use)
-  const _selectAllPushable = (imageTags: string[]) => {
-    const pushable = imageTags.filter(tag => registryStatus[tag]?.needs_push && !registryPushStatus[tag])
-    setSelectedForPush(new Set(pushable))
-  }
-
   // Clear selection
   const clearPushSelection = () => {
     setSelectedForPush(new Set())
