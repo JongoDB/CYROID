@@ -116,13 +116,13 @@ export default function RegistryTab() {
     setPushing(true)
     try {
       const res = await registryApi.pushImage(selectedImage)
-      if (res.data.success) {
-        toast.success(res.data.message || `Successfully pushed ${selectedImage} to registry`)
+      if (res.data.operation_id) {
+        toast.success(res.data.message || `Push started for ${selectedImage}`)
         setSelectedImage('')
         // Refresh the registry images list
         await fetchAll(false)
       } else {
-        toast.error(res.data.message || 'Failed to push image')
+        toast.error(res.data.message || 'Failed to start push')
       }
     } catch (err: any) {
       toast.error(err.response?.data?.detail || 'Failed to push image to registry')
@@ -199,7 +199,7 @@ export default function RegistryTab() {
 
         try {
           const res = await registryApi.pushImage(imageTag)
-          if (res.data.success) {
+          if (res.data.operation_id) {
             successCount++
           } else {
             failCount++
