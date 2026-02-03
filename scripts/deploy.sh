@@ -3855,8 +3855,8 @@ seed_students() {
     tui_info "Authenticating..."
     local login_response login_code token
     login_response=$(curl -sk -w "\n%{http_code}" -X POST "$login_url" \
-        -H "Content-Type: application/x-www-form-urlencoded" \
-        -d "username=${admin_user}&password=${admin_pass}" 2>/dev/null)
+        -H "Content-Type: application/json" \
+        -d "{\"username\":\"${admin_user}\",\"password\":\"${admin_pass}\"}" 2>/dev/null)
     login_code=$(echo "$login_response" | tail -n1)
     login_response=$(echo "$login_response" | sed '$d')
 
