@@ -2948,14 +2948,14 @@ pull_images() {
 
             # Pull individual image with explicit platform to avoid multi-arch issues
             if docker pull --platform "$DOCKER_PLATFORM" "$img" >/dev/null 2>&1; then
-                [ "$TUI_FULLSCREEN" != true ] && printf "    \033[32m✓\033[0m Pulled\n"
+                [ "$TUI_FULLSCREEN" != true ] && printf "    \033[32m✓\033[0m Pulled\n" || true
             else
-                [ "$TUI_FULLSCREEN" != true ] && printf "    \033[33m⚠\033[0m May already exist locally\n"
+                [ "$TUI_FULLSCREEN" != true ] && printf "    \033[33m⚠\033[0m May already exist locally\n" || true
             fi
         done < "$temp_images"
 
         rm -f "$temp_images"
-        [ "$TUI_FULLSCREEN" != true ] && printf "\n"
+        [ "$TUI_FULLSCREEN" != true ] && printf "\n" || true
     else
         # Fallback to compose pull if we can't parse images
         $compose_cmd -f docker-compose.yml -f docker-compose.prod.yml pull
