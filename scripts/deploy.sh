@@ -832,12 +832,13 @@ tui_init_fullscreen() {
     trap 'exit_code=$?; tui_cleanup_fullscreen; if [ $exit_code -ne 0 ]; then echo -e "\033[31m[ERROR]\033[0m Script exited with code $exit_code"; fi' EXIT
     trap 'tui_cleanup_fullscreen' INT TERM
 
-    # Hide cursor during redraws
-    tput civis 2>/dev/null || true
+    # Hide cursor during redraws (ANSI: ESC[?25l)
+    printf "\033[?25l" 2>/dev/null || true
 
     # Set up scroll region to protect the bottom status bar line
+    # ANSI: ESC[top;bottomr - sets scroll region from line 1 to TERM_LINES-1
     # This prevents normal output from overwriting the status bar
-    tput csr 0 $((TERM_LINES - 2)) 2>/dev/null || true
+    printf "\033[1;%dr" "$((TERM_LINES - 1))" 2>/dev/null || true
     TUI_SCROLL_REGION_SET=true
     TUI_LAST_HEIGHT=$TERM_LINES
 
@@ -846,20 +847,22 @@ tui_init_fullscreen() {
     # Initial draw
     tui_draw_screen
 
-    # Position cursor at the end of the scroll region for subsequent output
-    tput cup $((TERM_LINES - 2)) 0 2>/dev/null || true
+    # Position cursor at line 3 (after header) for subsequent output
+    # ANSI: ESC[row;colH
+    printf "\033[3;1H" 2>/dev/null || true
 }
 
 tui_cleanup_fullscreen() {
     if [ "$TUI_FULLSCREEN" = true ]; then
         # Reset scroll region to full terminal before cleanup
+        # ANSI: ESC[r resets scroll region to full screen
         if [ "$TUI_SCROLL_REGION_SET" = true ]; then
-            tput csr 0 $((TERM_LINES - 1)) 2>/dev/null || true
+            printf "\033[r" 2>/dev/null || true
             TUI_SCROLL_REGION_SET=false
         fi
 
-        # Show cursor
-        tput cnorm 2>/dev/null || true
+        # Show cursor (ANSI: ESC[?25h)
+        printf "\033[?25h" 2>/dev/null || true
 
         # Restore terminal settings
         if [ -n "$ORIGINAL_STTY" ]; then
@@ -867,8 +870,8 @@ tui_cleanup_fullscreen() {
         fi
 
         # Move cursor to bottom and reset
-        tput cup "$TERM_LINES" 0 2>/dev/null || true
-        echo ""
+        # ANSI: ESC[row;colH
+        printf "\033[%d;1H\n" "$TERM_LINES" 2>/dev/null || true
 
         TUI_FULLSCREEN=false
     fi
@@ -883,10 +886,10 @@ tui_update_dimensions() {
 # Call this before gum input/choose/etc that take over the terminal
 tui_suspend_scroll_region() {
     if [ "$TUI_SCROLL_REGION_SET" = true ]; then
-        # Reset scroll region to full terminal
-        tput csr 0 $((TERM_LINES - 1)) 2>/dev/null || true
-        # Show cursor for interactive input
-        tput cnorm 2>/dev/null || true
+        # Reset scroll region to full terminal (ANSI: ESC[r)
+        printf "\033[r" 2>/dev/null || true
+        # Show cursor for interactive input (ANSI: ESC[?25h)
+        printf "\033[?25h" 2>/dev/null || true
     fi
 }
 
@@ -896,10 +899,10 @@ tui_restore_scroll_region() {
         # Update dimensions in case terminal was resized during input
         tui_update_dimensions
         TUI_LAST_HEIGHT=$TERM_LINES
-        # Restore scroll region
-        tput csr 0 $((TERM_LINES - 2)) 2>/dev/null || true
-        # Hide cursor again
-        tput civis 2>/dev/null || true
+        # Restore scroll region (ANSI: ESC[top;bottomr)
+        printf "\033[1;%dr" "$((TERM_LINES - 1))" 2>/dev/null || true
+        # Hide cursor again (ANSI: ESC[?25l)
+        printf "\033[?25l" 2>/dev/null || true
         # Redraw status bar
         tui_draw_status_bar
     fi
@@ -908,9 +911,23 @@ tui_restore_scroll_region() {
 tui_set_status() {
     local message="$1"
     local type="${2:-info}"  # info, success, warn, error, progress
+    local sub_progress="${3:-}"  # Optional: sub-progress for detailed status (e.g., "9/9")
 
     STATUS_MESSAGE="$message"
     STATUS_TYPE="$type"
+
+    # If sub_progress is provided, calculate and update DEPLOYMENT_PROGRESS
+    if [ -n "$sub_progress" ] && [[ "$sub_progress" =~ ^([0-9]+)/([0-9]+)$ ]]; then
+        local current="${BASH_REMATCH[1]}"
+        local total="${BASH_REMATCH[2]}"
+        if [ "$total" -gt 0 ]; then
+            # Calculate sub-progress within current deployment step
+            # Each major step is ~14% (100/7), interpolate within that
+            local base_progress=$((DEPLOYMENT_PROGRESS / 14 * 14))  # Round down to step
+            local step_progress=$((current * 14 / total))
+            DEPLOYMENT_PROGRESS=$((base_progress + step_progress))
+        fi
+    fi
 
     # Immediately update status bar if in fullscreen mode
     if [ "$TUI_FULLSCREEN" = true ]; then
@@ -950,20 +967,15 @@ tui_draw_status_bar() {
     # Handle terminal resize - update scroll region if height changed
     if [ "$TUI_SCROLL_REGION_SET" = true ] && [ "$TERM_LINES" != "$TUI_LAST_HEIGHT" ]; then
         TUI_LAST_HEIGHT=$TERM_LINES
-        tput csr 0 $((TERM_LINES - 2)) 2>/dev/null || true
+        # Use ANSI escape for scroll region: ESC[top;bottomr
+        printf "\033[1;%dr" "$((TERM_LINES - 1))" 2>/dev/null || true
     fi
 
-    # Save cursor position
-    tput sc 2>/dev/null || true
+    # Save cursor position using ANSI escape (more reliable than tput)
+    printf "\0337" 2>/dev/null || true
 
-    # Temporarily expand scroll region to draw status bar at the very bottom
-    if [ "$TUI_SCROLL_REGION_SET" = true ]; then
-        tput csr 0 $((TERM_LINES - 1)) 2>/dev/null || true
-    fi
-
-    # Move to bottom line (leave 1 line for status bar)
-    local status_line=$((TERM_LINES - 1))
-    tput cup "$status_line" 0 2>/dev/null || true
+    # Move to bottom line using ANSI escape: ESC[row;colH
+    printf "\033[%d;1H" "$TERM_LINES" 2>/dev/null || true
 
     # Build status bar content
     local timestamp=$(date '+%H:%M:%S')
@@ -990,8 +1002,14 @@ tui_draw_status_bar() {
         progress_bar+="] ${DEPLOYMENT_PROGRESS}%"
     fi
 
-    # Build the full status line
-    local left_content="$status_icon $STATUS_MESSAGE$progress_bar"
+    # Build the full status line - truncate message if too long
+    local max_msg_len=$((TERM_COLS - 40))  # Leave room for progress bar and timestamp
+    local display_msg="$STATUS_MESSAGE"
+    if [ ${#display_msg} -gt $max_msg_len ] && [ $max_msg_len -gt 3 ]; then
+        display_msg="${display_msg:0:$((max_msg_len - 3))}..."
+    fi
+
+    local left_content="$status_icon $display_msg$progress_bar"
     local right_content="$timestamp"
 
     # Calculate padding
@@ -1000,27 +1018,22 @@ tui_draw_status_bar() {
     local padding=$((TERM_COLS - left_len - right_len - 4))
     if [ $padding -lt 0 ]; then padding=0; fi
 
-    # Clear the line and draw status bar
-    printf "\033[48;5;236m\033[K"  # Dark gray background, clear line
+    # Clear the line and draw status bar with dark background
+    printf "\033[48;5;236m\033[2K"  # Dark gray background, clear entire line
 
     # Draw with colors
-    printf "\033[38;5;${status_color}m %s\033[38;5;245m" "$status_icon"
-    printf " %s" "$STATUS_MESSAGE"
+    printf "\033[38;5;${status_color}m %s\033[38;5;255m" "$status_icon"
+    printf " %s" "$display_msg"
     if [ -n "$progress_bar" ]; then
-        printf "\033[38;5;39m%s\033[0m" "$progress_bar"
+        printf "\033[38;5;39m%s" "$progress_bar"
     fi
 
     # Right-align timestamp
     printf "%*s" "$padding" ""
     printf "\033[38;5;245m%s \033[0m" "$right_content"
 
-    # Restore scroll region to protect status bar again
-    if [ "$TUI_SCROLL_REGION_SET" = true ]; then
-        tput csr 0 $((TERM_LINES - 2)) 2>/dev/null || true
-    fi
-
-    # Restore cursor position
-    tput rc 2>/dev/null || true
+    # Restore cursor position using ANSI escape
+    printf "\0338" 2>/dev/null || true
 }
 
 tui_draw_header_bar() {
@@ -1028,8 +1041,8 @@ tui_draw_header_bar() {
         return
     fi
 
-    # Move to top
-    tput cup 0 0 2>/dev/null || true
+    # Move to top (ANSI: ESC[1;1H)
+    printf "\033[1;1H" 2>/dev/null || true
 
     # Build header bar
     local title="CYROID"
@@ -1043,7 +1056,7 @@ tui_draw_header_bar() {
     if [ $padding -lt 0 ]; then padding=0; fi
 
     # Draw header bar with cyan background
-    printf "\033[48;5;24m\033[38;5;255m\033[K"  # Dark blue background, white text
+    printf "\033[48;5;24m\033[38;5;255m\033[2K"  # Dark blue background, white text, clear line
     printf " %s" "$title"
     printf "%*s" "$padding" ""
     printf "%s \033[0m\n" "$right_content"
@@ -1054,8 +1067,8 @@ tui_draw_screen() {
         return
     fi
 
-    # Clear screen
-    clear
+    # Clear screen (ANSI: ESC[2J ESC[H)
+    printf "\033[2J\033[H" 2>/dev/null || true
 
     # Draw header bar
     tui_draw_header_bar
@@ -1064,13 +1077,14 @@ tui_draw_screen() {
     tui_draw_status_bar
 
     # Position cursor for main content (line 3, after header)
-    tput cup 2 0 2>/dev/null || true
+    # ANSI: ESC[row;colH
+    printf "\033[3;1H" 2>/dev/null || true
 }
 
 tui_main_area() {
     # Position cursor in main content area
     if [ "$TUI_FULLSCREEN" = true ]; then
-        tput cup 2 0 2>/dev/null || true
+        printf "\033[3;1H" 2>/dev/null || true
     fi
 }
 
@@ -2031,6 +2045,626 @@ delete_backup() {
     fi
 }
 
+# =============================================================================
+# Factory Reset - Complete system reset to "never installed" state
+# =============================================================================
+
+factory_reset() {
+    local compose_cmd="docker compose"
+    if ! docker compose version &> /dev/null 2>&1; then
+        compose_cmd="docker-compose"
+    fi
+    if [ -f "$ENV_FILE" ]; then
+        compose_cmd="$compose_cmd --env-file $ENV_FILE"
+    fi
+
+    # Get DATA_DIR (use current or detect default)
+    local data_dir="${DATA_DIR:-$(get_default_data_dir)}"
+    local backup_dir="${BACKUP_DIR:-$HOME/.cyroid-backups}"
+
+    # =========================================================================
+    # Phase 1: Initial Warning
+    # =========================================================================
+    echo ""
+    if [ "$USE_TUI" = true ] && command -v gum &> /dev/null; then
+        gum style --foreground 196 --border double --border-foreground 196 \
+            --align center --width 60 --margin "1 2" --padding "1 2" \
+            "⚠️  FACTORY RESET  ⚠️" "" "Return CYROID to 'never installed' state"
+        echo ""
+        tui_warn "This will permanently remove CYROID and all its data."
+        echo ""
+
+        if ! gum confirm --affirmative="I understand, continue" --negative="Cancel" --default=false \
+            "This is a DESTRUCTIVE operation. Do you want to continue?"; then
+            tui_info "Factory reset cancelled"
+            return
+        fi
+    else
+        echo "========================================"
+        echo "         ⚠️  FACTORY RESET  ⚠️"
+        echo "========================================"
+        echo ""
+        echo "This will permanently remove CYROID and all its data."
+        echo ""
+        read -p "This is DESTRUCTIVE. Continue? [y/N]: " confirm
+        if [[ ! "$confirm" =~ ^[Yy] ]]; then
+            echo "Factory reset cancelled"
+            return
+        fi
+    fi
+
+    # =========================================================================
+    # Phase 2: Resource Discovery
+    # =========================================================================
+    echo ""
+    tui_title "Discovering CYROID Resources..."
+    echo ""
+
+    # Docker Volumes
+    local compose_volumes=$($compose_cmd -f docker-compose.yml -f docker-compose.prod.yml config --volumes 2>/dev/null) || true
+    local dind_volumes=$(docker volume ls -q 2>/dev/null | grep "cyroid-range-.*-docker") || true
+    local dind_volume_count=0
+    [ -n "$dind_volumes" ] && dind_volume_count=$(echo "$dind_volumes" | wc -l | tr -d ' ')
+
+    # Get volume sizes
+    local postgres_size="unknown"
+    local minio_size="unknown"
+    if docker volume inspect cyroid_postgres_data &>/dev/null 2>&1 || docker volume inspect postgres_data &>/dev/null 2>&1; then
+        postgres_size="exists"
+    fi
+    if docker volume inspect cyroid_minio_data &>/dev/null 2>&1 || docker volume inspect minio_data &>/dev/null 2>&1; then
+        minio_size="exists"
+    fi
+
+    # Data directories with sizes
+    local iso_size="0"
+    local template_size="0"
+    local vm_size="0"
+    local registry_size="0"
+    local catalogs_size="0"
+    local scenarios_size="0"
+    local images_size="0"
+    local shared_size="0"
+
+    [ -d "$data_dir/iso-cache" ] && iso_size=$(du -sh "$data_dir/iso-cache" 2>/dev/null | cut -f1) || iso_size="0"
+    [ -d "$data_dir/template-storage" ] && template_size=$(du -sh "$data_dir/template-storage" 2>/dev/null | cut -f1) || template_size="0"
+    [ -d "$data_dir/vm-storage" ] && vm_size=$(du -sh "$data_dir/vm-storage" 2>/dev/null | cut -f1) || vm_size="0"
+    [ -d "$data_dir/registry" ] && registry_size=$(du -sh "$data_dir/registry" 2>/dev/null | cut -f1) || registry_size="0"
+    [ -d "$data_dir/catalogs" ] && catalogs_size=$(du -sh "$data_dir/catalogs" 2>/dev/null | cut -f1) || catalogs_size="0"
+    [ -d "$data_dir/scenarios" ] && scenarios_size=$(du -sh "$data_dir/scenarios" 2>/dev/null | cut -f1) || scenarios_size="0"
+    [ -d "$data_dir/images" ] && images_size=$(du -sh "$data_dir/images" 2>/dev/null | cut -f1) || images_size="0"
+    [ -d "$data_dir/shared" ] && shared_size=$(du -sh "$data_dir/shared" 2>/dev/null | cut -f1) || shared_size="0"
+
+    # Docker Images
+    local cyroid_images=$(docker images --format "{{.Repository}}:{{.Tag}}" 2>/dev/null | grep "ghcr.io/jongodb/cyroid" | grep -v "<none>") || true
+    local cyroid_image_count=0
+    [ -n "$cyroid_images" ] && cyroid_image_count=$(echo "$cyroid_images" | wc -l | tr -d ' ')
+
+    local range_images=$(docker images --format "{{.Repository}}:{{.Tag}}" 2>/dev/null | grep -E "dockur/|kasmweb|vyos|qemux|localhost:5000" | grep -v "<none>") || true
+    local range_image_count=0
+    [ -n "$range_images" ] && range_image_count=$(echo "$range_images" | wc -l | tr -d ' ')
+
+    # Docker Networks
+    local cyroid_networks=$(docker network ls --filter "name=cyroid-" --format "{{.Name}}" 2>/dev/null) || true
+    local range_networks=$(docker network ls --filter "name=range-" --format "{{.Name}}" 2>/dev/null) || true
+
+    # Range containers
+    local range_containers=$(docker ps -a --filter "label=cyroid.type=dind" --format "{{.Names}}" 2>/dev/null) || true
+    local dind_containers=$(docker ps -a --filter "name=dind-" --format "{{.Names}}" 2>/dev/null) || true
+    local all_range_containers=""
+    [ -n "$range_containers" ] && all_range_containers="$range_containers"
+    if [ -n "$dind_containers" ]; then
+        [ -n "$all_range_containers" ] && all_range_containers="$all_range_containers"$'\n'"$dind_containers" || all_range_containers="$dind_containers"
+    fi
+    all_range_containers=$(echo "$all_range_containers" | sort -u | grep -v '^$') || true
+    local range_count=0
+    [ -n "$all_range_containers" ] && range_count=$(echo "$all_range_containers" | wc -l | tr -d ' ')
+
+    # Config files
+    local has_env=false
+    local env_backup_count=0
+    [ -f "$ENV_FILE" ] && has_env=true
+    env_backup_count=$(ls -1 "$PROJECT_ROOT/.env.prod.backup."* 2>/dev/null | wc -l | tr -d ' ') || env_backup_count=0
+
+    # Backups
+    local backup_size="0"
+    local backup_count=0
+    if [ -d "$backup_dir" ]; then
+        backup_size=$(du -sh "$backup_dir" 2>/dev/null | cut -f1) || backup_size="0"
+        backup_count=$(ls -1 "$backup_dir" 2>/dev/null | wc -l | tr -d ' ') || backup_count=0
+    fi
+
+    # =========================================================================
+    # Phase 3: Display discovered resources
+    # =========================================================================
+    echo "  Found resources:"
+    echo ""
+    echo "  Docker Volumes:"
+    [ -n "$compose_volumes" ] && echo "$compose_volumes" | while read -r v; do echo "    • $v"; done
+    [ "$dind_volume_count" -gt 0 ] && echo "    • $dind_volume_count DinD volume(s)"
+    echo ""
+
+    if [ -d "$data_dir" ]; then
+        echo "  Data Directory: $data_dir"
+        echo "    • iso-cache: $iso_size"
+        echo "    • template-storage: $template_size"
+        echo "    • vm-storage: $vm_size"
+        echo "    • registry: $registry_size"
+        echo "    • catalogs: $catalogs_size"
+        echo "    • scenarios: $scenarios_size"
+        echo "    • images: $images_size"
+        echo "    • shared: $shared_size"
+        echo ""
+    fi
+
+    echo "  Docker Images:"
+    echo "    • CYROID images: $cyroid_image_count"
+    echo "    • Range images (qemu, kasmweb, vyos, etc): $range_image_count"
+    echo ""
+
+    if [ "$range_count" -gt 0 ]; then
+        echo "  Running Ranges: $range_count container(s)"
+        echo ""
+    fi
+
+    if [ "$backup_count" -gt 0 ]; then
+        echo "  Backups: $backup_count backup(s) ($backup_size)"
+        echo ""
+    fi
+
+    # =========================================================================
+    # Phase 4: Selection (what to delete)
+    # =========================================================================
+    echo ""
+    tui_title "Select what to DELETE"
+    echo ""
+
+    # Initialize deletion flags with defaults
+    local delete_db_volume=true
+    local delete_minio_volume=true
+    local delete_dind_volumes=true
+    local delete_iso_cache=false        # PRESERVE by default (large, slow to re-download)
+    local delete_templates=true
+    local delete_vm_storage=true
+    local delete_registry=true
+    local delete_catalogs=true
+    local delete_scenarios=true
+    local delete_images_dir=true
+    local delete_shared=true
+    local delete_cyroid_images=true
+    local delete_range_images=true
+    local delete_ranges=true
+    local delete_networks=true
+    local delete_config=true
+    local delete_backups=false          # PRESERVE by default
+
+    if [ "$USE_TUI" = true ] && command -v gum &> /dev/null; then
+        # Use gum for interactive selection
+        echo "  Use ${CYAN}↑/↓${NC} to navigate, ${CYAN}space${NC} to toggle, ${CYAN}enter${NC} to confirm"
+        echo "  Items marked with ${GREEN}[✓]${NC} will be ${RED}DELETED${NC}"
+        echo ""
+
+        # Build options list with current selection state
+        local options=""
+        options+="[VOLUME] postgres_data - Database"$'\n'
+        options+="[VOLUME] minio_data - Object storage"$'\n'
+        [ "$dind_volume_count" -gt 0 ] && options+="[VOLUME] DinD volumes ($dind_volume_count) - Range Docker data"$'\n'
+        [ -d "$data_dir/iso-cache" ] && options+="[DATA] iso-cache ($iso_size) - Downloaded ISOs (SLOW TO RE-DOWNLOAD)"$'\n'
+        [ -d "$data_dir/template-storage" ] && options+="[DATA] template-storage ($template_size) - VM templates"$'\n'
+        [ -d "$data_dir/vm-storage" ] && options+="[DATA] vm-storage ($vm_size) - Running VMs"$'\n'
+        [ -d "$data_dir/registry" ] && options+="[DATA] registry ($registry_size) - Docker registry"$'\n'
+        [ -d "$data_dir/catalogs" ] && options+="[DATA] catalogs ($catalogs_size)"$'\n'
+        [ -d "$data_dir/scenarios" ] && options+="[DATA] scenarios ($scenarios_size)"$'\n'
+        [ -d "$data_dir/images" ] && options+="[DATA] images ($images_size) - Custom Dockerfiles"$'\n'
+        [ -d "$data_dir/shared" ] && options+="[DATA] shared ($shared_size)"$'\n'
+        [ "$cyroid_image_count" -gt 0 ] && options+="[IMAGES] CYROID images ($cyroid_image_count)"$'\n'
+        [ "$range_image_count" -gt 0 ] && options+="[IMAGES] Range images ($range_image_count) - qemu, kasmweb, vyos, etc"$'\n'
+        [ "$range_count" -gt 0 ] && options+="[RANGES] Active range containers ($range_count)"$'\n'
+        options+="[NETWORKS] Docker networks (cyroid-mgmt, cyroid-ranges)"$'\n'
+        options+="[CONFIG] .env.prod and config files"$'\n'
+        [ "$backup_count" -gt 0 ] && options+="[BACKUP] Image backups ($backup_count, $backup_size) - PRESERVED BY DEFAULT"
+
+        # Remove trailing newline
+        options=$(echo "$options" | sed '/^$/d')
+
+        # Pre-select items (everything except iso-cache and backups)
+        local preselected=""
+        preselected+="[VOLUME] postgres_data"$'\n'
+        preselected+="[VOLUME] minio_data"$'\n'
+        [ "$dind_volume_count" -gt 0 ] && preselected+="[VOLUME] DinD volumes"$'\n'
+        [ -d "$data_dir/template-storage" ] && preselected+="[DATA] template-storage"$'\n'
+        [ -d "$data_dir/vm-storage" ] && preselected+="[DATA] vm-storage"$'\n'
+        [ -d "$data_dir/registry" ] && preselected+="[DATA] registry"$'\n'
+        [ -d "$data_dir/catalogs" ] && preselected+="[DATA] catalogs"$'\n'
+        [ -d "$data_dir/scenarios" ] && preselected+="[DATA] scenarios"$'\n'
+        [ -d "$data_dir/images" ] && preselected+="[DATA] images"$'\n'
+        [ -d "$data_dir/shared" ] && preselected+="[DATA] shared"$'\n'
+        [ "$cyroid_image_count" -gt 0 ] && preselected+="[IMAGES] CYROID images"$'\n'
+        [ "$range_image_count" -gt 0 ] && preselected+="[IMAGES] Range images"$'\n'
+        [ "$range_count" -gt 0 ] && preselected+="[RANGES] Active range"$'\n'
+        preselected+="[NETWORKS] Docker networks"$'\n'
+        preselected+="[CONFIG] .env.prod"
+
+        # Use gum choose with --no-limit for multi-select
+        local selected
+        selected=$(echo "$options" | gum choose --no-limit \
+            --header "Select items to DELETE (space=toggle, enter=confirm):" \
+            --selected="$preselected") || true
+
+        if [ -z "$selected" ]; then
+            tui_info "Nothing selected for deletion. Factory reset cancelled."
+            return
+        fi
+
+        # Parse selections
+        delete_db_volume=false
+        delete_minio_volume=false
+        delete_dind_volumes=false
+        delete_iso_cache=false
+        delete_templates=false
+        delete_vm_storage=false
+        delete_registry=false
+        delete_catalogs=false
+        delete_scenarios=false
+        delete_images_dir=false
+        delete_shared=false
+        delete_cyroid_images=false
+        delete_range_images=false
+        delete_ranges=false
+        delete_networks=false
+        delete_config=false
+        delete_backups=false
+
+        echo "$selected" | while IFS= read -r line; do
+            case "$line" in
+                *"postgres_data"*) echo "delete_db_volume" ;;
+                *"minio_data"*) echo "delete_minio_volume" ;;
+                *"DinD volumes"*) echo "delete_dind_volumes" ;;
+                *"iso-cache"*) echo "delete_iso_cache" ;;
+                *"template-storage"*) echo "delete_templates" ;;
+                *"vm-storage"*) echo "delete_vm_storage" ;;
+                *"registry"*) echo "delete_registry" ;;
+                *"catalogs"*) echo "delete_catalogs" ;;
+                *"scenarios"*) echo "delete_scenarios" ;;
+                *"[DATA] images"*) echo "delete_images_dir" ;;
+                *"shared"*) echo "delete_shared" ;;
+                *"CYROID images"*) echo "delete_cyroid_images" ;;
+                *"Range images"*) echo "delete_range_images" ;;
+                *"Active range"*) echo "delete_ranges" ;;
+                *"Docker networks"*) echo "delete_networks" ;;
+                *".env.prod"*) echo "delete_config" ;;
+                *"Image backups"*) echo "delete_backups" ;;
+            esac
+        done > /tmp/factory_reset_selections.tmp
+
+        # Read back the selections
+        if [ -f /tmp/factory_reset_selections.tmp ]; then
+            while IFS= read -r flag; do
+                eval "$flag=true"
+            done < /tmp/factory_reset_selections.tmp
+            rm -f /tmp/factory_reset_selections.tmp
+        fi
+
+    else
+        # Non-TUI: ask about each category
+        echo "Select what to delete (default selections shown):"
+        echo ""
+
+        read -p "Delete database volume (postgres_data)? [Y/n]: " r
+        [[ "$r" =~ ^[Nn] ]] && delete_db_volume=false
+
+        read -p "Delete object storage volume (minio_data)? [Y/n]: " r
+        [[ "$r" =~ ^[Nn] ]] && delete_minio_volume=false
+
+        if [ "$dind_volume_count" -gt 0 ]; then
+            read -p "Delete DinD volumes ($dind_volume_count)? [Y/n]: " r
+            [[ "$r" =~ ^[Nn] ]] && delete_dind_volumes=false
+        fi
+
+        if [ -d "$data_dir/iso-cache" ] && [ "$iso_size" != "0" ]; then
+            read -p "Delete ISO cache ($iso_size)? [y/N]: " r
+            [[ "$r" =~ ^[Yy] ]] && delete_iso_cache=true
+        fi
+
+        read -p "Delete template storage ($template_size)? [Y/n]: " r
+        [[ "$r" =~ ^[Nn] ]] && delete_templates=false
+
+        read -p "Delete VM storage ($vm_size)? [Y/n]: " r
+        [[ "$r" =~ ^[Nn] ]] && delete_vm_storage=false
+
+        read -p "Delete Docker registry ($registry_size)? [Y/n]: " r
+        [[ "$r" =~ ^[Nn] ]] && delete_registry=false
+
+        if [ "$cyroid_image_count" -gt 0 ]; then
+            read -p "Delete CYROID Docker images ($cyroid_image_count)? [Y/n]: " r
+            [[ "$r" =~ ^[Nn] ]] && delete_cyroid_images=false
+        fi
+
+        if [ "$range_image_count" -gt 0 ]; then
+            read -p "Delete Range Docker images ($range_image_count)? [Y/n]: " r
+            [[ "$r" =~ ^[Nn] ]] && delete_range_images=false
+        fi
+
+        if [ "$range_count" -gt 0 ]; then
+            read -p "Delete running ranges ($range_count)? [Y/n]: " r
+            [[ "$r" =~ ^[Nn] ]] && delete_ranges=false
+        fi
+
+        read -p "Delete Docker networks? [Y/n]: " r
+        [[ "$r" =~ ^[Nn] ]] && delete_networks=false
+
+        read -p "Delete config files (.env.prod, traefik)? [Y/n]: " r
+        [[ "$r" =~ ^[Nn] ]] && delete_config=false
+
+        if [ "$backup_count" -gt 0 ]; then
+            read -p "Delete image backups ($backup_count, $backup_size)? [y/N]: " r
+            [[ "$r" =~ ^[Yy] ]] && delete_backups=true
+        fi
+    fi
+
+    # =========================================================================
+    # Phase 5: Summary and Final Confirmation
+    # =========================================================================
+    echo ""
+    tui_title "Factory Reset Summary"
+    echo ""
+
+    echo "  ${RED}WILL BE DELETED:${NC}"
+    [ "$delete_db_volume" = true ] && echo "    • Database volume (postgres_data)"
+    [ "$delete_minio_volume" = true ] && echo "    • Object storage volume (minio_data)"
+    [ "$delete_dind_volumes" = true ] && [ "$dind_volume_count" -gt 0 ] && echo "    • DinD volumes ($dind_volume_count)"
+    [ "$delete_iso_cache" = true ] && echo "    • ISO cache ($iso_size)"
+    [ "$delete_templates" = true ] && echo "    • Template storage ($template_size)"
+    [ "$delete_vm_storage" = true ] && echo "    • VM storage ($vm_size)"
+    [ "$delete_registry" = true ] && echo "    • Docker registry ($registry_size)"
+    [ "$delete_catalogs" = true ] && echo "    • Catalogs"
+    [ "$delete_scenarios" = true ] && echo "    • Scenarios"
+    [ "$delete_images_dir" = true ] && echo "    • Custom images/Dockerfiles"
+    [ "$delete_shared" = true ] && echo "    • Shared files"
+    [ "$delete_cyroid_images" = true ] && echo "    • CYROID Docker images ($cyroid_image_count)"
+    [ "$delete_range_images" = true ] && echo "    • Range Docker images ($range_image_count)"
+    [ "$delete_ranges" = true ] && [ "$range_count" -gt 0 ] && echo "    • Running ranges ($range_count)"
+    [ "$delete_networks" = true ] && echo "    • Docker networks"
+    [ "$delete_config" = true ] && echo "    • Configuration files"
+    [ "$delete_backups" = true ] && echo "    • Image backups ($backup_size)"
+    echo ""
+
+    echo "  ${GREEN}WILL BE PRESERVED:${NC}"
+    [ "$delete_db_volume" = false ] && echo "    • Database volume (postgres_data)"
+    [ "$delete_minio_volume" = false ] && echo "    • Object storage volume (minio_data)"
+    [ "$delete_dind_volumes" = false ] && [ "$dind_volume_count" -gt 0 ] && echo "    • DinD volumes"
+    [ "$delete_iso_cache" = false ] && [ -d "$data_dir/iso-cache" ] && echo "    • ISO cache ($iso_size)"
+    [ "$delete_templates" = false ] && echo "    • Template storage"
+    [ "$delete_vm_storage" = false ] && echo "    • VM storage"
+    [ "$delete_registry" = false ] && echo "    • Docker registry"
+    [ "$delete_cyroid_images" = false ] && echo "    • CYROID Docker images"
+    [ "$delete_range_images" = false ] && echo "    • Range Docker images"
+    [ "$delete_ranges" = false ] && [ "$range_count" -gt 0 ] && echo "    • Running ranges"
+    [ "$delete_networks" = false ] && echo "    • Docker networks"
+    [ "$delete_config" = false ] && echo "    • Configuration files"
+    [ "$delete_backups" = false ] && [ "$backup_count" -gt 0 ] && echo "    • Image backups ($backup_size)"
+    echo ""
+
+    # Final confirmation
+    if [ "$USE_TUI" = true ] && command -v gum &> /dev/null; then
+        tui_warn "This action CANNOT be undone!"
+        echo ""
+
+        if ! gum confirm --affirmative="Yes, delete selected items" --negative="Cancel" --default=false \
+            "Proceed with factory reset?"; then
+            tui_info "Factory reset cancelled"
+            return
+        fi
+
+        # Type to confirm
+        echo ""
+        local confirm_text
+        confirm_text=$(gum input --placeholder "FACTORY RESET" --header "Type 'FACTORY RESET' to confirm:")
+
+        if [ "$confirm_text" != "FACTORY RESET" ]; then
+            tui_error "Confirmation text did not match. Factory reset cancelled."
+            return
+        fi
+    else
+        echo "This action CANNOT be undone!"
+        echo ""
+        read -p "Type 'FACTORY RESET' to confirm: " confirm_text
+        if [ "$confirm_text" != "FACTORY RESET" ]; then
+            echo "Confirmation text did not match. Factory reset cancelled."
+            return
+        fi
+    fi
+
+    # =========================================================================
+    # Phase 6: Execution
+    # =========================================================================
+    echo ""
+    tui_title "Executing Factory Reset..."
+    echo ""
+
+    local errors=()
+
+    # Step 1: Stop running ranges
+    if [ "$delete_ranges" = true ] && [ -n "$all_range_containers" ]; then
+        tui_info "Stopping and removing range containers..."
+        echo "$all_range_containers" | while read -r container; do
+            if [ -n "$container" ]; then
+                echo "  Removing: $container"
+                docker stop "$container" 2>/dev/null || true
+                docker rm -f "$container" 2>/dev/null || true
+            fi
+        done
+        tui_success "Range containers removed"
+    fi
+
+    # Step 2: Stop CYROID services
+    tui_info "Stopping CYROID services..."
+    if [ "$delete_db_volume" = true ] || [ "$delete_minio_volume" = true ]; then
+        clean_shutdown --volumes 2>/dev/null || $compose_cmd -f docker-compose.yml -f docker-compose.prod.yml down -v 2>/dev/null || true
+    else
+        clean_shutdown 2>/dev/null || $compose_cmd -f docker-compose.yml -f docker-compose.prod.yml down 2>/dev/null || true
+    fi
+    tui_success "Services stopped"
+
+    # Step 3: Remove Docker volumes
+    if [ "$delete_db_volume" = true ]; then
+        tui_info "Removing database volume..."
+        docker volume rm cyroid_postgres_data 2>/dev/null || docker volume rm postgres_data 2>/dev/null || true
+    fi
+    if [ "$delete_minio_volume" = true ]; then
+        tui_info "Removing object storage volume..."
+        docker volume rm cyroid_minio_data 2>/dev/null || docker volume rm minio_data 2>/dev/null || true
+    fi
+    if [ "$delete_dind_volumes" = true ] && [ -n "$dind_volumes" ]; then
+        tui_info "Removing DinD volumes..."
+        echo "$dind_volumes" | while read -r vol; do
+            [ -n "$vol" ] && docker volume rm "$vol" 2>/dev/null || true
+        done
+    fi
+
+    # Also remove traefik-logs volume
+    docker volume rm cyroid_traefik-logs 2>/dev/null || docker volume rm traefik-logs 2>/dev/null || true
+
+    # Step 4: Remove Docker networks
+    if [ "$delete_networks" = true ]; then
+        tui_info "Removing Docker networks..."
+        docker network rm cyroid-mgmt 2>/dev/null || true
+        docker network rm cyroid-ranges 2>/dev/null || true
+        if [ -n "$range_networks" ]; then
+            echo "$range_networks" | while read -r net; do
+                [ -n "$net" ] && docker network rm "$net" 2>/dev/null || true
+            done
+        fi
+        if [ -n "$cyroid_networks" ]; then
+            echo "$cyroid_networks" | while read -r net; do
+                [ -n "$net" ] && docker network rm "$net" 2>/dev/null || true
+            done
+        fi
+        tui_success "Networks removed"
+    fi
+
+    # Step 5: Clean data directories
+    tui_info "Cleaning data directories..."
+    [ "$delete_iso_cache" = true ] && [ -d "$data_dir/iso-cache" ] && rm -rf "$data_dir/iso-cache" && echo "  Removed: iso-cache"
+    [ "$delete_templates" = true ] && [ -d "$data_dir/template-storage" ] && rm -rf "$data_dir/template-storage" && echo "  Removed: template-storage"
+    [ "$delete_vm_storage" = true ] && [ -d "$data_dir/vm-storage" ] && rm -rf "$data_dir/vm-storage" && echo "  Removed: vm-storage"
+    [ "$delete_registry" = true ] && [ -d "$data_dir/registry" ] && rm -rf "$data_dir/registry" && echo "  Removed: registry"
+    [ "$delete_catalogs" = true ] && [ -d "$data_dir/catalogs" ] && rm -rf "$data_dir/catalogs" && echo "  Removed: catalogs"
+    [ "$delete_scenarios" = true ] && [ -d "$data_dir/scenarios" ] && rm -rf "$data_dir/scenarios" && echo "  Removed: scenarios"
+    [ "$delete_images_dir" = true ] && [ -d "$data_dir/images" ] && rm -rf "$data_dir/images" && echo "  Removed: images"
+    [ "$delete_shared" = true ] && [ -d "$data_dir/shared" ] && rm -rf "$data_dir/shared" && echo "  Removed: shared"
+
+    # Remove empty data directory
+    if [ -d "$data_dir" ] && [ -z "$(ls -A "$data_dir" 2>/dev/null)" ]; then
+        rmdir "$data_dir" 2>/dev/null || true
+    fi
+    tui_success "Data directories cleaned"
+
+    # Step 6: Remove Docker images
+    if [ "$delete_cyroid_images" = true ] && [ -n "$cyroid_images" ]; then
+        tui_info "Removing CYROID Docker images..."
+        echo "$cyroid_images" | while read -r img; do
+            [ -n "$img" ] && docker rmi "$img" 2>/dev/null || true
+        done
+        tui_success "CYROID images removed"
+    fi
+    if [ "$delete_range_images" = true ] && [ -n "$range_images" ]; then
+        tui_info "Removing Range Docker images..."
+        echo "$range_images" | while read -r img; do
+            [ -n "$img" ] && docker rmi "$img" 2>/dev/null || true
+        done
+        tui_success "Range images removed"
+    fi
+
+    # Step 7: Remove config files
+    if [ "$delete_config" = true ]; then
+        tui_info "Removing configuration files..."
+        rm -f "$ENV_FILE" 2>/dev/null || true
+        rm -f "$PROJECT_ROOT/.env.prod.backup."* 2>/dev/null || true
+        rm -f "$PROJECT_ROOT/traefik.yml" 2>/dev/null || true
+        rm -f "$PROJECT_ROOT/traefik-prod.yml" 2>/dev/null || true
+        rm -f "$PROJECT_ROOT/traefik/acme.json" 2>/dev/null || true
+        rm -rf "$PROJECT_ROOT/traefik/certs" 2>/dev/null || true
+        rm -rf "$PROJECT_ROOT/traefik/dynamic" 2>/dev/null || true
+        rm -rf "$PROJECT_ROOT/acme" 2>/dev/null || true
+        rm -rf "$PROJECT_ROOT/certs" 2>/dev/null || true
+        tui_success "Configuration removed"
+    fi
+
+    # Step 8: Remove backups
+    if [ "$delete_backups" = true ] && [ -d "$backup_dir" ]; then
+        tui_info "Removing image backups..."
+        rm -rf "$backup_dir"
+        tui_success "Image backups removed"
+    fi
+
+    # Step 9: Final Docker cleanup
+    tui_info "Final Docker cleanup..."
+    docker system prune -f 2>/dev/null || true
+    tui_success "Docker cleanup complete"
+
+    # =========================================================================
+    # Phase 7: Completion and Re-deployment Offer
+    # =========================================================================
+    echo ""
+    gum style --foreground 82 --border rounded --border-foreground 82 \
+        --align center --width 50 --margin "1 2" --padding "1 2" \
+        "✓ Factory Reset Complete" 2>/dev/null || echo "=== Factory Reset Complete ==="
+    echo ""
+
+    # Show what was preserved
+    if [ "$delete_backups" = false ] && [ "$backup_count" -gt 0 ]; then
+        tui_success "Image backups preserved at: $backup_dir"
+    fi
+    if [ "$delete_iso_cache" = false ] && [ -d "$data_dir/iso-cache" ]; then
+        tui_success "ISO cache preserved at: $data_dir/iso-cache"
+    fi
+    echo ""
+
+    # Offer re-deployment
+    if [ "$USE_TUI" = true ] && command -v gum &> /dev/null; then
+        local next_action
+        next_action=$(gum choose --header "What would you like to do next?" \
+            "Run fresh deployment" \
+            "Exit")
+
+        case "$next_action" in
+            "Run fresh deployment")
+                echo ""
+                tui_info "Starting fresh deployment..."
+                echo ""
+                # Reset state variables
+                DOMAIN=""
+                IP=""
+                EMAIL=""
+                SSL_MODE=""
+                VERSION="latest"
+                DATA_DIR=""
+                # Run deployment
+                do_deploy
+                ;;
+            "Exit"|"")
+                echo ""
+                tui_info "Run './deploy.sh' when ready to deploy again"
+                ;;
+        esac
+    else
+        echo ""
+        read -p "Run fresh deployment now? [Y/n]: " redeploy
+        if [[ ! "$redeploy" =~ ^[Nn] ]]; then
+            DOMAIN=""
+            IP=""
+            EMAIL=""
+            SSL_MODE=""
+            VERSION="latest"
+            DATA_DIR=""
+            do_deploy
+        else
+            echo "Run './deploy.sh' when ready to deploy again"
+        fi
+    fi
+}
+
 check_prerequisites() {
     # Comprehensive pre-flight checks for all requirements
     local errors=0
@@ -2940,7 +3574,7 @@ pull_images() {
 
             # Update progress
             if [ "$TUI_FULLSCREEN" = true ]; then
-                tui_set_status "Pulling ($current/$total): $name" "progress"
+                tui_set_status "Pulling ($current/$total): $name" "progress" "$current/$total"
             else
                 progress_bar_update "$current" "$total" "Pull Images" "$img"
                 printf "  [%d/%d] %s\n" "$current" "$total" "$name"
@@ -3014,7 +3648,7 @@ wait_for_health() {
 
         # Update progress bar
         if [ "$TUI_FULLSCREEN" = true ]; then
-            tui_set_status "Waiting for services... ($healthy_count/$target_healthy healthy, $running_count running)" "progress"
+            tui_set_status "Waiting for services... ($healthy_count/$target_healthy healthy)" "progress" "$healthy_count/$target_healthy"
         else
             progress_bar_update "$healthy_count" "$target_healthy" "Health Check" "$healthy_count/$target_healthy healthy, $running_count running"
         fi
@@ -3457,6 +4091,7 @@ management_menu() {
                 "Seed students" \
                 "Image Backup/Restore" \
                 "Clean up (stop + remove data)" \
+                "Factory Reset (complete reset)" \
                 "Exit")
 
             case "$choice" in
@@ -3737,6 +4372,12 @@ management_menu() {
                         break
                     fi
                     ;;
+                "Factory Reset"*)
+                    factory_reset
+                    # If user chose to redeploy, we're done here
+                    # If they exited, break out of menu
+                    break
+                    ;;
                 "Exit"|"")
                     echo ""
                     tui_info "CYROID is still running in the background"
@@ -3754,9 +4395,10 @@ management_menu() {
             echo "  4) Stop services"
             echo "  5) Seed students"
             echo "  6) Clean up (stop + remove data)"
-            echo "  7) Exit"
+            echo "  7) Factory Reset (complete reset)"
+            echo "  8) Exit"
             echo ""
-            read -p "Choice [1-7]: " choice
+            read -p "Choice [1-8]: " choice
 
             case "$choice" in
                 1)
@@ -3943,7 +4585,13 @@ management_menu() {
                         break
                     fi
                     ;;
-                7|"")
+                7)
+                    factory_reset
+                    # If user chose to redeploy, we're done here
+                    # If they exited, break out of menu
+                    break
+                    ;;
+                8|"")
                     echo ""
                     echo "CYROID is still running. Use '$0 --stop' to stop."
                     break
