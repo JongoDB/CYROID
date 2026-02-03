@@ -1,6 +1,6 @@
 // frontend/src/pages/ImageCache.tsx
 import { useState, useEffect, useRef } from 'react'
-import { cacheApi, registryApi, DockerPullStatus, DockerBuildStatus, BuildableImage, ImageStatusResponse, RegistryPushStatus } from '../services/api'
+import { cacheApi, registryApi, DockerPullStatus, DockerBuildStatus, BuildableImage, ImageStatusResponse } from '../services/api'
 import { useAuthStore } from '../stores/authStore'
 import type {
   CachedImage,
@@ -236,8 +236,8 @@ export default function ImageCache() {
     })
   }
 
-  // Select all pushable images
-  const selectAllPushable = (imageTags: string[]) => {
+  // Select all pushable images (for future use)
+  const _selectAllPushable = (imageTags: string[]) => {
     const pushable = imageTags.filter(tag => registryStatus[tag]?.needs_push && !registryPushStatus[tag])
     setSelectedForPush(new Set(pushable))
   }
