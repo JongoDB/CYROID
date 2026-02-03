@@ -3140,66 +3140,128 @@ create_initial_admin() {
 }
 
 seed_students() {
-    # Seed student accounts via API
+    # Seed user accounts via API (requires admin login)
     local address="${DOMAIN:-$IP}"
     local protocol="https"
-    local api_url="${protocol}://${address}/api/v1/auth/register"
+    local login_url="${protocol}://${address}/api/v1/auth/login"
+    local create_url="${protocol}://${address}/api/v1/users"
 
     echo ""
-    tui_title "Seed Student Accounts"
+    tui_title "Seed User Accounts"
     echo ""
 
-    # Get number of students to create
-    local num_students
+    # Get role to assign
+    local role
     if [ "$USE_TUI" = true ] && command -v gum &> /dev/null; then
         tui_suspend_scroll_region
-        num_students=$(gum input --placeholder "10" --header "How many students to create?")
+        role=$(gum choose --header "Select role for seeded accounts:" \
+            "student (Recommended)" \
+            "engineer" \
+            "evaluator" \
+            "admin")
+        tui_restore_scroll_region
+        # Extract just the role name (remove " (Recommended)" suffix if present)
+        role=$(echo "$role" | awk '{print $1}')
+    else
+        echo "Available roles: student, engineer, evaluator, admin"
+        read -p "Role for seeded accounts [student]: " role
+    fi
+
+    # Default to student if empty
+    role="${role:-student}"
+
+    # Validate role
+    if [[ ! "$role" =~ ^(student|engineer|evaluator|admin)$ ]]; then
+        tui_error "Invalid role. Must be: student, engineer, evaluator, or admin"
+        return 1
+    fi
+
+    # Get number of users to create
+    local num_users
+    if [ "$USE_TUI" = true ] && command -v gum &> /dev/null; then
+        tui_suspend_scroll_region
+        num_users=$(gum input --placeholder "10" --header "How many ${role} accounts to create?")
         tui_restore_scroll_region
     else
-        read -p "How many students to create? [10]: " num_students
+        read -p "How many ${role} accounts to create? [10]: " num_users
     fi
 
     # Default to 10 if empty
-    num_students="${num_students:-10}"
+    num_users="${num_users:-10}"
 
     # Validate input is a number
-    if ! [[ "$num_students" =~ ^[0-9]+$ ]] || [ "$num_students" -lt 1 ]; then
+    if ! [[ "$num_users" =~ ^[0-9]+$ ]] || [ "$num_users" -lt 1 ]; then
         tui_error "Invalid number. Please enter a positive integer."
         return 1
     fi
 
+    # Get admin credentials to authenticate
     echo ""
-    tui_info "Creating $num_students student account(s)..."
+    tui_info "Admin login required to create users with roles"
+    echo ""
+
+    local admin_user admin_pass
+    if [ "$USE_TUI" = true ] && command -v gum &> /dev/null; then
+        tui_suspend_scroll_region
+        admin_user=$(gum input --placeholder "admin" --header "Admin username:")
+        admin_pass=$(gum input --password --header "Admin password:")
+        tui_restore_scroll_region
+    else
+        read -p "Admin username: " admin_user
+        read -sp "Admin password: " admin_pass
+        echo ""
+    fi
+
+    if [ -z "$admin_user" ] || [ -z "$admin_pass" ]; then
+        tui_error "Admin credentials are required"
+        return 1
+    fi
+
+    # Login to get token
+    tui_info "Authenticating..."
+    local login_response login_code token
+    login_response=$(curl -sk -w "\n%{http_code}" -X POST "$login_url" \
+        -H "Content-Type: application/x-www-form-urlencoded" \
+        -d "username=${admin_user}&password=${admin_pass}" 2>/dev/null)
+    login_code=$(echo "$login_response" | tail -n1)
+    login_response=$(echo "$login_response" | sed '$d')
+
+    if [ "$login_code" != "200" ]; then
+        tui_error "Admin login failed. Check credentials."
+        return 1
+    fi
+
+    token=$(echo "$login_response" | grep -o '"access_token":"[^"]*"' | cut -d'"' -f4)
+    if [ -z "$token" ]; then
+        tui_error "Failed to extract token from login response"
+        return 1
+    fi
+
+    tui_success "Authenticated as $admin_user"
+    echo ""
+    tui_info "Creating $num_users ${role} account(s)..."
     echo ""
 
     local success_count=0
     local fail_count=0
 
-    for i in $(seq 1 "$num_students"); do
-        local username="student${i}"
-        local email="student${i}@student.com"
+    for i in $(seq 1 "$num_users"); do
+        local username="${role}${i}"
+        local email="${role}${i}@${role}.com"
         local password="password"
 
         local response
         local http_code
 
-        if command -v curl &> /dev/null; then
-            response=$(curl -sk -w "\n%{http_code}" -X POST "$api_url" \
-                -H "Content-Type: application/json" \
-                -d "{\"username\":\"$username\",\"email\":\"$email\",\"password\":\"$password\"}" 2>/dev/null)
-            http_code=$(echo "$response" | tail -n1)
-            response=$(echo "$response" | sed '$d')
-        elif command -v wget &> /dev/null; then
-            response=$(wget -qO- --no-check-certificate --post-data="{\"username\":\"$username\",\"email\":\"$email\",\"password\":\"$password\"}" \
-                --header="Content-Type: application/json" "$api_url" 2>/dev/null)
-            http_code="200"
-        else
-            tui_error "Neither curl nor wget available"
-            return 1
-        fi
+        response=$(curl -sk -w "\n%{http_code}" -X POST "$create_url" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer $token" \
+            -d "{\"username\":\"$username\",\"email\":\"$email\",\"password\":\"$password\",\"roles\":[\"$role\"]}" 2>/dev/null)
+        http_code=$(echo "$response" | tail -n1)
+        response=$(echo "$response" | sed '$d')
 
         if [ "$http_code" = "201" ]; then
-            tui_success "  Created: $username ($email)"
+            tui_success "  Created: $username ($email) [${role}]"
             success_count=$((success_count + 1))
         elif echo "$response" | grep -q "already registered"; then
             tui_warn "  Skipped: $username (already exists)"
@@ -3213,7 +3275,7 @@ seed_students() {
     echo ""
     tui_info "Seeding complete: $success_count created, $fail_count skipped/failed"
     echo ""
-    tui_info "All students have password: password"
+    tui_info "All accounts have password: password"
 }
 
 show_access_info() {
