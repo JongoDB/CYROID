@@ -3351,16 +3351,33 @@ setup_ssl() {
     # Create base traefik dynamic config if missing (defensive - should be in git)
     if [ ! -f "$PROJECT_ROOT/traefik/dynamic/base.yml" ]; then
         cat > "$PROJECT_ROOT/traefik/dynamic/base.yml" << 'BASEEOF'
-# Base Traefik dynamic configuration
+# Traefik dynamic configuration
 http:
-  middlewares:
-    secure-headers:
-      headers:
-        frameDeny: true
-        sslRedirect: true
-        browserXssFilter: true
-        contentTypeNosniff: true
-        referrerPolicy: "same-origin"
+  serversTransports:
+    # Transport for containers with self-signed certs (KasmVNC, etc.)
+    insecure-transport:
+      insecureSkipVerify: true
+
+tls:
+  # Default certificate store
+  stores:
+    default:
+      defaultCertificate:
+        certFile: /etc/traefik/certs/cert.pem
+        keyFile: /etc/traefik/certs/key.pem
+
+  # Certificate configuration
+  certificates:
+    - certFile: /etc/traefik/certs/cert.pem
+      keyFile: /etc/traefik/certs/key.pem
+      stores:
+        - default
+
+  # TLS options
+  options:
+    default:
+      minVersion: VersionTLS12
+      sniStrict: false
 BASEEOF
     fi
 
