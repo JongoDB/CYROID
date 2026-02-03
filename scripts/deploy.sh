@@ -3139,6 +3139,83 @@ create_initial_admin() {
     fi
 }
 
+seed_students() {
+    # Seed student accounts via API
+    local address="${DOMAIN:-$IP}"
+    local protocol="https"
+    local api_url="${protocol}://${address}/api/v1/auth/register"
+
+    echo ""
+    tui_title "Seed Student Accounts"
+    echo ""
+
+    # Get number of students to create
+    local num_students
+    if [ "$USE_TUI" = true ] && command -v gum &> /dev/null; then
+        tui_suspend_scroll_region
+        num_students=$(gum input --placeholder "10" --header "How many students to create?")
+        tui_restore_scroll_region
+    else
+        read -p "How many students to create? [10]: " num_students
+    fi
+
+    # Default to 10 if empty
+    num_students="${num_students:-10}"
+
+    # Validate input is a number
+    if ! [[ "$num_students" =~ ^[0-9]+$ ]] || [ "$num_students" -lt 1 ]; then
+        tui_error "Invalid number. Please enter a positive integer."
+        return 1
+    fi
+
+    echo ""
+    tui_info "Creating $num_students student account(s)..."
+    echo ""
+
+    local success_count=0
+    local fail_count=0
+
+    for i in $(seq 1 "$num_students"); do
+        local username="student${i}"
+        local email="student${i}@student.com"
+        local password="password"
+
+        local response
+        local http_code
+
+        if command -v curl &> /dev/null; then
+            response=$(curl -sk -w "\n%{http_code}" -X POST "$api_url" \
+                -H "Content-Type: application/json" \
+                -d "{\"username\":\"$username\",\"email\":\"$email\",\"password\":\"$password\"}" 2>/dev/null)
+            http_code=$(echo "$response" | tail -n1)
+            response=$(echo "$response" | sed '$d')
+        elif command -v wget &> /dev/null; then
+            response=$(wget -qO- --no-check-certificate --post-data="{\"username\":\"$username\",\"email\":\"$email\",\"password\":\"$password\"}" \
+                --header="Content-Type: application/json" "$api_url" 2>/dev/null)
+            http_code="200"
+        else
+            tui_error "Neither curl nor wget available"
+            return 1
+        fi
+
+        if [ "$http_code" = "201" ]; then
+            tui_success "  Created: $username ($email)"
+            success_count=$((success_count + 1))
+        elif echo "$response" | grep -q "already registered"; then
+            tui_warn "  Skipped: $username (already exists)"
+            fail_count=$((fail_count + 1))
+        else
+            tui_error "  Failed: $username"
+            fail_count=$((fail_count + 1))
+        fi
+    done
+
+    echo ""
+    tui_info "Seeding complete: $success_count created, $fail_count skipped/failed"
+    echo ""
+    tui_info "All students have password: password"
+}
+
 show_access_info() {
     local address="${DOMAIN:-$IP}"
     local protocol="https"
@@ -3377,6 +3454,7 @@ management_menu() {
                 "Show status" \
                 "Restart services" \
                 "Stop services" \
+                "Seed students" \
                 "Image Backup/Restore" \
                 "Clean up (stop + remove data)" \
                 "Exit")
@@ -3421,6 +3499,9 @@ management_menu() {
                         tui_info "Run '$0 --start' to start again"
                         break
                     fi
+                    ;;
+                "Seed students")
+                    seed_students
                     ;;
                 "Image Backup/Restore"*)
                     echo ""
@@ -3671,10 +3752,11 @@ management_menu() {
             echo "  2) Show status"
             echo "  3) Restart services"
             echo "  4) Stop services"
-            echo "  5) Clean up (stop + remove data)"
-            echo "  6) Exit"
+            echo "  5) Seed students"
+            echo "  6) Clean up (stop + remove data)"
+            echo "  7) Exit"
             echo ""
-            read -p "Choice [1-6]: " choice
+            read -p "Choice [1-7]: " choice
 
             case "$choice" in
                 1)
@@ -3702,6 +3784,9 @@ management_menu() {
                     fi
                     ;;
                 5)
+                    seed_students
+                    ;;
+                6)
                     echo ""
                     echo "WARNING: This will delete all data!"
                     echo ""
@@ -3858,7 +3943,7 @@ management_menu() {
                         break
                     fi
                     ;;
-                6|"")
+                7|"")
                     echo ""
                     echo "CYROID is still running. Use '$0 --stop' to stop."
                     break
