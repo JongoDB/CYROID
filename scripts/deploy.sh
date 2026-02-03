@@ -828,8 +828,9 @@ tui_init_fullscreen() {
     # Get terminal dimensions
     tui_update_dimensions
 
-    # Set up cleanup trap
-    trap 'tui_cleanup_fullscreen' EXIT INT TERM
+    # Set up cleanup trap with error reporting
+    trap 'exit_code=$?; tui_cleanup_fullscreen; if [ $exit_code -ne 0 ]; then echo -e "\033[31m[ERROR]\033[0m Script exited with code $exit_code"; fi' EXIT
+    trap 'tui_cleanup_fullscreen' INT TERM
 
     # Hide cursor during redraws
     tput civis 2>/dev/null || true
