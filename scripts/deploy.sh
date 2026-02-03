@@ -832,12 +832,13 @@ tui_init_fullscreen() {
     trap 'exit_code=$?; tui_cleanup_fullscreen; if [ $exit_code -ne 0 ]; then echo -e "\033[31m[ERROR]\033[0m Script exited with code $exit_code"; fi' EXIT
     trap 'tui_cleanup_fullscreen' INT TERM
 
-    # Hide cursor during redraws
-    tput civis 2>/dev/null || true
+    # Hide cursor during redraws (ANSI: ESC[?25l)
+    printf "\033[?25l" 2>/dev/null || true
 
     # Set up scroll region to protect the bottom status bar line
+    # ANSI: ESC[top;bottomr - sets scroll region from line 1 to TERM_LINES-1
     # This prevents normal output from overwriting the status bar
-    tput csr 0 $((TERM_LINES - 2)) 2>/dev/null || true
+    printf "\033[1;%dr" "$((TERM_LINES - 1))" 2>/dev/null || true
     TUI_SCROLL_REGION_SET=true
     TUI_LAST_HEIGHT=$TERM_LINES
 
@@ -846,20 +847,22 @@ tui_init_fullscreen() {
     # Initial draw
     tui_draw_screen
 
-    # Position cursor at the end of the scroll region for subsequent output
-    tput cup $((TERM_LINES - 2)) 0 2>/dev/null || true
+    # Position cursor at line 3 (after header) for subsequent output
+    # ANSI: ESC[row;colH
+    printf "\033[3;1H" 2>/dev/null || true
 }
 
 tui_cleanup_fullscreen() {
     if [ "$TUI_FULLSCREEN" = true ]; then
         # Reset scroll region to full terminal before cleanup
+        # ANSI: ESC[r resets scroll region to full screen
         if [ "$TUI_SCROLL_REGION_SET" = true ]; then
-            tput csr 0 $((TERM_LINES - 1)) 2>/dev/null || true
+            printf "\033[r" 2>/dev/null || true
             TUI_SCROLL_REGION_SET=false
         fi
 
-        # Show cursor
-        tput cnorm 2>/dev/null || true
+        # Show cursor (ANSI: ESC[?25h)
+        printf "\033[?25h" 2>/dev/null || true
 
         # Restore terminal settings
         if [ -n "$ORIGINAL_STTY" ]; then
@@ -867,8 +870,8 @@ tui_cleanup_fullscreen() {
         fi
 
         # Move cursor to bottom and reset
-        tput cup "$TERM_LINES" 0 2>/dev/null || true
-        echo ""
+        # ANSI: ESC[row;colH
+        printf "\033[%d;1H\n" "$TERM_LINES" 2>/dev/null || true
 
         TUI_FULLSCREEN=false
     fi
@@ -883,10 +886,10 @@ tui_update_dimensions() {
 # Call this before gum input/choose/etc that take over the terminal
 tui_suspend_scroll_region() {
     if [ "$TUI_SCROLL_REGION_SET" = true ]; then
-        # Reset scroll region to full terminal
-        tput csr 0 $((TERM_LINES - 1)) 2>/dev/null || true
-        # Show cursor for interactive input
-        tput cnorm 2>/dev/null || true
+        # Reset scroll region to full terminal (ANSI: ESC[r)
+        printf "\033[r" 2>/dev/null || true
+        # Show cursor for interactive input (ANSI: ESC[?25h)
+        printf "\033[?25h" 2>/dev/null || true
     fi
 }
 
@@ -896,10 +899,10 @@ tui_restore_scroll_region() {
         # Update dimensions in case terminal was resized during input
         tui_update_dimensions
         TUI_LAST_HEIGHT=$TERM_LINES
-        # Restore scroll region
-        tput csr 0 $((TERM_LINES - 2)) 2>/dev/null || true
-        # Hide cursor again
-        tput civis 2>/dev/null || true
+        # Restore scroll region (ANSI: ESC[top;bottomr)
+        printf "\033[1;%dr" "$((TERM_LINES - 1))" 2>/dev/null || true
+        # Hide cursor again (ANSI: ESC[?25l)
+        printf "\033[?25l" 2>/dev/null || true
         # Redraw status bar
         tui_draw_status_bar
     fi
@@ -908,9 +911,23 @@ tui_restore_scroll_region() {
 tui_set_status() {
     local message="$1"
     local type="${2:-info}"  # info, success, warn, error, progress
+    local sub_progress="${3:-}"  # Optional: sub-progress for detailed status (e.g., "9/9")
 
     STATUS_MESSAGE="$message"
     STATUS_TYPE="$type"
+
+    # If sub_progress is provided, calculate and update DEPLOYMENT_PROGRESS
+    if [ -n "$sub_progress" ] && [[ "$sub_progress" =~ ^([0-9]+)/([0-9]+)$ ]]; then
+        local current="${BASH_REMATCH[1]}"
+        local total="${BASH_REMATCH[2]}"
+        if [ "$total" -gt 0 ]; then
+            # Calculate sub-progress within current deployment step
+            # Each major step is ~14% (100/7), interpolate within that
+            local base_progress=$((DEPLOYMENT_PROGRESS / 14 * 14))  # Round down to step
+            local step_progress=$((current * 14 / total))
+            DEPLOYMENT_PROGRESS=$((base_progress + step_progress))
+        fi
+    fi
 
     # Immediately update status bar if in fullscreen mode
     if [ "$TUI_FULLSCREEN" = true ]; then
@@ -950,20 +967,15 @@ tui_draw_status_bar() {
     # Handle terminal resize - update scroll region if height changed
     if [ "$TUI_SCROLL_REGION_SET" = true ] && [ "$TERM_LINES" != "$TUI_LAST_HEIGHT" ]; then
         TUI_LAST_HEIGHT=$TERM_LINES
-        tput csr 0 $((TERM_LINES - 2)) 2>/dev/null || true
+        # Use ANSI escape for scroll region: ESC[top;bottomr
+        printf "\033[1;%dr" "$((TERM_LINES - 1))" 2>/dev/null || true
     fi
 
-    # Save cursor position
-    tput sc 2>/dev/null || true
+    # Save cursor position using ANSI escape (more reliable than tput)
+    printf "\0337" 2>/dev/null || true
 
-    # Temporarily expand scroll region to draw status bar at the very bottom
-    if [ "$TUI_SCROLL_REGION_SET" = true ]; then
-        tput csr 0 $((TERM_LINES - 1)) 2>/dev/null || true
-    fi
-
-    # Move to bottom line (leave 1 line for status bar)
-    local status_line=$((TERM_LINES - 1))
-    tput cup "$status_line" 0 2>/dev/null || true
+    # Move to bottom line using ANSI escape: ESC[row;colH
+    printf "\033[%d;1H" "$TERM_LINES" 2>/dev/null || true
 
     # Build status bar content
     local timestamp=$(date '+%H:%M:%S')
@@ -990,8 +1002,14 @@ tui_draw_status_bar() {
         progress_bar+="] ${DEPLOYMENT_PROGRESS}%"
     fi
 
-    # Build the full status line
-    local left_content="$status_icon $STATUS_MESSAGE$progress_bar"
+    # Build the full status line - truncate message if too long
+    local max_msg_len=$((TERM_COLS - 40))  # Leave room for progress bar and timestamp
+    local display_msg="$STATUS_MESSAGE"
+    if [ ${#display_msg} -gt $max_msg_len ] && [ $max_msg_len -gt 3 ]; then
+        display_msg="${display_msg:0:$((max_msg_len - 3))}..."
+    fi
+
+    local left_content="$status_icon $display_msg$progress_bar"
     local right_content="$timestamp"
 
     # Calculate padding
@@ -1000,27 +1018,22 @@ tui_draw_status_bar() {
     local padding=$((TERM_COLS - left_len - right_len - 4))
     if [ $padding -lt 0 ]; then padding=0; fi
 
-    # Clear the line and draw status bar
-    printf "\033[48;5;236m\033[K"  # Dark gray background, clear line
+    # Clear the line and draw status bar with dark background
+    printf "\033[48;5;236m\033[2K"  # Dark gray background, clear entire line
 
     # Draw with colors
-    printf "\033[38;5;${status_color}m %s\033[38;5;245m" "$status_icon"
-    printf " %s" "$STATUS_MESSAGE"
+    printf "\033[38;5;${status_color}m %s\033[38;5;255m" "$status_icon"
+    printf " %s" "$display_msg"
     if [ -n "$progress_bar" ]; then
-        printf "\033[38;5;39m%s\033[0m" "$progress_bar"
+        printf "\033[38;5;39m%s" "$progress_bar"
     fi
 
     # Right-align timestamp
     printf "%*s" "$padding" ""
     printf "\033[38;5;245m%s \033[0m" "$right_content"
 
-    # Restore scroll region to protect status bar again
-    if [ "$TUI_SCROLL_REGION_SET" = true ]; then
-        tput csr 0 $((TERM_LINES - 2)) 2>/dev/null || true
-    fi
-
-    # Restore cursor position
-    tput rc 2>/dev/null || true
+    # Restore cursor position using ANSI escape
+    printf "\0338" 2>/dev/null || true
 }
 
 tui_draw_header_bar() {
@@ -1028,8 +1041,8 @@ tui_draw_header_bar() {
         return
     fi
 
-    # Move to top
-    tput cup 0 0 2>/dev/null || true
+    # Move to top (ANSI: ESC[1;1H)
+    printf "\033[1;1H" 2>/dev/null || true
 
     # Build header bar
     local title="CYROID"
@@ -1043,7 +1056,7 @@ tui_draw_header_bar() {
     if [ $padding -lt 0 ]; then padding=0; fi
 
     # Draw header bar with cyan background
-    printf "\033[48;5;24m\033[38;5;255m\033[K"  # Dark blue background, white text
+    printf "\033[48;5;24m\033[38;5;255m\033[2K"  # Dark blue background, white text, clear line
     printf " %s" "$title"
     printf "%*s" "$padding" ""
     printf "%s \033[0m\n" "$right_content"
@@ -1054,8 +1067,8 @@ tui_draw_screen() {
         return
     fi
 
-    # Clear screen
-    clear
+    # Clear screen (ANSI: ESC[2J ESC[H)
+    printf "\033[2J\033[H" 2>/dev/null || true
 
     # Draw header bar
     tui_draw_header_bar
@@ -1064,13 +1077,14 @@ tui_draw_screen() {
     tui_draw_status_bar
 
     # Position cursor for main content (line 3, after header)
-    tput cup 2 0 2>/dev/null || true
+    # ANSI: ESC[row;colH
+    printf "\033[3;1H" 2>/dev/null || true
 }
 
 tui_main_area() {
     # Position cursor in main content area
     if [ "$TUI_FULLSCREEN" = true ]; then
-        tput cup 2 0 2>/dev/null || true
+        printf "\033[3;1H" 2>/dev/null || true
     fi
 }
 
@@ -3560,7 +3574,7 @@ pull_images() {
 
             # Update progress
             if [ "$TUI_FULLSCREEN" = true ]; then
-                tui_set_status "Pulling ($current/$total): $name" "progress"
+                tui_set_status "Pulling ($current/$total): $name" "progress" "$current/$total"
             else
                 progress_bar_update "$current" "$total" "Pull Images" "$img"
                 printf "  [%d/%d] %s\n" "$current" "$total" "$name"
@@ -3634,7 +3648,7 @@ wait_for_health() {
 
         # Update progress bar
         if [ "$TUI_FULLSCREEN" = true ]; then
-            tui_set_status "Waiting for services... ($healthy_count/$target_healthy healthy, $running_count running)" "progress"
+            tui_set_status "Waiting for services... ($healthy_count/$target_healthy healthy)" "progress" "$healthy_count/$target_healthy"
         else
             progress_bar_update "$healthy_count" "$target_healthy" "Health Check" "$healthy_count/$target_healthy healthy, $running_count running"
         fi
