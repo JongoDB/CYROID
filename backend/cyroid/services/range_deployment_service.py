@@ -487,9 +487,11 @@ class RangeDeploymentService:
                 environment = {}
                 privileged = False
                 cap_add = None
+                sysctls = None
+                devices = None
 
                 # Apply container_config from BaseImage (VM Library settings)
-                # This allows users to set privileged, cap_add, etc. per-image
+                # This allows users to set privileged, cap_add, sysctls, devices per-image
                 if vm.base_image and vm.base_image.container_config:
                     config = vm.base_image.container_config
                     if config.get("privileged"):
@@ -498,6 +500,12 @@ class RangeDeploymentService:
                     if config.get("cap_add"):
                         cap_add = config["cap_add"]
                         logger.info(f"VM {vm.hostname}: cap_add={cap_add} from base_image.container_config")
+                    if config.get("sysctls"):
+                        sysctls = config["sysctls"]
+                        logger.info(f"VM {vm.hostname}: sysctls={sysctls} from base_image.container_config")
+                    if config.get("devices"):
+                        devices = config["devices"]
+                        logger.info(f"VM {vm.hostname}: devices={devices} from base_image.container_config")
 
                 # macOS VM (dockur/macos) - requires VERSION env and privileged mode for KVM
                 if "dockur/macos" in container_image.lower():
@@ -549,6 +557,8 @@ class RangeDeploymentService:
                     environment=environment if environment else None,
                     privileged=privileged,
                     cap_add=cap_add,
+                    sysctls=sysctls,
+                    devices=devices,
                 )
 
                 vm.container_id = container_id

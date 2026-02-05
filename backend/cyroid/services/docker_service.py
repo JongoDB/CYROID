@@ -2804,6 +2804,8 @@ local-hostname: {name}
         hostname: Optional[str] = None,
         dns_servers: Optional[str] = None,
         dns_search: Optional[str] = None,
+        sysctls: Optional[Dict[str, str]] = None,
+        devices: Optional[List[str]] = None,
     ) -> str:
         """
         Create a container inside a range's DinD container.
@@ -2867,6 +2869,10 @@ local-hostname: {name}
         }
         if dns_search_list:
             host_config_args["dns_search"] = dns_search_list
+        if sysctls:
+            host_config_args["sysctls"] = sysctls
+        if devices:
+            host_config_args["devices"] = devices
 
         try:
             container = range_client.api.create_container(
