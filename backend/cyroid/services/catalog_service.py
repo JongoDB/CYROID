@@ -385,19 +385,29 @@ class CatalogService:
             item_id = item_data.get("id", "")
             installed = installed_lookup.get(item_id)
 
+            # Normalize arch (catalog may provide string, list, or null)
+            raw_arch = item_data.get("arch")
+            if isinstance(raw_arch, list):
+                arch = ", ".join(raw_arch)
+            else:
+                arch = raw_arch
+
+            # Filter out empty-string tags from catalog data
+            tags = [t for t in item_data.get("tags", []) if t]
+
             summary = CatalogItemSummary(
                 id=item_id,
                 type=CatalogItemType(item_data.get("type", "blueprint")),
                 name=item_data.get("name", ""),
                 description=item_data.get("description", ""),
-                tags=item_data.get("tags", []),
+                tags=tags,
                 version=item_data.get("version", "1.0"),
                 path=item_data.get("path", ""),
                 checksum=item_data.get("checksum", ""),
                 requires_images=item_data.get("requires_images", []),
                 includes_msel=item_data.get("includes_msel", False),
                 includes_content=item_data.get("includes_content", False),
-                arch=item_data.get("arch"),
+                arch=arch,
                 docker_tag=item_data.get("docker_tag"),
                 installed=installed is not None,
                 installed_version=installed.installed_version if installed else None,
@@ -462,19 +472,29 @@ class CatalogService:
                         logger.warning(f"Could not read README for {item_id}: {e}")
             # If path points to a file (e.g., scenario YAML), no README
 
+        # Normalize arch (catalog may provide string, list, or null)
+        raw_arch = item_data.get("arch")
+        if isinstance(raw_arch, list):
+            arch = ", ".join(raw_arch)
+        else:
+            arch = raw_arch
+
+        # Filter out empty-string tags from catalog data
+        tags = [t for t in item_data.get("tags", []) if t]
+
         detail = CatalogItemDetail(
             id=item_data.get("id", ""),
             type=CatalogItemType(item_data.get("type", "blueprint")),
             name=item_data.get("name", ""),
             description=item_data.get("description", ""),
-            tags=item_data.get("tags", []),
+            tags=tags,
             version=item_data.get("version", "1.0"),
             path=item_data.get("path", ""),
             checksum=item_data.get("checksum", ""),
             requires_images=item_data.get("requires_images", []),
             includes_msel=item_data.get("includes_msel", False),
             includes_content=item_data.get("includes_content", False),
-            arch=item_data.get("arch"),
+            arch=arch,
             docker_tag=item_data.get("docker_tag"),
             installed=installed is not None,
             installed_version=installed.installed_version if installed else None,
