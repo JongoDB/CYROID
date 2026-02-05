@@ -10,6 +10,7 @@ from cyroid.models.user import User
 from cyroid.models.range import Range
 from cyroid.models.content import Content
 from cyroid.models.walkthrough_progress import WalkthroughProgress
+from cyroid.services.walkthrough_parser import parse_markdown_to_walkthrough
 
 
 router = APIRouter(prefix="/ranges", tags=["walkthrough"])
@@ -52,8 +53,14 @@ def get_walkthrough(
     walkthrough = None
     if range_obj.student_guide_id:
         content = db.query(Content).filter(Content.id == range_obj.student_guide_id).first()
-        if content and content.walkthrough_data:
-            walkthrough = content.walkthrough_data
+        if content:
+            if content.walkthrough_data:
+                walkthrough = content.walkthrough_data
+            elif content.body_markdown:
+                # Auto-parse markdown into structured walkthrough format
+                walkthrough = parse_markdown_to_walkthrough(
+                    content.title or "Walkthrough", content.body_markdown
+                )
 
     return WalkthroughResponse(walkthrough=walkthrough)
 
