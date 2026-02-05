@@ -36,6 +36,7 @@ from cyroid.models.catalog import (
 )
 from cyroid.models.content import Content, ContentType
 from cyroid.schemas.catalog import CatalogItemDetail, CatalogItemSummary
+from cyroid.services.walkthrough_parser import parse_markdown_to_walkthrough
 
 logger = logging.getLogger(__name__)
 
@@ -639,6 +640,23 @@ class CatalogService:
                 content_id = self._create_content_from_json(
                     content_data, detail.name, user_id
                 )
+                # Auto-generate walkthrough_data from body_markdown if not
+                # provided explicitly in content.json
+                if content_id and not content_data.get("walkthrough_data") and content_data.get("body_markdown"):
+                    content_obj = self.db.query(Content).filter(
+                        Content.id == content_id
+                    ).first()
+                    if content_obj and not content_obj.walkthrough_data:
+                        content_obj.walkthrough_data = parse_markdown_to_walkthrough(
+                            content_obj.title or detail.name,
+                            content_data["body_markdown"],
+                        )
+                        self.db.flush()
+                        logger.info(
+                            f"Auto-generated walkthrough_data from body_markdown "
+                            f"for '{content_obj.title}'"
+                        )
+
                 # Also extract walkthrough_data for MSEL config
                 if content_data.get("walkthrough_data"):
                     walkthrough = content_data["walkthrough_data"]
