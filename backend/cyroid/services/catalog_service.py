@@ -1003,6 +1003,24 @@ class CatalogService:
                 except (IOError, UnicodeDecodeError):
                     pass
 
+            # Read container_config from image.yaml if present
+            container_config = None
+            image_yaml_path = dest_dir / "image.yaml"
+            if image_yaml_path.exists():
+                try:
+                    with open(image_yaml_path) as f:
+                        image_meta = yaml.safe_load(f) or {}
+                    if image_meta.get("container_config"):
+                        container_config = image_meta["container_config"]
+                        logger.info(
+                            f"Image '{project_name}': loaded container_config "
+                            f"from image.yaml: {container_config}"
+                        )
+                except (IOError, yaml.YAMLError) as exc:
+                    logger.warning(
+                        f"Failed to read image.yaml for '{project_name}': {exc}"
+                    )
+
             base_image = BaseImage(
                 name=project_name,
                 description=description,
@@ -1014,6 +1032,7 @@ class CatalogService:
                 native_arch="x86_64",
                 is_global=True,
                 created_by=None,
+                container_config=container_config,
             )
             self.db.add(base_image)
             self.db.flush()
