@@ -668,6 +668,28 @@ class DinDService:
             else:
                 logger.warning(f"Skipping network '{network}' - could not resolve bridge ID")
 
+        # Bypass Docker's legacy iptables DOCKER-ISOLATION rules.
+        # Docker creates legacy iptables rules that drop cross-subnet traffic
+        # on bridges (e.g., packets on the DMZ bridge with dest outside DMZ
+        # subnet). This blocks multi-homed containers (like firewall/router
+        # containers) from forwarding between network segments. DOCKER-USER
+        # runs before DOCKER-ISOLATION, so ACCEPT rules here let traffic
+        # through. The nft iptables rules below still enforce actual isolation.
+        for network in set(validated_networks + validated_allow_internet):
+            bridge_id = network_bridge_ids.get(network)
+            if not bridge_id:
+                continue
+            rule = f"iptables-legacy -I DOCKER-USER -i br-{bridge_id} -j ACCEPT"
+            try:
+                exit_code, output = dind_container.exec_run(rule, privileged=True)
+                if exit_code != 0:
+                    output_str = output.decode() if isinstance(output, bytes) else str(output)
+                    logger.debug(f"iptables-legacy DOCKER-USER rule skipped: {output_str}")
+                else:
+                    logger.debug(f"Applied DOCKER-USER bypass: br-{bridge_id}")
+            except Exception as e:
+                logger.debug(f"iptables-legacy not available: {e}")
+
         # Build list of iptables rules to apply
         rules = []
 
