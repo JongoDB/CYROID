@@ -15,6 +15,7 @@ RUN apk add --no-cache \
     iproute2 \
     iputils \
     net-tools \
+    socat \
     tcpdump
 
 # Configure Docker daemon for range use
