@@ -93,6 +93,8 @@ export function VncConsole({ vmId, vmHostname, token, onClose }: VncConsoleProps
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const lastSyncedRef = useRef<number | null>(null)
   const bridgeInjectedRef = useRef(false)
+  const retryCountRef = useRef(0)
+  const MAX_MISROUTE_RETRIES = 3
   const vmClipboard = useVmClipboardOptional()
 
   useEffect(() => {
@@ -208,6 +210,34 @@ export function VncConsole({ vmId, vmHostname, token, onClose }: VncConsoleProps
     if (timeoutRef.current) {
       clearTimeout(timeoutRef.current)
     }
+
+    // Detect if the iframe loaded the CYROID SPA instead of KasmVNC.
+    // This happens when Traefik hasn't picked up VNC routes yet and
+    // the request falls through to the frontend catch-all.
+    try {
+      const iframe = iframeRef.current
+      const iframeDoc = iframe?.contentDocument || iframe?.contentWindow?.document
+      if (iframeDoc) {
+        const title = iframeDoc.title || ''
+        const server = iframeDoc.querySelector('meta[name="generator"]')?.getAttribute('content') || ''
+        const isKasmVNC = title.includes('KasmVNC') || title.includes('noVNC') || iframeDoc.querySelector('.noVNC_loading') !== null
+        const isCyroidSPA = title.includes('CYROID') || iframeDoc.getElementById('root') !== null
+
+        if (isCyroidSPA && !isKasmVNC && retryCountRef.current < MAX_MISROUTE_RETRIES) {
+          retryCountRef.current++
+          console.warn(`VNC iframe loaded CYROID SPA instead of KasmVNC (retry ${retryCountRef.current}/${MAX_MISROUTE_RETRIES})`)
+          // Retry after a delay to give Traefik time to load routes
+          setTimeout(() => {
+            setIframeKey(prev => prev + 1)
+          }, 2000)
+          return
+        }
+      }
+    } catch {
+      // Cross-origin access error — likely KasmVNC loaded correctly
+    }
+
+    retryCountRef.current = 0
     setConnectionStatus('connected')
 
     // Try to inject clipboard bridge with retries
