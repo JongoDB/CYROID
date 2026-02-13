@@ -68,7 +68,7 @@ async def vm_console(
     """
     await websocket.accept()
 
-    # Get database session
+    # Get database session for auth and lookup only
     db = next(get_db())
 
     try:
@@ -93,11 +93,21 @@ async def vm_console(
             await websocket.close(code=4000, reason="VM range not found")
             return
 
+        # Extract what we need before releasing the session
+        container_id = vm.container_id
+        dind_container_id = range_obj.dind_container_id
+        dind_docker_url = range_obj.dind_docker_url
+        range_id_str = str(range_obj.id)
+
+        # Release DB session - no longer needed for the streaming phase
+        db.close()
+        db = None
+
         # Get the appropriate Docker client (DinD or host)
-        dind_client = get_dind_docker_client(range_obj)
-        if dind_client:
-            # DinD deployment - use the range's Docker client
-            docker_client = dind_client
+        if dind_container_id and dind_docker_url:
+            from cyroid.services.dind_service import get_dind_service
+            dind_service = get_dind_service()
+            docker_client = dind_service.get_range_client(range_id_str, dind_docker_url)
             logger.debug(f"Using DinD Docker client for VM {vm_id}")
         else:
             # Non-DinD (legacy) - use host Docker client
@@ -106,7 +116,7 @@ async def vm_console(
             logger.debug(f"Using host Docker client for VM {vm_id}")
 
         # Get container and create exec instance
-        container = docker_client.containers.get(vm.container_id)
+        container = docker_client.containers.get(container_id)
 
         # Try /bin/bash first, fall back to /bin/sh
         # Use shell with login to get proper environment
@@ -114,7 +124,7 @@ async def vm_console(
 
         # Create interactive exec instance
         exec_instance = docker_client.api.exec_create(
-            vm.container_id,
+            container_id,
             cmd=shell_cmd,
             stdin=True,
             tty=True,
@@ -199,7 +209,8 @@ async def vm_console(
         logger.error(f"Console WebSocket error for VM {vm_id}: {e}")
         await websocket.close(code=4000, reason=str(e))
     finally:
-        db.close()
+        if db is not None:
+            db.close()
 
 
 @router.websocket("/ws/vnc/{vm_id}")
@@ -247,24 +258,40 @@ async def vm_vnc_console(
             await websocket.close(code=4000, reason="VM range not found")
             return
 
+        # Extract what we need before releasing the session
+        container_id = vm.container_id
+        vnc_proxy_mappings = range_obj.vnc_proxy_mappings
+        dind_docker_url = range_obj.dind_docker_url
+        dind_container_id = range_obj.dind_container_id
+        range_id_str = str(range_obj.id)
+
+        # Release DB session - no longer needed for the streaming phase
+        db.close()
+        db = None
+
         # Determine VNC connection target
         vnc_host = None
         vnc_port = VNC_WEBSOCKET_PORT
 
         # Check if this is a DinD deployment with VNC proxy mappings
         vm_id_str = str(vm_id)
-        if range_obj.vnc_proxy_mappings and vm_id_str in range_obj.vnc_proxy_mappings:
+        if vnc_proxy_mappings and vm_id_str in vnc_proxy_mappings:
             # DinD deployment - use proxy mapping
-            proxy_info = range_obj.vnc_proxy_mappings[vm_id_str]
+            proxy_info = vnc_proxy_mappings[vm_id_str]
             vnc_host = proxy_info.get("proxy_host")
             vnc_port = proxy_info.get("proxy_port", VNC_WEBSOCKET_PORT)
             logger.debug(f"Using DinD VNC proxy for VM {vm_id}: {vnc_host}:{vnc_port}")
-        elif range_obj.dind_docker_url:
+        elif dind_docker_url:
             # DinD deployment but no proxy mapping - get container IP from DinD
-            dind_client = get_dind_docker_client(range_obj)
+            if dind_container_id and dind_docker_url:
+                from cyroid.services.dind_service import get_dind_service
+                dind_service = get_dind_service()
+                dind_client = dind_service.get_range_client(range_id_str, dind_docker_url)
+            else:
+                dind_client = None
             if dind_client:
                 try:
-                    container = dind_client.containers.get(vm.container_id)
+                    container = dind_client.containers.get(container_id)
                     # Get IP from the first network the container is attached to
                     networks = container.attrs.get("NetworkSettings", {}).get("Networks", {})
                     for network_name, network_config in networks.items():
@@ -295,7 +322,7 @@ async def vm_vnc_console(
             docker = get_docker_service()
 
             try:
-                container = docker.client.containers.get(vm.container_id)
+                container = docker.client.containers.get(container_id)
                 # Get IP from the first network the container is attached to
                 networks = container.attrs.get("NetworkSettings", {}).get("Networks", {})
                 for network_name, network_config in networks.items():
@@ -374,7 +401,8 @@ async def vm_vnc_console(
         except Exception:
             pass
     finally:
-        db.close()
+        if db is not None:
+            db.close()
         if vnc_ws:
             try:
                 await vnc_ws.close()
@@ -426,13 +454,20 @@ async def range_console(
             await websocket.close(code=4000, reason="Range is not a DinD deployment")
             return
 
+        # Extract what we need before releasing the session
+        dind_container_id = range_obj.dind_container_id
+
+        # Release DB session - no longer needed for the streaming phase
+        db.close()
+        db = None
+
         # Get the DinD container from the host Docker
         from cyroid.services.docker_service import get_docker_service
         docker_service = get_docker_service()
         host_client = docker_service.client
 
         try:
-            dind_container = host_client.containers.get(range_obj.dind_container_id)
+            dind_container = host_client.containers.get(dind_container_id)
         except Exception as e:
             await websocket.close(code=4000, reason=f"DinD container not found: {e}")
             return
@@ -528,7 +563,8 @@ async def range_console(
         except Exception:
             pass
     finally:
-        db.close()
+        if db is not None:
+            db.close()
 
 
 @router.websocket("/ws/status/{range_id}")
@@ -644,6 +680,10 @@ async def system_events(
         if not user:
             return
 
+        # Release DB session - only needed for auth
+        db.close()
+        db = None
+
         from cyroid.services.event_broadcaster import (
             get_connection_manager,
             RANGE_CHANNEL_PREFIX,
@@ -743,4 +783,5 @@ async def system_events(
             await connection_manager.disconnect(connection_id)
         except Exception:
             pass
-        db.close()
+        if db is not None:
+            db.close()

@@ -640,7 +640,10 @@ class DockerService:
             # KasmVNC containers - use hardcoded VNC password for seamless auto-login
             # The linux_password field is for the actual OS user, not VNC auth
             environment["VNC_PW"] = "vncpassword"
-            logger.info(f"Set default VNC password for KasmVNC container {name}")
+            # Disable audio services to save memory (~100MB per container)
+            environment["KASM_SVC_AUDIO"] = "0"
+            environment["KASM_SVC_AUDIO_INPUT"] = "0"
+            logger.info(f"Set default VNC password for KasmVNC container {name} (audio disabled)")
         elif "linuxserver/" in image or "lscr.io/linuxserver" in image:
             # LinuxServer containers (webtop, etc.)
             if linux_username:
