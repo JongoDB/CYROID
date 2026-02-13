@@ -483,8 +483,8 @@ class RangeDeploymentService:
                     "cyroid.vm_id": str(vm.id),
                 }
 
-                # Set up environment variables based on image type
-                environment = {}
+                # Set up environment variables: blueprint env vars first, then image-type overrides
+                environment = dict(vm.environment) if vm.environment else {}
                 privileged = False
                 cap_add = None
                 sysctls = None
@@ -638,6 +638,41 @@ class RangeDeploymentService:
                 event_type=EventType.DEPLOYMENT_STEP,
                 message=f"Warning: {len(failed_vms)} VM(s) failed to create: {', '.join(failed_vms)}",
             )
+
+        # 4b. Set up inter-network routing for multi-homed VMs (firewalls/routers)
+        # Detect VMs connected to multiple networks and enable DinD-level routing
+        # between those networks so the VM can forward traffic between them.
+        multi_homed_pairs: set[tuple[str, str]] = set()
+        for vm in vms:
+            if not vm.container_id:
+                continue
+            vm_interfaces = db.query(VMNetwork).filter(VMNetwork.vm_id == vm.id).all()
+            if len(vm_interfaces) < 2:
+                continue
+            vm_networks = []
+            for iface in vm_interfaces:
+                net = db.query(Network).filter(Network.id == iface.network_id).first()
+                if net:
+                    vm_networks.append(net.name)
+            for i, net_a in enumerate(vm_networks):
+                for net_b in vm_networks[i + 1:]:
+                    pair = tuple(sorted([net_a, net_b]))
+                    multi_homed_pairs.add(pair)
+
+        if multi_homed_pairs:
+            event_service.log_event(
+                range_id=range_uuid,
+                event_type=EventType.DEPLOYMENT_STEP,
+                message=f"Enabling inter-network routing for {len(multi_homed_pairs)} network pair(s)...",
+            )
+            try:
+                await self.dind_service.setup_inter_network_routing(
+                    range_id=range_id,
+                    docker_url=docker_url,
+                    network_pairs=list(multi_homed_pairs),
+                )
+            except Exception as e:
+                logger.warning(f"Failed to set up inter-network routing: {e}")
 
         # 5. Set up VNC port forwarding using iptables DNAT (replaces nginx proxy)
         vm_ports = []
@@ -992,8 +1027,8 @@ class RangeDeploymentService:
                     "cyroid.vm_id": str(vm.id),
                 }
 
-                # Set up environment variables based on image type
-                environment = {}
+                # Set up environment variables: blueprint env vars first, then image-type overrides
+                environment = dict(vm.environment) if vm.environment else {}
                 privileged = False
                 volumes = {}
 
