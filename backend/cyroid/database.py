@@ -13,7 +13,13 @@ def get_engine():
     global _engine
     if _engine is None:
         settings = get_settings()
-        _engine = create_engine(settings.database_url)
+        _engine = create_engine(
+            settings.database_url,
+            pool_size=20,
+            max_overflow=40,
+            pool_pre_ping=True,
+            pool_recycle=3600,
+        )
     return _engine
 
 

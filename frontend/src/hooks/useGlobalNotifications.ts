@@ -127,10 +127,13 @@ export function useGlobalNotifications(
 
       // Attempt reconnection if not a clean close
       if (event.code !== 1000 && reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS && enabled) {
-        const delay = Math.min(
+        const baseDelay = Math.min(
           INITIAL_RECONNECT_DELAY * Math.pow(2, reconnectAttemptsRef.current),
           30000 // Max 30 seconds
         )
+        // Add random jitter (0-25%) to prevent thundering herd when many clients reconnect
+        const jitter = Math.random() * 0.25 * baseDelay
+        const delay = Math.round(baseDelay + jitter)
         console.log(`[GlobalNotifications] Reconnecting in ${delay}ms (attempt ${reconnectAttemptsRef.current + 1})`)
 
         reconnectTimeoutRef.current = setTimeout(() => {

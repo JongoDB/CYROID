@@ -118,7 +118,7 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    command: bash -c "until python -c \"import psycopg2; psycopg2.connect('$${DATABASE_URL}')\" 2>/dev/null; do echo 'Waiting for database...'; sleep 2; done && alembic upgrade head && uvicorn cyroid.main:app --host 0.0.0.0 --port 8000"
+    command: bash -c "until python -c \"import psycopg2; psycopg2.connect('$${DATABASE_URL}')\" 2>/dev/null; do echo 'Waiting for database...'; sleep 2; done && alembic upgrade head && uvicorn cyroid.main:app --host 0.0.0.0 --port 8000 --workers 4"
     labels:
       - "traefik.enable=true"
       # API service
@@ -193,7 +193,7 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    command: bash -c "until python -c \"import psycopg2; psycopg2.connect('$${DATABASE_URL}')\" 2>/dev/null; do echo 'Waiting for database...'; sleep 2; done && dramatiq cyroid.tasks --processes 2 --threads 4"
+    command: bash -c "until python -c \"import psycopg2; psycopg2.connect('$${DATABASE_URL}')\" 2>/dev/null; do echo 'Waiting for database...'; sleep 2; done && dramatiq cyroid.tasks --processes 4 --threads 8"
 
   registry:
     image: registry:2
