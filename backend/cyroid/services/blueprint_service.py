@@ -92,6 +92,7 @@ def extract_config_from_range(db: Session, range_id: UUID) -> BlueprintConfig:
                 disk_gb=vm.disk_gb,
                 position_x=vm.position_x,
                 position_y=vm.position_y,
+                environment=vm.environment,
             )
         )
 
@@ -299,6 +300,7 @@ def create_range_from_blueprint(
             disk_gb=vm_config.disk_gb,
             position_x=vm_config.position_x,
             position_y=vm_config.position_y,
+            environment=vm_config.environment,
         )
         db.add(vm)
         db.flush()  # Get VM ID for VMNetwork records

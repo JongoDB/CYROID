@@ -43,6 +43,8 @@ class VMConfig(BaseModel):
     disk_gb: int = 20
     position_x: Optional[int] = None
     position_y: Optional[int] = None
+    # Environment variables passed to the container at runtime
+    environment: Optional[dict[str, str]] = None
 
 
 class RouterConfig(BaseModel):

@@ -116,6 +116,9 @@ class VM(Base, UUIDMixin, TimestampMixin):
     # Used to select correct cached ISO and determine if emulation is needed
     arch: Mapped[Optional[str]] = mapped_column(String(10), nullable=True, default=None)
 
+    # Environment variables passed to the container at runtime
+    environment: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+
     # Position in visual builder (for UI)
     position_x: Mapped[int] = mapped_column(Integer, default=0)
     position_y: Mapped[int] = mapped_column(Integer, default=0)
