@@ -1896,6 +1896,12 @@ def get_vm_vnc_info(vm_id: UUID, db: DBSession, current_user: CurrentUser, reque
                     # Generate Traefik routes
                     traefik_service.generate_vnc_routes(str(vm.range_id), existing_mappings)
 
+                    # Brief delay for Traefik file watcher to pick up new routes.
+                    # Without this, the frontend may load the iframe before the
+                    # route is active, causing it to hit the frontend catch-all.
+                    import time
+                    time.sleep(1.5)
+
                     proxy_mapping = port_mappings.get(str(vm.id))
                     if proxy_mapping:
                         logger.info(f"Set up VNC routing on-demand for VM {vm.hostname}")

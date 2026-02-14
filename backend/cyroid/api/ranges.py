@@ -401,6 +401,13 @@ def delete_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
         logger.info(f"Running legacy cleanup for range {range_id}")
         docker.cleanup_range(str(range_id))
 
+        # Remove Traefik VNC route file for this range
+        try:
+            from cyroid.services.traefik_route_service import get_traefik_route_service
+            get_traefik_route_service().remove_vnc_routes(str(range_id))
+        except Exception as route_err:
+            logger.debug(f"VNC route cleanup skipped: {route_err}")
+
     except Exception as e:
         logger.warning(f"Failed to cleanup Docker resources for range {range_id}: {e}")
         # Continue with database deletion even if Docker cleanup fails
@@ -1353,6 +1360,13 @@ def teardown_range(range_id: UUID, db: DBSession, current_user: CurrentUser):
                 logger.info(f"Deleted DinD container for range {range_id}")
             except Exception as e:
                 logger.warning(f"Failed to delete DinD container: {e}")
+
+            # Remove Traefik VNC route file for this range
+            try:
+                from cyroid.services.traefik_route_service import get_traefik_route_service
+                get_traefik_route_service().remove_vnc_routes(str(range_id))
+            except Exception as route_err:
+                logger.debug(f"VNC route cleanup skipped: {route_err}")
 
             # Clear DinD references
             range_obj.dind_container_id = None

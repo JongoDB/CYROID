@@ -627,6 +627,13 @@ def _delete_event_ranges(event_id: UUID, db: Session) -> int:
                 # Legacy cleanup
                 docker.cleanup_range(str(range_id))
 
+                # Remove Traefik VNC route file
+                try:
+                    from cyroid.services.traefik_route_service import get_traefik_route_service
+                    get_traefik_route_service().remove_vnc_routes(str(range_id))
+                except Exception as route_err:
+                    logger.debug(f"VNC route cleanup skipped: {route_err}")
+
             except Exception as e:
                 logger.warning(f"Failed to cleanup Docker for range {range_id}: {e}")
 
