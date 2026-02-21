@@ -405,6 +405,7 @@ class CatalogService:
                 path=item_data.get("path", ""),
                 checksum=item_data.get("checksum", ""),
                 requires_images=item_data.get("requires_images", []),
+                requires_base_images=item_data.get("requires_base_images", []),
                 includes_msel=item_data.get("includes_msel", False),
                 includes_content=item_data.get("includes_content", False),
                 arch=arch,
@@ -482,6 +483,7 @@ class CatalogService:
             path=item_data.get("path", ""),
             checksum=item_data.get("checksum", ""),
             requires_images=item_data.get("requires_images", []),
+            requires_base_images=item_data.get("requires_base_images", []),
             includes_msel=item_data.get("includes_msel", False),
             includes_content=item_data.get("includes_content", False),
             arch=item_data.get("arch"),
@@ -636,6 +638,45 @@ class CatalogService:
                     f"Required image '{image_name}' not found in catalog at "
                     f"{image_src_dir}"
                 )
+
+        # Install required base images from catalog
+        requires_base_images = detail.requires_base_images or []
+        if requires_base_images:
+            # Load the catalog index.json to find base_image items
+            index_path = catalog_root / "index.json"
+            base_image_items: Dict[str, dict] = {}
+            if index_path.exists():
+                with open(index_path, "r", encoding="utf-8") as idx_f:
+                    index_data = json.load(idx_f)
+                base_image_items = {
+                    item.get("id"): item
+                    for item in (index_data.get("items") or [])
+                    if item.get("type") == "base_image"
+                }
+            for bi_name in requires_base_images:
+                bi_item = base_image_items.get(bi_name)
+                if bi_item:
+                    bi_path = catalog_root / bi_item.get("path", "")
+                    try:
+                        bi_detail = CatalogItemDetail(
+                            id=bi_item.get("id", ""),
+                            type=CatalogItemType.BASE_IMAGE,
+                            name=bi_item.get("name", ""),
+                            description=bi_item.get("description", ""),
+                            path=bi_item.get("path", ""),
+                        )
+                        self._install_base_image(bi_path, bi_detail)
+                        logger.info(
+                            f"Auto-installed base image '{bi_name}' for blueprint"
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            f"Could not auto-install base image '{bi_name}': {e}"
+                        )
+                else:
+                    logger.warning(
+                        f"Required base image '{bi_name}' not found in catalog index"
+                    )
 
         # Extract walkthrough -> create Content model if present
         content_id: Optional[UUID] = None

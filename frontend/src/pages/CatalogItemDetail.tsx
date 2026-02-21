@@ -302,7 +302,7 @@ export default function CatalogItemDetail() {
           </div>
 
           {/* Dependencies (blueprint-specific) */}
-          {item.requires_images.length > 0 && (
+          {(item.requires_images.length > 0 || (item.requires_base_images && item.requires_base_images.length > 0)) && (
             <div className="bg-white shadow rounded-lg p-6">
               <h3 className="text-sm font-semibold text-gray-900 uppercase tracking-wide mb-4">Required Images</h3>
               <ul className="space-y-2">
@@ -310,6 +310,12 @@ export default function CatalogItemDetail() {
                   <li key={img} className="flex items-center text-sm text-gray-700">
                     <Server className="h-4 w-4 mr-2 text-gray-400" />
                     {img}
+                  </li>
+                ))}
+                {item.requires_base_images && item.requires_base_images.map((img) => (
+                  <li key={img} className="flex items-center text-sm text-gray-700">
+                    <Server className="h-4 w-4 mr-2 text-blue-400" />
+                    {img} <span className="ml-1 text-xs text-gray-400">(base image)</span>
                   </li>
                 ))}
               </ul>
