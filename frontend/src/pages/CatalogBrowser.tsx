@@ -419,8 +419,8 @@ export default function CatalogBrowser() {
                 {/* Metadata row */}
                 <div className="mt-3 flex items-center gap-4 text-xs text-gray-500">
                   <span>v{item.version}</span>
-                  {item.requires_images.length > 0 && (
-                    <span>{item.requires_images.length} image{item.requires_images.length !== 1 && 's'}</span>
+                  {(item.requires_images.length + (item.requires_base_images?.length || 0)) > 0 && (
+                    <span>{item.requires_images.length + (item.requires_base_images?.length || 0)} image{(item.requires_images.length + (item.requires_base_images?.length || 0)) !== 1 && 's'}</span>
                   )}
                   {item.includes_msel && <span>MSEL</span>}
                   {item.includes_content && <span>Walkthrough</span>}

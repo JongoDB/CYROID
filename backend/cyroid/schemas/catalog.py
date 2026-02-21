@@ -59,6 +59,7 @@ class CatalogItemSummary(BaseModel):
     checksum: str = ""
     # Blueprint-specific
     requires_images: List[str] = []
+    requires_base_images: List[str] = []
     includes_msel: bool = False
     includes_content: bool = False
     # Image-specific

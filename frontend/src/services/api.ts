@@ -2147,6 +2147,7 @@ export interface CatalogItemSummary {
   path: string
   checksum: string
   requires_images: string[]
+  requires_base_images: string[]
   includes_msel: boolean
   includes_content: boolean
   arch?: string | null
