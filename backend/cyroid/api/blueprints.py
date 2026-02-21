@@ -650,6 +650,124 @@ async def import_blueprint(
             pass
 
 
+# ============ Async Import Endpoints ============
+
+@router.post("/import/start")
+async def start_async_import(
+    file: UploadFile = File(...),
+    template_conflict_strategy: str = Query(
+        default="skip",
+        description="(Deprecated) How to handle template conflicts"
+    ),
+    new_name: str = Query(
+        default=None,
+        description="Rename blueprint on import to avoid name conflicts"
+    ),
+    dockerfile_conflict_strategy: str = Query(
+        default="skip",
+        description="How to handle Dockerfile conflicts: skip, overwrite, or error"
+    ),
+    content_conflict_strategy: str = Query(
+        default="skip",
+        description="How to handle Content Library conflicts: skip, rename, or use_existing"
+    ),
+    build_images: bool = Query(
+        default=True,
+        description="Automatically build Docker images from included Dockerfiles"
+    ),
+    db: DBSession = None,
+    current_user: CurrentUser = None,
+):
+    """
+    Start an async blueprint import job with progress tracking.
+
+    Saves the uploaded file, queues a Dramatiq task, and returns immediately
+    with a job_id for polling status.
+    """
+    import uuid as uuid_mod
+    from cyroid.tasks.blueprint_import import import_blueprint_async, update_job_status
+
+    if not file.filename or not file.filename.endswith(".zip"):
+        raise HTTPException(status_code=400, detail="File must be a ZIP archive")
+
+    # Save uploaded file to a persistent temp path (worker needs to access it)
+    settings = __import__('cyroid.config', fromlist=['get_settings']).get_settings()
+    import_base = Path(settings.global_shared_dir) / "imports"
+    import_base.mkdir(parents=True, exist_ok=True)
+
+    job_id = str(uuid_mod.uuid4())
+    archive_path = import_base / f"{job_id}.zip"
+
+    content = await file.read()
+    archive_path.write_bytes(content)
+
+    # Initialize job status
+    update_job_status(job_id, "pending", "Queued for import...", 0, 5)
+
+    # Build options dict
+    options_dict = {
+        "template_conflict_strategy": template_conflict_strategy,
+        "dockerfile_conflict_strategy": dockerfile_conflict_strategy,
+        "content_conflict_strategy": content_conflict_strategy,
+        "build_images": build_images,
+    }
+    if new_name:
+        options_dict["new_name"] = new_name
+
+    # Queue the task
+    import_blueprint_async.send(
+        job_id,
+        str(archive_path),
+        str(current_user.id),
+        options_dict,
+    )
+
+    return {
+        "job_id": job_id,
+        "status": "pending",
+        "message": "Import job queued",
+    }
+
+
+@router.get("/import/{job_id}/status")
+def get_import_status(job_id: str, current_user: CurrentUser):
+    """
+    Get the status of an async import job.
+
+    Returns current step, progress, and any errors or results.
+    """
+    from cyroid.tasks.blueprint_import import get_job_status
+
+    status = get_job_status(job_id)
+    if not status:
+        raise HTTPException(status_code=404, detail="Import job not found")
+
+    return status
+
+
+@router.post("/import/{job_id}/cancel")
+def cancel_import(job_id: str, current_user: CurrentUser):
+    """
+    Cancel an in-progress import job.
+    """
+    from cyroid.tasks.blueprint_import import cancel_job, get_job_status
+
+    status = get_job_status(job_id)
+    if not status:
+        raise HTTPException(status_code=404, detail="Import job not found")
+
+    if status.get("status") not in ("pending", "running"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot cancel job with status: {status.get('status')}"
+        )
+
+    if cancel_job(job_id):
+        return {"message": "Import cancelled", "job_id": job_id}
+    else:
+        raise HTTPException(status_code=400, detail="Failed to cancel import")
+
+
 # ============ Helper Functions ============
 
 def _blueprint_to_response(blueprint: RangeBlueprint, db: Session) -> BlueprintResponse:

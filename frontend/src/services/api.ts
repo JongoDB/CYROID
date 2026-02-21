@@ -1192,6 +1192,17 @@ export interface BlueprintImportResult {
   warnings: string[];
 }
 
+export interface BlueprintImportJobStatus {
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+  step: string;
+  progress: number;
+  total_steps: number;
+  current_item: string;
+  error: string;
+  result?: BlueprintImportResult;
+  updated_at: string;
+}
+
 export interface BlueprintExportOptions {
   include_msel?: boolean;
   include_dockerfiles?: boolean;
@@ -1304,6 +1315,39 @@ export const blueprintsApi = {
     const response = await api.post<BlueprintImportResult>(url, formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     });
+    return response.data;
+  },
+
+  // Async Import (with progress tracking)
+  importStart: async (
+    file: File,
+    options: BlueprintImportOptions = {}
+  ): Promise<{ job_id: string; status: string; message: string }> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const params = new URLSearchParams();
+    if (options.template_conflict_strategy) {
+      params.append('template_conflict_strategy', options.template_conflict_strategy);
+    }
+    if (options.content_conflict_strategy) {
+      params.append('content_conflict_strategy', options.content_conflict_strategy);
+    }
+    if (options.new_name) {
+      params.append('new_name', options.new_name);
+    }
+    const queryString = params.toString();
+    const url = queryString ? `/blueprints/import/start?${queryString}` : '/blueprints/import/start';
+    const response = await api.post<{ job_id: string; status: string; message: string }>(url, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return response.data;
+  },
+  getImportStatus: async (jobId: string): Promise<BlueprintImportJobStatus> => {
+    const response = await api.get<BlueprintImportJobStatus>(`/blueprints/import/${jobId}/status`);
+    return response.data;
+  },
+  cancelImport: async (jobId: string): Promise<{ message: string }> => {
+    const response = await api.post<{ message: string }>(`/blueprints/import/${jobId}/cancel`);
     return response.data;
   },
 
