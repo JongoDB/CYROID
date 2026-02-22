@@ -50,6 +50,7 @@ interface VMConfig {
   disk_gb: number;
   position_x?: number;
   position_y?: number;
+  arch?: 'x86_64' | 'arm64';
   // Legacy fields for backward compatibility
   ip_address?: string;
   network_name?: string;
@@ -570,6 +571,31 @@ export function VisualBlueprintEditor({
                           />
                         </div>
                       </div>
+                    </div>
+
+                    {/* Architecture Override */}
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1">
+                        Architecture
+                      </label>
+                      <select
+                        value={vm.arch || ''}
+                        onChange={(e) =>
+                          updateVM(vmIndex, {
+                            arch: (e.target.value || undefined) as VMConfig['arch'],
+                          })
+                        }
+                        className="w-full md:w-48 px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+                      >
+                        <option value="">Host Default</option>
+                        <option value="x86_64">x86_64 (Intel/AMD)</option>
+                        <option value="arm64">ARM64 (Apple Silicon)</option>
+                      </select>
+                      {vm.arch && (
+                        <p className="mt-1 text-xs text-amber-600">
+                          Forces --platform {vm.arch === 'x86_64' ? 'linux/amd64' : 'linux/arm64'} on Docker pull
+                        </p>
+                      )}
                     </div>
 
                     {/* Network Interfaces */}
