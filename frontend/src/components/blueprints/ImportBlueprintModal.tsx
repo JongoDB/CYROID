@@ -1,9 +1,10 @@
 // frontend/src/components/blueprints/ImportBlueprintModal.tsx
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import {
   blueprintsApi,
   BlueprintImportValidation,
   BlueprintImportOptions,
+  BlueprintImportJobStatus,
 } from '../../services/api';
 import {
   Upload,
@@ -12,6 +13,7 @@ import {
   XCircle,
   AlertTriangle,
   FileArchive,
+  Ban,
 } from 'lucide-react';
 import Modal, { ModalBody, ModalFooter } from '../common/Modal';
 
@@ -41,6 +43,74 @@ export default function ImportBlueprintModal({ onClose, onSuccess }: Props) {
     warnings: string[];
   } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Async import state
+  const [jobId, setJobId] = useState<string | null>(null);
+  const [jobStatus, setJobStatus] = useState<BlueprintImportJobStatus | null>(null);
+  const [cancelling, setCancelling] = useState(false);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Clean up polling on unmount
+  useEffect(() => {
+    return () => {
+      if (pollRef.current) {
+        clearInterval(pollRef.current);
+      }
+    };
+  }, []);
+
+  // Poll for import status
+  const startPolling = useCallback((id: string) => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+    }
+
+    const poll = async () => {
+      try {
+        const status = await blueprintsApi.getImportStatus(id);
+        setJobStatus(status);
+
+        if (status.status === 'completed') {
+          if (pollRef.current) clearInterval(pollRef.current);
+
+          // Extract result from job status
+          const result = status.result;
+          if (result) {
+            setImportResult({
+              blueprintName: result.blueprint_name,
+              templatesCreated: result.templates_created || [],
+              templatesSkipped: result.templates_skipped || [],
+              dockerfilesExtracted: result.dockerfiles_extracted,
+              imagesBuilt: result.images_built,
+              contentImported: result.content_imported,
+              artifactsImported: result.artifacts_imported,
+              warnings: result.warnings || [],
+            });
+          }
+          setStep('done');
+        } else if (status.status === 'failed') {
+          if (pollRef.current) clearInterval(pollRef.current);
+          setError(status.error || 'Import failed');
+          setStep('review');
+          setJobId(null);
+          setJobStatus(null);
+        } else if (status.status === 'cancelled') {
+          if (pollRef.current) clearInterval(pollRef.current);
+          setError('Import was cancelled');
+          setStep('review');
+          setJobId(null);
+          setJobStatus(null);
+          setCancelling(false);
+        }
+      } catch {
+        // Ignore transient polling errors
+      }
+    };
+
+    // Poll immediately, then every 2 seconds
+    poll();
+    pollRef.current = setInterval(poll, 2000);
+  }, []);
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
@@ -84,27 +154,23 @@ export default function ImportBlueprintModal({ onClose, onSuccess }: Props) {
         options.new_name = newName;
       }
 
-      const result = await blueprintsApi.import(file, options);
-
-      if (result.success) {
-        setImportResult({
-          blueprintName: result.blueprint_name,
-          templatesCreated: result.templates_created,
-          templatesSkipped: result.templates_skipped,
-          dockerfilesExtracted: result.dockerfiles_extracted,
-          imagesBuilt: result.images_built,
-          contentImported: result.content_imported,
-          artifactsImported: result.artifacts_imported,
-          warnings: result.warnings,
-        });
-        setStep('done');
-      } else {
-        setError(result.errors[0] || 'Import failed');
-        setStep('review');
-      }
+      // Start async import
+      const { job_id } = await blueprintsApi.importStart(file, options);
+      setJobId(job_id);
+      startPolling(job_id);
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to import blueprint');
+      setError(err.response?.data?.detail || 'Failed to start import');
       setStep('review');
+    }
+  };
+
+  const handleCancel = async () => {
+    if (!jobId) return;
+    setCancelling(true);
+    try {
+      await blueprintsApi.cancelImport(jobId);
+    } catch {
+      // Cancellation request sent, polling will pick up the status change
     }
   };
 
@@ -114,6 +180,10 @@ export default function ImportBlueprintModal({ onClose, onSuccess }: Props) {
   };
 
   const resetModal = () => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
     setFile(null);
     setValidation(null);
     setNewName('');
@@ -121,6 +191,9 @@ export default function ImportBlueprintModal({ onClose, onSuccess }: Props) {
     setContentStrategy('skip');
     setError(null);
     setImportResult(null);
+    setJobId(null);
+    setJobStatus(null);
+    setCancelling(false);
     setStep('upload');
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
@@ -140,13 +213,18 @@ export default function ImportBlueprintModal({ onClose, onSuccess }: Props) {
       case 'review':
         return 'Review import';
       case 'importing':
-        return 'Importing...';
+        return jobStatus?.step || 'Importing...';
       case 'done':
         return 'Import complete';
       default:
         return undefined;
     }
   };
+
+  // Compute progress percentage for the bar
+  const progressPercent = jobStatus && jobStatus.total_steps > 0
+    ? Math.round((jobStatus.progress / jobStatus.total_steps) * 100)
+    : 0;
 
   return (
     <Modal
@@ -390,11 +468,37 @@ export default function ImportBlueprintModal({ onClose, onSuccess }: Props) {
           </div>
         )}
 
-        {/* Importing Step */}
+        {/* Importing Step — with progress */}
         {step === 'importing' && (
-          <div className="flex flex-col items-center py-8">
-            <Loader2 className="h-8 w-8 animate-spin text-indigo-600" />
-            <p className="mt-4 text-sm text-gray-600">Importing blueprint...</p>
+          <div className="space-y-4 py-4">
+            {/* Progress bar */}
+            <div>
+              <div className="flex justify-between text-sm text-gray-600 mb-1">
+                <span>{jobStatus?.step || 'Starting import...'}</span>
+                <span>Step {jobStatus?.progress || 0} of {jobStatus?.total_steps || 5}</span>
+              </div>
+              <div className="w-full bg-gray-200 rounded-full h-2.5">
+                <div
+                  className="bg-indigo-600 h-2.5 rounded-full transition-all duration-500"
+                  style={{ width: `${progressPercent}%` }}
+                />
+              </div>
+            </div>
+
+            {/* Current item detail */}
+            {jobStatus?.current_item && (
+              <div className="flex items-center text-sm text-gray-500">
+                <Loader2 className="h-4 w-4 animate-spin mr-2 text-indigo-500" />
+                {jobStatus.current_item}
+              </div>
+            )}
+
+            {/* Spinner when no detail */}
+            {!jobStatus?.current_item && (
+              <div className="flex justify-center">
+                <Loader2 className="h-6 w-6 animate-spin text-indigo-600" />
+              </div>
+            )}
           </div>
         )}
 
@@ -516,6 +620,18 @@ export default function ImportBlueprintModal({ onClose, onSuccess }: Props) {
               Import Blueprint
             </button>
           </>
+        )}
+
+        {step === 'importing' && (
+          <button
+            type="button"
+            onClick={handleCancel}
+            disabled={cancelling}
+            className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
+          >
+            <Ban className="h-4 w-4 mr-2" />
+            {cancelling ? 'Cancelling...' : 'Cancel Import'}
+          </button>
         )}
 
         {step === 'done' && (
