@@ -3007,6 +3007,78 @@ local-hostname: {name}
 
         return result
 
+    def _pull_platform_image(self, image: str, platform: str):
+        """Pull a specific platform variant of a multi-platform image by resolving its digest.
+
+        On ARM hosts, `docker pull --platform linux/amd64 <image>` may return the ARM
+        variant from cache. This method resolves the platform-specific manifest digest
+        and pulls by digest to guarantee the correct architecture, then re-tags it.
+
+        Args:
+            image: Image name (e.g., "dockurr/windows:latest")
+            platform: Docker platform string (e.g., "linux/amd64")
+
+        Returns:
+            docker.Image or None if the image is not multi-platform
+        """
+        import subprocess
+        target_arch = "amd64" if platform == "linux/amd64" else "arm64"
+
+        try:
+            # Use docker manifest inspect to find the platform-specific digest
+            result = subprocess.run(
+                ["docker", "manifest", "inspect", image],
+                capture_output=True, text=True, timeout=30,
+            )
+            if result.returncode != 0:
+                logger.debug(f"manifest inspect failed for '{image}': {result.stderr}")
+                return None
+
+            import json
+            manifest = json.loads(result.stdout)
+            manifests = manifest.get("manifests", [])
+
+            digest = None
+            for m in manifests:
+                plat = m.get("platform", {})
+                if plat.get("architecture") == target_arch and plat.get("os") == "linux":
+                    digest = m.get("digest")
+                    break
+
+            if not digest:
+                logger.info(f"No {target_arch} variant found in manifest for '{image}'")
+                return None
+
+            # Parse repo and tag
+            if ":" in image:
+                repo = image.rsplit(":", 1)[0]
+            else:
+                repo = image
+
+            # Pull by digest (bypasses local cache)
+            logger.info(f"Pulling '{repo}@{digest}' (platform={platform})")
+            pulled = self.client.images.pull(f"{repo}@{digest}")
+
+            # Verify architecture
+            pulled_arch = pulled.attrs.get("Architecture", "")
+            if pulled_arch != target_arch:
+                logger.warning(f"Digest pull got {pulled_arch}, expected {target_arch}")
+                return None
+
+            # Re-tag so the image is accessible by its original name
+            if ":" in image:
+                tag_repo, tag_tag = image.rsplit(":", 1)
+            else:
+                tag_repo, tag_tag = image, "latest"
+            pulled.tag(tag_repo, tag_tag)
+            logger.info(f"Tagged {target_arch} image as '{tag_repo}:{tag_tag}'")
+
+            return self.client.images.get(image)
+
+        except Exception as e:
+            logger.warning(f"Platform-specific pull failed for '{image}': {e}")
+            return None
+
     async def transfer_image_to_dind(
         self,
         range_id: str,
@@ -3149,6 +3221,27 @@ local-hostname: {name}
                 host_image = self.client.images.get(img_name)
                 image_size = host_image.attrs.get('Size', 0)
                 logger.info(f"Image '{img_name}' found on host (size: {image_size / 1024 / 1024:.1f} MB, tags: {host_image.tags})")
+
+                # If a specific platform is requested, verify the cached image matches.
+                # On ARM hosts, "dockurr/windows:latest" may be cached as ARM even though
+                # we need amd64. Multi-platform images require digest-based re-pull.
+                if platform:
+                    img_arch = host_image.attrs.get("Architecture", "")
+                    expected_arch = "amd64" if platform == "linux/amd64" else "arm64"
+                    if img_arch != expected_arch:
+                        logger.warning(
+                            f"Image '{img_name}' on host is {img_arch}, need {expected_arch} — "
+                            f"re-pulling with platform digest"
+                        )
+                        host_image = self._pull_platform_image(image, platform)
+                        if host_image:
+                            image_size = host_image.attrs.get('Size', 0)
+                            logger.info(f"Re-pulled '{image}' as {expected_arch} ({image_size / 1024 / 1024:.1f} MB)")
+                        else:
+                            logger.error(f"Failed to re-pull '{image}' as {expected_arch}")
+                            report_progress(0, 0, 'error')
+                            return False
+
                 report_progress(0, image_size, 'found_on_host')
                 break
             except docker.errors.ImageNotFound:
@@ -3160,7 +3253,13 @@ local-hostname: {name}
                 logger.info(f"Image '{image}' not on host, pulling (platform={platform})...")
                 report_progress(0, 0, 'pulling_to_host')
                 try:
-                    host_image = self.client.images.pull(image, platform=platform)
+                    if platform:
+                        # Use digest-based pull for cross-platform to avoid ARM cache issues
+                        host_image = self._pull_platform_image(image, platform)
+                        if not host_image:
+                            host_image = self.client.images.pull(image, platform=platform)
+                    else:
+                        host_image = self.client.images.pull(image)
                     image_size = host_image.attrs.get('Size', 0)
                     logger.info(f"Pulled '{image}' to host (size: {image_size / 1024 / 1024:.1f} MB)")
                     report_progress(image_size, image_size, 'pulled_to_host')
