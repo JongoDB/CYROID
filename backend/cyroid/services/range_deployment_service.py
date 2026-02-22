@@ -259,6 +259,12 @@ class RangeDeploymentService:
                 base_img = db.query(BaseImage).filter(BaseImage.id == vm.base_image_id).first()
                 if base_img and base_img.image_type == "container":
                     image_tag = base_img.docker_image_tag or base_img.docker_image_id
+                    # Override dockurr/windows image based on vm.arch
+                    if image_tag and vm.arch and ("dockurr/windows" in image_tag.lower() or "dockur/windows" in image_tag.lower()):
+                        if vm.arch == "x86_64":
+                            image_tag = "dockurr/windows:latest"
+                        elif vm.arch == "arm64":
+                            image_tag = "dockurr/windows-arm:latest"
                     if image_tag:
                         unique_images[image_tag] = vm.arch
             elif vm.golden_image_id:
@@ -416,6 +422,14 @@ class RangeDeploymentService:
                     # New Image Library: Base Image
                     if vm.base_image.image_type == "container":
                         container_image = vm.base_image.docker_image_tag or vm.base_image.docker_image_id
+                        # Override dockurr/windows image based on vm.arch
+                        # dockurr/windows (x86_64) and dockurr/windows-arm (arm64) are separate images
+                        if container_image and vm.arch and ("dockurr/windows" in container_image.lower() or "dockur/windows" in container_image.lower()):
+                            if vm.arch == "x86_64":
+                                container_image = "dockurr/windows:latest"
+                            elif vm.arch == "arm64":
+                                container_image = "dockurr/windows-arm:latest"
+                            logger.info(f"VM {vm.hostname}: arch override -> {container_image}")
                     else:
                         error_msg = f"VM {vm.hostname} uses ISO-based base image, not supported in DinD yet"
                         logger.warning(error_msg)
@@ -911,12 +925,20 @@ class RangeDeploymentService:
                     if base_img.image_type == "container":
                         # Container-based VMs use the docker image directly
                         image_tag = base_img.docker_image_tag or base_img.docker_image_id
+                        # Override dockurr/windows image based on vm.arch
+                        if image_tag and vm.arch and ("dockurr/windows" in image_tag.lower() or "dockur/windows" in image_tag.lower()):
+                            if vm.arch == "x86_64":
+                                image_tag = "dockurr/windows:latest"
+                            elif vm.arch == "arm64":
+                                image_tag = "dockurr/windows-arm:latest"
                         if image_tag:
                             unique_images.add(image_tag)
                     elif base_img.image_type == "iso":
                         # ISO-based VMs use QEMU images based on vm_type
+                        # vm.arch overrides base_img.native_arch when set
+                        target_arch = vm.arch or base_img.native_arch
                         if base_img.vm_type == VMType.WINDOWS_VM:
-                            if base_img.native_arch == "arm64":
+                            if target_arch == "arm64":
                                 unique_images.add("dockurr/windows-arm:latest")
                             else:
                                 unique_images.add("dockurr/windows:latest")
@@ -986,11 +1008,20 @@ class RangeDeploymentService:
                         image_tag = snapshot.docker_image_tag or snapshot.docker_image_id
                         vm_type = snapshot.vm_type
 
+                # Override dockurr/windows image based on vm.arch
+                if image_tag and vm.arch and ("dockurr/windows" in image_tag.lower() or "dockur/windows" in image_tag.lower()):
+                    if vm.arch == "x86_64":
+                        image_tag = "dockurr/windows:latest"
+                    elif vm.arch == "arm64":
+                        image_tag = "dockurr/windows-arm:latest"
+                    logger.info(f"VM {vm.hostname}: arch override -> {image_tag}")
+
                 # For ISO-based VMs, derive image from vm_type
                 if not image_tag and vm_type:
+                    target_arch = vm.arch or (base_img.native_arch if base_img else None)
                     if vm_type == VMType.WINDOWS_VM:
-                        # Check architecture for Windows ARM
-                        if base_img and base_img.native_arch == "arm64":
+                        # Check architecture for Windows ARM - vm.arch overrides base_img
+                        if target_arch == "arm64":
                             image_tag = "dockurr/windows-arm:latest"
                         else:
                             image_tag = "dockurr/windows:latest"
