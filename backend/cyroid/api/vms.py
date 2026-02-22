@@ -790,7 +790,7 @@ def _start_or_provision_vm(vm_id: UUID, db: Session, current_user, provision_onl
     _event_svc = EventService(db)
     _event_svc.log_event(
         range_id=vm.range_id, vm_id=vm.id,
-        event_type=EventType.VM_CREATED,
+        event_type=EventType.VM_CREATING,
         message=f"{'Provisioning' if provision_only else 'Starting'} VM {vm.hostname}..."
     )
 
@@ -973,8 +973,8 @@ def _start_or_provision_vm(vm_id: UUID, db: Session, current_user, provision_onl
             # Create new container — log progress for WebSocket
             _event_svc.log_event(
                 range_id=vm.range_id, vm_id=vm.id,
-                event_type=EventType.VM_CREATED,
-                message=f"Pulling image {image_ref} and creating container for {vm.hostname}..."
+                event_type=EventType.DEPLOYMENT_STEP,
+                message=f"Pulling image {image_ref} for {vm.hostname}..."
             )
             vm_id_short = str(vm.id)[:8]
             labels = {
@@ -1545,20 +1545,31 @@ def _start_or_provision_vm(vm_id: UUID, db: Session, current_user, provision_onl
 
             vm.container_id = container_id
 
+            _event_svc.log_event(
+                range_id=vm.range_id, vm_id=vm.id,
+                event_type=EventType.DEPLOYMENT_STEP,
+                message=f"Container created for {vm.hostname}"
+            )
+
             # Provision-only: save container_id and set STOPPED without starting
             if provision_only:
                 vm.status = VMStatus.STOPPED
                 db.commit()
                 db.refresh(vm)
                 logger.info(f"VM {vm.hostname} provisioned (container {container_id[:12]}), status=STOPPED")
-                event_service = EventService(db)
-                event_service.log_event(
+                _event_svc.log_event(
                     range_id=vm.range_id,
                     vm_id=vm.id,
                     event_type=EventType.VM_CREATED,
                     message=f"VM {vm.hostname} provisioned and ready to start"
                 )
                 return vm_to_response(vm, db, base_image_record, golden_image_record, snapshot)
+
+            _event_svc.log_event(
+                range_id=vm.range_id, vm_id=vm.id,
+                event_type=EventType.DEPLOYMENT_STEP,
+                message=f"Starting {vm.hostname}..."
+            )
 
             if use_dind:
                 asyncio.run(docker.start_range_container_dind(
@@ -1614,6 +1625,12 @@ def _start_or_provision_vm(vm_id: UUID, db: Session, current_user, provision_onl
         db.commit()
         db.refresh(vm)
 
+        _event_svc.log_event(
+            range_id=vm.range_id, vm_id=vm.id,
+            event_type=EventType.VM_STARTED,
+            message=f"VM {vm.hostname} is running"
+        )
+
         # Set up VNC port forwarding for DinD ranges (for VMs created after deployment or missing VNC)
         logger.info(f"VNC check: use_dind={use_dind}, container_id={vm.container_id}, ip={vm.ip_address}, vm_type={vm_type}")
         if use_dind and vm.container_id and vm.ip_address:
@@ -1624,6 +1641,11 @@ def _start_or_provision_vm(vm_id: UUID, db: Session, current_user, provision_onl
 
             if vm_id_str not in existing_mappings:
                 logger.info(f"VNC mapping missing for VM {vm_id_str}, setting up...")
+                _event_svc.log_event(
+                    range_id=vm.range_id, vm_id=vm.id,
+                    event_type=EventType.DEPLOYMENT_STEP,
+                    message=f"Setting up VNC console for {vm.hostname}..."
+                )
                 # VNC mapping missing - set it up
                 try:
                     from cyroid.services.dind_service import get_dind_service
@@ -1765,6 +1787,11 @@ def _start_or_provision_vm(vm_id: UUID, db: Session, current_user, provision_onl
         vm.status = VMStatus.ERROR
         vm.error_message = str(he.detail)[:1000]
         db.commit()
+        _event_svc.log_event(
+            range_id=vm.range_id, vm_id=vm.id,
+            event_type=EventType.VM_ERROR,
+            message=f"VM {vm.hostname} failed: {str(he.detail)[:200]}"
+        )
         raise
     except Exception as e:
         logger.error(f"Failed to start VM {vm_id}: {e}")

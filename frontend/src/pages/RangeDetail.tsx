@@ -329,19 +329,92 @@ export default function RangeDetail() {
   const [recentlyChangedVms, setRecentlyChangedVms] = useState<Set<string>>(new Set())
   const vmStatusRef = useRef<Record<string, string>>({})
 
+  // Track per-VM provisioning progress messages from WebSocket events
+  const [vmProgress, setVmProgress] = useState<Record<string, string>>({})
+
+  // Clear stale progress entries when VM status changes from any source
+  useEffect(() => {
+    setVmProgress(prev => {
+      const staleIds = Object.keys(prev).filter(vmId => {
+        const vm = vms.find(v => v.id === vmId)
+        return vm && vm.status !== 'creating'
+      })
+      if (staleIds.length === 0) return prev
+      const next = { ...prev }
+      staleIds.forEach(id => delete next[id])
+      return next
+    })
+  }, [vms])
+
   // Handle real-time events
   const handleRealtimeEvent = useCallback((event: RealtimeEvent) => {
+    // Track per-VM progress and update status optimistically from WebSocket events
+    if (event.vm_id) {
+      const vmId = event.vm_id
+
+      if (event.event_type === 'vm_creating' || event.event_type === 'deployment_step') {
+        setVmProgress(prev => ({ ...prev, [vmId]: event.message }))
+        // Ensure VM shows as 'creating' status immediately
+        setVms(prev => prev.map(vm =>
+          vm.id === vmId && vm.status !== 'creating'
+            ? { ...vm, status: 'creating' as VM['status'] }
+            : vm
+        ))
+      } else if (event.event_type === 'vm_created') {
+        // Provisioned → stopped (ready to start)
+        setVmProgress(prev => {
+          const next = { ...prev }
+          delete next[vmId]
+          return next
+        })
+        setVms(prev => prev.map(vm =>
+          vm.id === vmId ? { ...vm, status: 'stopped' as VM['status'] } : vm
+        ))
+        // Trigger pulse animation
+        setRecentlyChangedVms(prev => new Set(prev).add(vmId))
+        setTimeout(() => setRecentlyChangedVms(prev => { const n = new Set(prev); n.delete(vmId); return n }), 1000)
+        fetchData()
+      } else if (event.event_type === 'vm_started') {
+        // Started → running
+        setVmProgress(prev => {
+          const next = { ...prev }
+          delete next[vmId]
+          return next
+        })
+        setVms(prev => prev.map(vm =>
+          vm.id === vmId ? { ...vm, status: 'running' as VM['status'] } : vm
+        ))
+        setRecentlyChangedVms(prev => new Set(prev).add(vmId))
+        setTimeout(() => setRecentlyChangedVms(prev => { const n = new Set(prev); n.delete(vmId); return n }), 1000)
+        fetchData()
+      } else if (event.event_type === 'vm_stopped') {
+        setVms(prev => prev.map(vm =>
+          vm.id === vmId ? { ...vm, status: 'stopped' as VM['status'] } : vm
+        ))
+        setRecentlyChangedVms(prev => new Set(prev).add(vmId))
+        setTimeout(() => setRecentlyChangedVms(prev => { const n = new Set(prev); n.delete(vmId); return n }), 1000)
+        fetchData()
+      } else if (event.event_type === 'vm_error') {
+        setVmProgress(prev => {
+          const next = { ...prev }
+          delete next[vmId]
+          return next
+        })
+        setVms(prev => prev.map(vm =>
+          vm.id === vmId ? { ...vm, status: 'error' as VM['status'], error_message: event.message } : vm
+        ))
+        setRecentlyChangedVms(prev => new Set(prev).add(vmId))
+        setTimeout(() => setRecentlyChangedVms(prev => { const n = new Set(prev); n.delete(vmId); return n }), 1000)
+        toast.error(`VM Error: ${event.message}`)
+      }
+    }
+
     // Show toast for significant events
     if (event.event_type === 'deployment_completed') {
       toast.success(event.message)
       fetchData()
     } else if (event.event_type === 'deployment_failed') {
       toast.error(event.message)
-      fetchData()
-    } else if (event.event_type === 'vm_error') {
-      toast.error(`VM Error: ${event.message}`)
-    } else if (event.event_type === 'vm_started' || event.event_type === 'vm_stopped') {
-      // Refresh to get latest VM status
       fetchData()
     }
   }, [])
@@ -894,10 +967,8 @@ export default function RangeDetail() {
 
       // Auto-provision VM in background if range is already deployed
       if (range.status === 'running' || range.status === 'stopped') {
-        toast.info(`Provisioning ${vmData.hostname} — pulling image and creating container...`)
-        // Fire-and-forget: don't block UI, progress shows via WebSocket events
+        // Fire-and-forget: progress shows inline via WebSocket events
         vmsApi.provision(newVm.id).then(() => {
-          toast.success(`${vmData.hostname} ready — click play to start`)
           fetchData()
         }).catch((provisionErr: any) => {
           toast.error(provisionErr.response?.data?.detail || `Failed to provision ${vmData.hostname}`)
@@ -1351,11 +1422,18 @@ export default function RangeDetail() {
                 // Get image source name (base image, golden image, or legacy template)
                 const imageName = vm.base_image?.name || vm.golden_image?.name || vm.template?.name || 'Unknown'
                 return (
-                  <div key={vm.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                  <div key={vm.id} className={clsx(
+                    "p-3 rounded-lg",
+                    vm.status === 'creating' || vmProgress[vm.id] ? 'bg-blue-50 border border-blue-200' : 'bg-gray-50'
+                  )}>
+                    <div className="flex items-center justify-between">
                     <div className="flex items-center">
                       <Server className={clsx(
                         "h-5 w-5 mr-3",
-                        vm.status === 'running' ? 'text-green-500' : 'text-gray-400'
+                        vm.status === 'running' ? 'text-green-500' :
+                        vm.status === 'creating' ? 'text-blue-500 animate-pulse' :
+                        vm.status === 'error' ? 'text-red-500' :
+                        'text-gray-400'
                       )} />
                       <div>
                         <div className="flex items-center">
@@ -1365,7 +1443,12 @@ export default function RangeDetail() {
                             statusColors[vm.status.toLowerCase()],
                             recentlyChangedVms.has(vm.id) && "animate-pulse-once ring-2 ring-blue-400"
                           )}>
-                            {vm.status.toLowerCase()}
+                            {vm.status === 'creating' ? (
+                              <span className="inline-flex items-center gap-1">
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                                provisioning
+                              </span>
+                            ) : vm.status.toLowerCase()}
                           </span>
                         </div>
                         <p className="text-xs text-gray-500">
@@ -1448,6 +1531,21 @@ export default function RangeDetail() {
                         <Trash2 className="h-4 w-4" />
                       </button>
                     </div>
+                    </div>
+                    {/* Inline provisioning progress */}
+                    {(vm.status === 'creating' || vmProgress[vm.id]) && (
+                      <div className="mt-2 flex items-center gap-2 pl-8">
+                        <Loader2 className="h-3.5 w-3.5 text-blue-500 animate-spin flex-shrink-0" />
+                        <span className="text-xs text-blue-600 truncate">
+                          {vmProgress[vm.id] || 'Provisioning...'}
+                        </span>
+                      </div>
+                    )}
+                    {vm.status === 'error' && vm.error_message && (
+                      <div className="mt-2 pl-8">
+                        <span className="text-xs text-red-600">{vm.error_message}</span>
+                      </div>
+                    )}
                   </div>
                 )
               })}
