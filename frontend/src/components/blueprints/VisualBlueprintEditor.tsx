@@ -466,7 +466,12 @@ export function VisualBlueprintEditor({
                     <span className="ml-3 text-xs text-gray-500">
                       {vm.base_image_tag || vm.template_name || 'No image'}
                     </span>
-                    <span className="ml-3 text-xs text-gray-400">
+                    {vm.arch && (
+                      <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-700">
+                        {vm.arch}
+                      </span>
+                    )}
+                    <span className="ml-2 text-xs text-gray-400">
                       {vm.network_interfaces.length} NIC
                       {vm.network_interfaces.length !== 1 ? 's' : ''}
                     </span>
@@ -515,9 +520,22 @@ export function VisualBlueprintEditor({
                         <input
                           type="text"
                           value={vm.base_image_tag || ''}
-                          onChange={(e) =>
-                            updateVM(vmIndex, { base_image_tag: e.target.value })
-                          }
+                          onChange={(e) => {
+                            const newTag = e.target.value;
+                            const lower = newTag.toLowerCase();
+                            const isMultiPlatform =
+                              lower.includes('dockurr/') ||
+                              lower.includes('dockur/') ||
+                              lower.includes('qemux/') ||
+                              lower.includes('windows') ||
+                              lower.includes('macos');
+                            // Clear arch when switching to a non-multi-platform image
+                            const updates: Partial<VMConfig> = { base_image_tag: newTag };
+                            if (!isMultiPlatform && vm.arch) {
+                              updates.arch = undefined;
+                            }
+                            updateVM(vmIndex, updates);
+                          }}
                           placeholder="ubuntu:22.04"
                           className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
                         />
@@ -573,30 +591,42 @@ export function VisualBlueprintEditor({
                       </div>
                     </div>
 
-                    {/* Architecture Override */}
-                    <div>
-                      <label className="block text-xs font-medium text-gray-500 mb-1">
-                        Architecture
-                      </label>
-                      <select
-                        value={vm.arch || ''}
-                        onChange={(e) =>
-                          updateVM(vmIndex, {
-                            arch: (e.target.value || undefined) as VMConfig['arch'],
-                          })
-                        }
-                        className="w-full md:w-48 px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
-                      >
-                        <option value="">Host Default</option>
-                        <option value="x86_64">x86_64 (Intel/AMD)</option>
-                        <option value="arm64">ARM64 (Apple Silicon)</option>
-                      </select>
-                      {vm.arch && (
-                        <p className="mt-1 text-xs text-amber-600">
-                          Forces --platform {vm.arch === 'x86_64' ? 'linux/amd64' : 'linux/arm64'} on Docker pull
-                        </p>
-                      )}
-                    </div>
+                    {/* Architecture Override - only for multi-platform images (dockurr, qemux, etc.) */}
+                    {(() => {
+                      const tag = (vm.base_image_tag || '').toLowerCase();
+                      const isMultiPlatform =
+                        tag.includes('dockurr/') ||
+                        tag.includes('dockur/') ||
+                        tag.includes('qemux/') ||
+                        tag.includes('windows') ||
+                        tag.includes('macos');
+                      if (!isMultiPlatform && !vm.arch) return null;
+                      return (
+                        <div>
+                          <label className="block text-xs font-medium text-gray-500 mb-1">
+                            Architecture
+                          </label>
+                          <select
+                            value={vm.arch || ''}
+                            onChange={(e) =>
+                              updateVM(vmIndex, {
+                                arch: (e.target.value || undefined) as VMConfig['arch'],
+                              })
+                            }
+                            className="w-full md:w-48 px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+                          >
+                            <option value="">Host Default</option>
+                            <option value="x86_64">x86_64 (Intel/AMD)</option>
+                            <option value="arm64">ARM64 (Apple Silicon)</option>
+                          </select>
+                          {vm.arch && (
+                            <p className="mt-1 text-xs text-amber-600">
+                              Forces --platform {vm.arch === 'x86_64' ? 'linux/amd64' : 'linux/arm64'} on Docker pull
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })()}
 
                     {/* Network Interfaces */}
                     <div>
