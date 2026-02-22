@@ -203,6 +203,8 @@ def create_range_from_blueprint(
             subnet=net_config.subnet,
             gateway=net_config.gateway,
             is_isolated=net_config.is_isolated,
+            internet_enabled=net_config.internet_enabled,
+            dhcp_enabled=net_config.dhcp_enabled,
         )
         db.add(network)
         db.flush()

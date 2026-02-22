@@ -59,7 +59,9 @@ def build_config_from_yaml(blueprint_data: dict) -> dict:
             "name": net.get("name"),
             "subnet": net.get("subnet"),
             "gateway": net.get("gateway"),
-            "is_isolated": net.get("is_isolated", False)
+            "is_isolated": net.get("is_isolated", False),
+            "internet_enabled": net.get("internet_enabled", False),
+            "dhcp_enabled": net.get("dhcp_enabled", False),
         })
 
     # Convert VMs

@@ -12,6 +12,8 @@ class NetworkConfig(BaseModel):
     subnet: str
     gateway: str
     is_isolated: bool = False
+    internet_enabled: bool = False
+    dhcp_enabled: bool = False
 
 
 class NetworkInterfaceConfig(BaseModel):
