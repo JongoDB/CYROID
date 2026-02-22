@@ -300,6 +300,7 @@ def create_range_from_blueprint(
             disk_gb=vm_config.disk_gb,
             position_x=vm_config.position_x,
             position_y=vm_config.position_y,
+            windows_version=vm_config.windows_version,
             environment=vm_config.environment,
         )
         db.add(vm)
