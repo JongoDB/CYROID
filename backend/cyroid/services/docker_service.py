@@ -2836,10 +2836,21 @@ local-hostname: {name}
         if arch:
             platform = "linux/amd64" if arch == "x86_64" else "linux/arm64"
 
-        # Pull image if not present in DinD
+        # Pull image if not present in DinD (or wrong architecture)
+        need_pull = False
         try:
-            range_client.images.get(image)
+            existing = range_client.images.get(image)
+            # If a specific platform is requested, verify the cached image matches
+            if platform:
+                img_arch = existing.attrs.get("Architecture", "")
+                expected_arch = "amd64" if platform == "linux/amd64" else "arm64"
+                if img_arch != expected_arch:
+                    logger.info(f"Image {image} in DinD is {img_arch}, need {expected_arch} — re-pulling")
+                    need_pull = True
         except ImageNotFound:
+            need_pull = True
+
+        if need_pull:
             logger.info(f"Pulling image {image} into DinD for range {range_id} (platform={platform})")
             range_client.images.pull(image, platform=platform)
 
@@ -2885,6 +2896,9 @@ local-hostname: {name}
             host_config_args["devices"] = devices
 
         try:
+            # Note: platform is NOT passed to create_container — it's a strict
+            # verification check that rejects if the cached image doesn't match.
+            # The platform constraint is enforced at pull time instead.
             create_kwargs = dict(
                 image=image,
                 name=name,
@@ -2897,8 +2911,6 @@ local-hostname: {name}
                 environment=environment,
                 labels=labels or {},
             )
-            if platform:
-                create_kwargs["platform"] = platform
 
             container = range_client.api.create_container(**create_kwargs)
             container_id = container["Id"]
@@ -3064,11 +3076,22 @@ local-hostname: {name}
             return False
 
         # Check if image already exists in DinD (early return)
+        # If a specific platform is requested, verify the cached image matches
         try:
-            range_client.images.get(image)
-            logger.info(f"Image '{image}' already exists in DinD, skipping transfer")
-            report_progress(0, 0, 'already_exists')
-            return True
+            existing = range_client.images.get(image)
+            if platform:
+                img_arch = existing.attrs.get("Architecture", "")
+                expected_arch = "amd64" if platform == "linux/amd64" else "arm64"
+                if img_arch != expected_arch:
+                    logger.info(f"Image '{image}' in DinD is {img_arch}, need {expected_arch} — re-transferring")
+                else:
+                    logger.info(f"Image '{image}' already exists in DinD with correct arch, skipping transfer")
+                    report_progress(0, 0, 'already_exists')
+                    return True
+            else:
+                logger.info(f"Image '{image}' already exists in DinD, skipping transfer")
+                report_progress(0, 0, 'already_exists')
+                return True
         except docker.errors.ImageNotFound:
             pass  # Need to transfer
 
