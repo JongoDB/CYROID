@@ -47,6 +47,9 @@ class VMConfig(BaseModel):
     position_y: Optional[int] = None
     # Windows version code for dockur/windows VMs (e.g., "11", "10", "2022")
     windows_version: Optional[str] = None
+    # Target architecture override (e.g., "x86_64" or "arm64")
+    # When set, Docker pulls the specific platform variant instead of host default
+    arch: Optional[str] = None
     # Environment variables passed to the container at runtime
     environment: Optional[dict[str, str]] = None
 

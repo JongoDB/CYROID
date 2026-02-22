@@ -92,6 +92,7 @@ def extract_config_from_range(db: Session, range_id: UUID) -> BlueprintConfig:
                 disk_gb=vm.disk_gb,
                 position_x=vm.position_x,
                 position_y=vm.position_y,
+                arch=vm.arch,
                 environment=vm.environment,
             )
         )
@@ -303,6 +304,7 @@ def create_range_from_blueprint(
             position_x=vm_config.position_x,
             position_y=vm_config.position_y,
             windows_version=vm_config.windows_version,
+            arch=vm_config.arch,
             environment=vm_config.environment,
         )
         db.add(vm)

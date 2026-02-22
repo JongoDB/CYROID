@@ -250,7 +250,9 @@ class RangeDeploymentService:
         # 3. Pull required images into DinD
         current_stage = 3
         vms = db.query(VM).filter(VM.range_id == range_obj.id).all()
-        unique_images = set()
+        # Map image_tag -> arch (None means host default)
+        # If multiple VMs use the same image with different arch, the last one wins
+        unique_images: dict[str, str | None] = {}
         for vm in vms:
             # Get container image from Image Library sources
             if vm.base_image_id:
@@ -258,19 +260,19 @@ class RangeDeploymentService:
                 if base_img and base_img.image_type == "container":
                     image_tag = base_img.docker_image_tag or base_img.docker_image_id
                     if image_tag:
-                        unique_images.add(image_tag)
+                        unique_images[image_tag] = vm.arch
             elif vm.golden_image_id:
                 golden_img = db.query(GoldenImage).filter(GoldenImage.id == vm.golden_image_id).first()
                 if golden_img:
                     image_tag = golden_img.docker_image_tag or golden_img.docker_image_id
                     if image_tag:
-                        unique_images.add(image_tag)
+                        unique_images[image_tag] = vm.arch
             elif vm.snapshot_id:
                 snapshot = db.query(Snapshot).filter(Snapshot.id == vm.snapshot_id).first()
                 if snapshot:
                     image_tag = snapshot.docker_image_tag or snapshot.docker_image_id
                     if image_tag:
-                        unique_images.add(image_tag)
+                        unique_images[image_tag] = vm.arch
 
         if unique_images:
             event_service.log_event(
@@ -279,7 +281,7 @@ class RangeDeploymentService:
                 message=f"[Stage {current_stage}/{total_stages}] Transferring {len(unique_images)} image(s) to DinD...",
             )
 
-        for idx, image in enumerate(unique_images, 1):
+        for idx, (image, image_arch) in enumerate(unique_images.items(), 1):
             # Create a progress callback that emits events for this image
             last_status = [None]  # Use list to allow modification in closure
             last_pct = [0]  # Track last reported percentage
@@ -347,6 +349,7 @@ class RangeDeploymentService:
                     docker_url=docker_url,
                     image=image,
                     progress_callback=image_progress_callback,
+                    arch=image_arch,
                 )
 
                 # Notify users if image was pulled from internet (not from local registry)
@@ -560,6 +563,7 @@ class RangeDeploymentService:
                     cap_add=cap_add,
                     sysctls=sysctls,
                     devices=devices,
+                    arch=vm.arch,
                 )
 
                 vm.container_id = container_id

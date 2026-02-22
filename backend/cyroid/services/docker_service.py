@@ -2809,6 +2809,7 @@ local-hostname: {name}
         dns_search: Optional[str] = None,
         sysctls: Optional[Dict[str, str]] = None,
         devices: Optional[List[str]] = None,
+        arch: Optional[str] = None,
     ) -> str:
         """
         Create a container inside a range's DinD container.
@@ -2822,6 +2823,7 @@ local-hostname: {name}
             image: Docker image
             network_name: Network to attach to (inside DinD)
             ip_address: Static IP address (exact blueprint IP)
+            arch: Target architecture ("x86_64" or "arm64"), None = host default
             Other args same as create_container()
 
         Returns:
@@ -2829,12 +2831,17 @@ local-hostname: {name}
         """
         range_client = self.get_range_client_sync(range_id, docker_url)
 
+        # Map arch to Docker platform string
+        platform = None
+        if arch:
+            platform = "linux/amd64" if arch == "x86_64" else "linux/arm64"
+
         # Pull image if not present in DinD
         try:
             range_client.images.get(image)
         except ImageNotFound:
-            logger.info(f"Pulling image {image} into DinD for range {range_id}")
-            range_client.images.pull(image)
+            logger.info(f"Pulling image {image} into DinD for range {range_id} (platform={platform})")
+            range_client.images.pull(image, platform=platform)
 
         # Get network
         try:
@@ -2878,7 +2885,7 @@ local-hostname: {name}
             host_config_args["devices"] = devices
 
         try:
-            container = range_client.api.create_container(
+            create_kwargs = dict(
                 image=image,
                 name=name,
                 hostname=hostname or name,
@@ -2888,10 +2895,14 @@ local-hostname: {name}
                 networking_config=networking_config,
                 host_config=range_client.api.create_host_config(**host_config_args),
                 environment=environment,
-                labels=labels or {}
+                labels=labels or {},
             )
+            if platform:
+                create_kwargs["platform"] = platform
+
+            container = range_client.api.create_container(**create_kwargs)
             container_id = container["Id"]
-            logger.info(f"Created container '{name}' in range {range_id} DinD with IP {ip_address}")
+            logger.info(f"Created container '{name}' in range {range_id} DinD with IP {ip_address} (platform={platform})")
             return container_id
         except APIError as e:
             logger.error(f"Failed to create container in DinD: {e}")
@@ -3000,6 +3011,7 @@ local-hostname: {name}
         image: str,
         pull_if_missing: bool = True,
         progress_callback: Optional[Callable[[int, int, str], None]] = None,
+        arch: Optional[str] = None,
     ) -> bool:
         """
         Transfer a Docker image from host to a DinD container.
@@ -3020,10 +3032,16 @@ local-hostname: {name}
                 Status values: 'starting', 'found_on_host', 'pulling_to_host',
                 'pulled_to_host', 'already_exists', 'pushing_to_registry',
                 'pulling_from_registry', 'transferring', 'complete', 'error'
+            arch: Target architecture ("x86_64" or "arm64"), None = host default
 
         Returns:
             True if transfer succeeded, False otherwise
         """
+        # Map arch to Docker platform string
+        platform = None
+        if arch:
+            platform = "linux/amd64" if arch == "x86_64" else "linux/arm64"
+
         # Helper to safely call progress callback
         def report_progress(transferred: int, total: int, status: str) -> None:
             if progress_callback:
@@ -3032,7 +3050,7 @@ local-hostname: {name}
                 except Exception as e:
                     logger.warning(f"Progress callback error: {e}")
 
-        logger.info(f"Transferring image '{image}' to DinD for range {range_id}")
+        logger.info(f"Transferring image '{image}' to DinD for range {range_id} (platform={platform})")
         report_progress(0, 0, 'starting')
 
         image_size = 0
@@ -3082,7 +3100,7 @@ local-hostname: {name}
 
                     registry_tag = registry.get_registry_tag(image)
                     try:
-                        range_client.images.pull(registry_tag)
+                        range_client.images.pull(registry_tag, platform=platform)
 
                         # Retag to original name — use api.tag for reliability
                         # (images.get can fail for multi-platform manifests)
@@ -3123,10 +3141,10 @@ local-hostname: {name}
 
         if host_image is None:
             if pull_if_missing:
-                logger.info(f"Image '{image}' not on host, pulling...")
+                logger.info(f"Image '{image}' not on host, pulling (platform={platform})...")
                 report_progress(0, 0, 'pulling_to_host')
                 try:
-                    host_image = self.client.images.pull(image)
+                    host_image = self.client.images.pull(image, platform=platform)
                     image_size = host_image.attrs.get('Size', 0)
                     logger.info(f"Pulled '{image}' to host (size: {image_size / 1024 / 1024:.1f} MB)")
                     report_progress(image_size, image_size, 'pulled_to_host')
@@ -3155,7 +3173,7 @@ local-hostname: {name}
 
                         # Pull from registry into DinD
                         try:
-                            range_client.images.pull(registry_tag)
+                            range_client.images.pull(registry_tag, platform=platform)
 
                             # Retag to original name
                             if ':' in image:
@@ -3281,6 +3299,7 @@ local-hostname: {name}
         docker_url: str,
         image: str,
         progress_callback: Optional[Callable[[int, int, str], None]] = None,
+        arch: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Pull/transfer a Docker image into a range's DinD container, tracking source.
@@ -3295,6 +3314,7 @@ local-hostname: {name}
             image: Image name/tag to transfer
             progress_callback: Optional callback for progress reporting.
                 Signature: (transferred: int, total: int, status: str) -> None
+            arch: Target architecture ("x86_64" or "arm64"), None = host default
 
         Returns:
             Dict with:
@@ -3310,8 +3330,13 @@ local-hostname: {name}
             "image": image,
         }
 
+        # Map arch to Docker platform string for direct pull fallback
+        platform = None
+        if arch:
+            platform = "linux/amd64" if arch == "x86_64" else "linux/arm64"
+
         # Try host-to-DinD transfer first (handles local images, snapshots, and registry)
-        if await self.transfer_image_to_dind(range_id, docker_url, image, progress_callback=progress_callback):
+        if await self.transfer_image_to_dind(range_id, docker_url, image, progress_callback=progress_callback, arch=arch):
             result["success"] = True
             result["source"] = "registry"
             return result
@@ -3333,10 +3358,10 @@ local-hostname: {name}
             )
 
         # Fallback: try direct pull into DinD (requires internet in DinD)
-        logger.info(f"Falling back to direct pull of '{image}' into DinD")
+        logger.info(f"Falling back to direct pull of '{image}' into DinD (platform={platform})")
         try:
             range_client = self.get_range_client_sync(range_id, docker_url)
-            range_client.images.pull(image)
+            range_client.images.pull(image, platform=platform)
             logger.info(f"Successfully pulled '{image}' into DinD from internet")
             result["success"] = True
             result["source"] = "internet"

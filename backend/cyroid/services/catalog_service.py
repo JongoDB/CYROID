@@ -101,6 +101,10 @@ def build_config_from_yaml(blueprint_data: dict) -> dict:
         if vm.get("windows_version"):
             vm_config["windows_version"] = vm.get("windows_version")
 
+        # Pass through architecture override (for cross-platform pulls)
+        if vm.get("arch"):
+            vm_config["arch"] = vm.get("arch")
+
         # Pass through environment variables (used by dockurr VMs, service configs, etc.)
         if vm.get("environment"):
             vm_config["environment"] = vm.get("environment")
