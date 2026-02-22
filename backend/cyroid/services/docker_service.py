@@ -2836,23 +2836,14 @@ local-hostname: {name}
         if arch:
             platform = "linux/amd64" if arch == "x86_64" else "linux/arm64"
 
-        # Pull image if not present in DinD (or wrong architecture)
-        need_pull = False
+        # Verify image exists in DinD (should already be transferred in stage 3)
+        # Don't pass platform here — stage 3 handles platform-aware transfers.
+        # This is only a fallback check; passing platform to pull breaks local images.
         try:
-            existing = range_client.images.get(image)
-            # If a specific platform is requested, verify the cached image matches
-            if platform:
-                img_arch = existing.attrs.get("Architecture", "")
-                expected_arch = "amd64" if platform == "linux/amd64" else "arm64"
-                if img_arch != expected_arch:
-                    logger.info(f"Image {image} in DinD is {img_arch}, need {expected_arch} — re-pulling")
-                    need_pull = True
+            range_client.images.get(image)
         except ImageNotFound:
-            need_pull = True
-
-        if need_pull:
-            logger.info(f"Pulling image {image} into DinD for range {range_id} (platform={platform})")
-            range_client.images.pull(image, platform=platform)
+            logger.info(f"Image {image} not in DinD, pulling (fallback)")
+            range_client.images.pull(image)
 
         # Get network
         try:
@@ -3123,7 +3114,9 @@ local-hostname: {name}
 
                     registry_tag = registry.get_registry_tag(image)
                     try:
-                        range_client.images.pull(registry_tag, platform=platform)
+                        # Don't pass platform for local registry pulls — the registry
+                        # stores single-platform images, not multi-arch manifests.
+                        range_client.images.pull(registry_tag)
 
                         # Retag to original name — use api.tag for reliability
                         # (images.get can fail for multi-platform manifests)
@@ -3194,9 +3187,9 @@ local-hostname: {name}
                         registry_tag = registry.get_registry_tag(image)
                         report_progress(0, image_size, 'pulling_from_registry')
 
-                        # Pull from registry into DinD
+                        # Pull from registry into DinD (no platform — local registry is single-arch)
                         try:
-                            range_client.images.pull(registry_tag, platform=platform)
+                            range_client.images.pull(registry_tag)
 
                             # Retag to original name
                             if ':' in image:
