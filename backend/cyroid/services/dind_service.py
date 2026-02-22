@@ -608,6 +608,24 @@ class DinDService:
             logger.error(f"Error getting network ID for '{network_name}': {e}")
             return None
 
+    def _get_outbound_interface(self, dind_container) -> str:
+        """Detect the interface carrying the default route inside a DinD container.
+
+        Returns the interface name (e.g. 'eth0' or 'eth1'), falling back to 'eth0'.
+        """
+        try:
+            exit_code, output = dind_container.exec_run(
+                ["sh", "-c", "ip route show default | awk '{print $5}'"],
+                privileged=True,
+            )
+            if exit_code == 0:
+                iface = output.decode().strip().split("\n")[0]
+                if iface:
+                    return iface
+        except Exception as e:
+            logger.warning(f"Failed to detect outbound interface: {e}")
+        return "eth0"
+
     async def setup_network_isolation_in_dind(
         self,
         range_id: str,
@@ -717,21 +735,25 @@ class DinDService:
                 f"iptables -A FORWARD -i br-{bridge_id} -o br-{bridge_id} -j ACCEPT"
             )
 
+        # Detect the outbound interface (carries the default route)
+        outbound_iface = self._get_outbound_interface(dind_container)
+        logger.info(f"DinD outbound interface: {outbound_iface}")
+
         # Allow internet access for specified networks
         for network in validated_allow_internet:
             bridge_id = network_bridge_ids.get(network)
             if not bridge_id:
                 continue
-            # Allow outbound traffic from this network to eth0 (external)
-            rules.append(f"iptables -A FORWARD -i br-{bridge_id} -o eth0 -j ACCEPT")
+            # Allow outbound traffic from this network to the internet-facing interface
+            rules.append(f"iptables -A FORWARD -i br-{bridge_id} -o {outbound_iface} -j ACCEPT")
 
         # Set up NAT/MASQUERADE for internet-enabled networks (once, not per network)
         if validated_allow_internet:
             # This allows return traffic from internet
-            rules.append("iptables -A FORWARD -i eth0 -m state --state ESTABLISHED,RELATED -j ACCEPT")
+            rules.append(f"iptables -A FORWARD -i {outbound_iface} -m state --state ESTABLISHED,RELATED -j ACCEPT")
             # MASQUERADE for outbound traffic (NAT)
             rules.append(
-                "iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE"
+                f"iptables -t nat -A POSTROUTING -o {outbound_iface} -j MASQUERADE"
             )
 
         # Execute rules inside the DinD container

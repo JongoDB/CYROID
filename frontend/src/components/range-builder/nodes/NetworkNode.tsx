@@ -41,24 +41,20 @@ export const NetworkNode = memo(({ data }: NetworkNodeProps) => {
             <Shield className="w-3 h-3" fill={network.is_isolated ? 'currentColor' : 'none'} />
             {network.is_isolated ? 'Isolated' : 'Open'}
           </span>
-          {network.vyos_interface && (
-            <>
-              <span className={clsx(
-                'flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium rounded',
-                network.internet_enabled ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'
-              )}>
-                <Globe className="w-3 h-3" fill={network.internet_enabled ? 'currentColor' : 'none'} />
-                {network.internet_enabled ? 'Internet' : 'Offline'}
-              </span>
-              <span className={clsx(
-                'flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium rounded',
-                network.dhcp_enabled ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-500'
-              )}>
-                <Wifi className="w-3 h-3" fill={network.dhcp_enabled ? 'currentColor' : 'none'} />
-                {network.dhcp_enabled ? 'DHCP' : 'Static'}
-              </span>
-            </>
-          )}
+          <span className={clsx(
+            'flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium rounded',
+            network.internet_enabled ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'
+          )}>
+            <Globe className="w-3 h-3" fill={network.internet_enabled ? 'currentColor' : 'none'} />
+            {network.internet_enabled ? 'Internet' : 'Offline'}
+          </span>
+          <span className={clsx(
+            'flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium rounded',
+            network.dhcp_enabled ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-500'
+          )}>
+            <Wifi className="w-3 h-3" fill={network.dhcp_enabled ? 'currentColor' : 'none'} />
+            {network.dhcp_enabled ? 'DHCP' : 'Static'}
+          </span>
         </div>
       </div>
 

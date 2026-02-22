@@ -686,25 +686,15 @@ export default function RangeDetail() {
   }
 
   const handleToggleInternet = async (network: Network) => {
-    if (!network.docker_network_id) {
-      alert('Network must be provisioned first (deploy the range)')
-      return
-    }
-    // Note: With DinD deployment, internet access is set via iptables at deploy time
-    // Dynamic toggling requires range redeployment
     try {
       await networksApi.toggleInternet(network.id)
       fetchData()
     } catch (err: any) {
-      alert(err.response?.data?.detail || 'Failed to toggle internet access. With DinD, you may need to redeploy.')
+      alert(err.response?.data?.detail || 'Failed to toggle internet access')
     }
   }
 
   const handleToggleDhcp = async (network: Network) => {
-    if (!network.docker_network_id) {
-      alert('Network must be provisioned first (deploy the range)')
-      return
-    }
     // Note: DHCP is not currently supported with DinD deployments
     try {
       await networksApi.toggleDhcp(network.id)
@@ -1262,46 +1252,42 @@ export default function RangeDetail() {
                             fill={network.is_isolated ? "currentColor" : "none"}
                           />
                         </button>
-                        {network.vyos_interface && (
-                          <>
-                            <button
-                              onClick={() => handleToggleInternet(network)}
-                              className={clsx(
-                                "p-1",
-                                network.internet_enabled
-                                  ? "text-green-600 hover:text-green-800"
-                                  : "text-gray-400 hover:text-green-600"
-                              )}
-                              title={network.internet_enabled
-                                ? "Internet enabled - Click to disable"
-                                : "No internet - Click to enable NAT"
-                              }
-                            >
-                              <Globe
-                                className="h-4 w-4"
-                                fill={network.internet_enabled ? "currentColor" : "none"}
-                              />
-                            </button>
-                            <button
-                              onClick={() => handleToggleDhcp(network)}
-                              className={clsx(
-                                "p-1",
-                                network.dhcp_enabled
-                                  ? "text-blue-600 hover:text-blue-800"
-                                  : "text-gray-400 hover:text-blue-600"
-                              )}
-                              title={network.dhcp_enabled
-                                ? "DHCP enabled - Click to disable"
-                                : "DHCP disabled - Click to enable"
-                              }
-                            >
-                              <Wifi
-                                className="h-4 w-4"
-                                fill={network.dhcp_enabled ? "currentColor" : "none"}
-                              />
-                            </button>
-                          </>
-                        )}
+                        <button
+                          onClick={() => handleToggleInternet(network)}
+                          className={clsx(
+                            "p-1",
+                            network.internet_enabled
+                              ? "text-green-600 hover:text-green-800"
+                              : "text-gray-400 hover:text-green-600"
+                          )}
+                          title={network.internet_enabled
+                            ? "Internet enabled - Click to disable"
+                            : "No internet - Click to enable NAT"
+                          }
+                        >
+                          <Globe
+                            className="h-4 w-4"
+                            fill={network.internet_enabled ? "currentColor" : "none"}
+                          />
+                        </button>
+                        <button
+                          onClick={() => handleToggleDhcp(network)}
+                          className={clsx(
+                            "p-1",
+                            network.dhcp_enabled
+                              ? "text-blue-600 hover:text-blue-800"
+                              : "text-gray-400 hover:text-blue-600"
+                          )}
+                          title={network.dhcp_enabled
+                            ? "DHCP enabled - Click to disable"
+                            : "DHCP disabled - Click to enable"
+                          }
+                        >
+                          <Wifi
+                            className="h-4 w-4"
+                            fill={network.dhcp_enabled ? "currentColor" : "none"}
+                          />
+                        </button>
                       </>
                     )}
                     <button

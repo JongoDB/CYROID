@@ -230,16 +230,11 @@ def toggle_network_isolation(network_id: UUID, db: DBSession, current_user: Curr
 @router.post("/{network_id}/toggle-internet", response_model=NetworkResponse)
 def toggle_network_internet(network_id: UUID, db: DBSession, current_user: CurrentUser):
     """
-    Toggle internet access on/off for a provisioned network.
+    Toggle internet access on/off for a network.
 
-    When enabled, VyOS router provides NAT masquerade for this network via eth0
-    (management interface). Traffic flows: VM → VyOS NAT → Docker bridge NAT → Internet.
-
-    This leverages Docker's native NAT on the management bridge for internet access,
-    eliminating the need for complex macvlan configurations.
+    If the range is deployed (DinD running), applies iptables rules immediately.
+    If not deployed yet, just toggles the DB flag for use at next deployment.
     """
-    from cyroid.models.router import RangeRouter, RouterStatus
-
     network = db.query(Network).filter(Network.id == network_id).first()
     if not network:
         raise HTTPException(
@@ -247,55 +242,59 @@ def toggle_network_internet(network_id: UUID, db: DBSession, current_user: Curre
             detail="Network not found",
         )
 
-    if not network.docker_network_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Network not provisioned. Deploy the range first.",
-        )
-
-    # Get the VyOS router for this range
-    router = db.query(RangeRouter).filter(RangeRouter.range_id == network.range_id).first()
-    if not router or not router.container_id or router.status != RouterStatus.RUNNING:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="VyOS router not available. Deploy the range first.",
-        )
-
-    if not network.vyos_interface:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Network not connected to VyOS router",
-        )
+    new_state = not network.internet_enabled
 
     try:
-        from cyroid.services.vyos_service import get_vyos_service
-        vyos = get_vyos_service()
+        # If the range is deployed, apply iptables rules live
+        range_obj = db.query(Range).filter(Range.id == network.range_id).first()
+        if range_obj and range_obj.dind_docker_url and network.docker_network_id:
+            from cyroid.services.dind_service import get_dind_service
+            dind_service = get_dind_service()
 
-        # Use eth0 (management interface) for outbound NAT
-        # Docker's NAT on the management bridge will forward traffic to the internet
-        outbound_interface = "eth0"
+            range_id_str = str(range_obj.id)
+            dind_container = dind_service._find_container_by_range_id(range_id_str)
 
-        if network.internet_enabled:
-            # Disable internet access - remove NAT rule
-            vyos.remove_internet_nat(router.container_id, network.subnet, outbound_interface)
-            network.internet_enabled = False
-            logger.info(f"Disabled internet for network {network.name}")
-        else:
-            # Enable internet access - add NAT masquerade rule via eth0
-            if not vyos.configure_internet_nat(
-                router.container_id,
-                network.subnet,
-                outbound_interface
-            ):
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail="Failed to configure NAT for internet access",
-                )
-            network.internet_enabled = True
-            logger.info(f"Enabled internet for network {network.name} via Docker bridge NAT")
+            if dind_container:
+                range_client = dind_service.get_range_client(range_id_str, range_obj.dind_docker_url)
+                bridge_id = dind_service._get_network_bridge_id(range_client, network.name)
 
+                if bridge_id:
+                    # Detect the outbound interface (carries the default route)
+                    out_iface = dind_service._get_outbound_interface(dind_container)
+
+                    if new_state:
+                        # Enable internet — add FORWARD rule + ensure NAT/MASQUERADE
+                        rules = [
+                            f"iptables -A FORWARD -i br-{bridge_id} -o {out_iface} -j ACCEPT",
+                            f"iptables -C FORWARD -i {out_iface} -m state --state ESTABLISHED,RELATED -j ACCEPT "
+                            f"|| iptables -A FORWARD -i {out_iface} -m state --state ESTABLISHED,RELATED -j ACCEPT",
+                            f"iptables -t nat -C POSTROUTING -o {out_iface} -j MASQUERADE "
+                            f"|| iptables -t nat -A POSTROUTING -o {out_iface} -j MASQUERADE",
+                        ]
+                    else:
+                        # Disable internet — remove FORWARD rule for this bridge
+                        rules = [
+                            f"iptables -D FORWARD -i br-{bridge_id} -o {out_iface} -j ACCEPT",
+                        ]
+
+                    for rule in rules:
+                        exit_code, output = dind_container.exec_run(
+                            ["sh", "-c", rule], privileged=True
+                        )
+                        if exit_code != 0:
+                            output_str = output.decode() if isinstance(output, bytes) else str(output)
+                            logger.debug(f"iptables rule result: {rule} -> {output_str}")
+
+                    logger.info(f"Applied iptables rules for {'enabling' if new_state else 'disabling'} internet on {network.name}")
+                else:
+                    logger.warning(f"Could not resolve bridge ID for {network.name}, saving flag only")
+            else:
+                logger.debug(f"DinD container not found for range, saving flag only")
+
+        network.internet_enabled = new_state
         db.commit()
         db.refresh(network)
+        logger.info(f"{'Enabled' if new_state else 'Disabled'} internet for network {network.name}")
 
     except HTTPException:
         raise
@@ -312,14 +311,11 @@ def toggle_network_internet(network_id: UUID, db: DBSession, current_user: Curre
 @router.post("/{network_id}/toggle-dhcp", response_model=NetworkResponse)
 def toggle_network_dhcp(network_id: UUID, db: DBSession, current_user: CurrentUser):
     """
-    Toggle DHCP server on/off for a provisioned network.
+    Toggle DHCP flag on/off for a network.
 
-    When enabled, VyOS router provides DHCP for this network, assigning IPs
-    to VMs/containers that use DHCP. The DHCP range is automatically calculated
-    from the subnet (.10 to .250 for /24 networks).
+    This sets the network's dhcp_enabled flag which is used during deployment
+    to configure Docker network IPAM options.
     """
-    from cyroid.models.router import RangeRouter, RouterStatus
-
     network = db.query(Network).filter(Network.id == network_id).first()
     if not network:
         raise HTTPException(
@@ -327,51 +323,11 @@ def toggle_network_dhcp(network_id: UUID, db: DBSession, current_user: CurrentUs
             detail="Network not found",
         )
 
-    if not network.docker_network_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Network not provisioned. Deploy the range first.",
-        )
-
-    # Get the VyOS router for this range
-    router = db.query(RangeRouter).filter(RangeRouter.range_id == network.range_id).first()
-    if not router or not router.container_id or router.status != RouterStatus.RUNNING:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="VyOS router not available. Deploy the range first.",
-        )
-
     try:
-        from cyroid.services.vyos_service import get_vyos_service
-        vyos = get_vyos_service()
-
-        if network.dhcp_enabled:
-            # Disable DHCP - remove DHCP server config
-            vyos.remove_dhcp_server(router.container_id, network.name, network.subnet)
-            network.dhcp_enabled = False
-            logger.info(f"Disabled DHCP for network {network.name}")
-        else:
-            # Enable DHCP - configure DHCP server
-            if not vyos.configure_dhcp_server(
-                container_id=router.container_id,
-                network_name=network.name,
-                subnet=network.subnet,
-                gateway=network.gateway,
-                dns_servers=network.dns_servers,
-                dns_search=network.dns_search
-            ):
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail="Failed to configure DHCP server",
-                )
-            network.dhcp_enabled = True
-            logger.info(f"Enabled DHCP for network {network.name}")
-
+        network.dhcp_enabled = not network.dhcp_enabled
         db.commit()
         db.refresh(network)
-
-    except HTTPException:
-        raise
+        logger.info(f"{'Enabled' if network.dhcp_enabled else 'Disabled'} DHCP for network {network.name}")
     except Exception as e:
         logger.error(f"Failed to toggle DHCP for network {network_id}: {e}")
         raise HTTPException(
