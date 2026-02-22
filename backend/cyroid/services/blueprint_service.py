@@ -6,8 +6,11 @@ All ranges use DinD (Docker-in-Docker) isolation, so IP offset logic is not
 needed. Each range runs in its own isolated network namespace inside a DinD
 container, allowing multiple ranges to use identical IP spaces.
 """
+import logging
 import re
 from typing import Dict, Any, List
+
+logger = logging.getLogger(__name__)
 from uuid import UUID
 from sqlalchemy.orm import Session
 
@@ -290,6 +293,7 @@ def create_range_from_blueprint(
         if not base_image_id and not golden_image_id and not snapshot_id:
             continue  # Skip VMs with no resolvable image source
 
+        logger.info(f"Creating VM '{vm_config.hostname}' from blueprint: arch={vm_config.arch}, base_image_id={base_image_id}")
         vm = VM(
             range_id=range_obj.id,
             network_id=network_id,
