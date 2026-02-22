@@ -1088,6 +1088,9 @@ export interface VMConfig {
   disk_gb: number;
   position_x?: number;
   position_y?: number;
+  arch?: 'x86_64' | 'arm64';
+  windows_version?: string;
+  environment?: Record<string, string>;
 }
 
 export interface BlueprintConfig {

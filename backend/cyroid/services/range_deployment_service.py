@@ -409,10 +409,11 @@ class RangeDeploymentService:
         failed_vms = []
         for vm_idx, vm in enumerate(vms, 1):
             try:
+                logger.info(f"VM {vm.hostname}: arch={vm.arch}, base_image_id={vm.base_image_id}")
                 event_service.log_event(
                     range_id=range_uuid,
                     event_type=EventType.VM_CREATING,
-                    message=f"Creating VM {vm_idx}/{total_vms}: '{vm.hostname}' ({vm.ip_address})...",
+                    message=f"Creating VM {vm_idx}/{total_vms}: '{vm.hostname}' ({vm.ip_address}, arch={vm.arch})...",
                     vm_id=vm.id,
                 )
 
