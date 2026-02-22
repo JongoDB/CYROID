@@ -756,9 +756,20 @@ def delete_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
     db.commit()
 
 
+@router.post("/{vm_id}/provision", response_model=VMResponse)
+def provision_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
+    """Provision a VM (pull image + create container) without starting it."""
+    return _start_or_provision_vm(vm_id, db, current_user, provision_only=True)
+
+
 @router.post("/{vm_id}/start", response_model=VMResponse)
 def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
-    """Start a stopped VM"""
+    """Start a VM. If already provisioned (has container), starts immediately."""
+    return _start_or_provision_vm(vm_id, db, current_user, provision_only=False)
+
+
+def _start_or_provision_vm(vm_id: UUID, db: Session, current_user, provision_only: bool = False):
+    """Internal: provision and/or start a VM."""
     vm = db.query(VM).filter(VM.id == vm_id).first()
     if not vm:
         raise HTTPException(
@@ -774,6 +785,14 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
 
     vm.status = VMStatus.CREATING
     db.commit()
+
+    # Log progress events for WebSocket visibility
+    _event_svc = EventService(db)
+    _event_svc.log_event(
+        range_id=vm.range_id, vm_id=vm.id,
+        event_type=EventType.VM_CREATED,
+        message=f"{'Provisioning' if provision_only else 'Starting'} VM {vm.hostname}..."
+    )
 
     try:
         docker = get_docker_service()
@@ -805,6 +824,65 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
                 range_obj.dind_docker_url = dind_info["docker_url"]
                 db.commit()
                 use_dind = True
+
+        # Fast-start path: container already provisioned, just start it
+        if vm.container_id and not provision_only:
+            logger.info(f"Fast-starting VM {vm.hostname} (container {vm.container_id[:12]} already provisioned)")
+            if use_dind:
+                asyncio.run(docker.start_range_container_dind(
+                    range_id=str(vm.range_id),
+                    docker_url=range_obj.dind_docker_url,
+                    container_id=vm.container_id,
+                ))
+            else:
+                docker.start_container(vm.container_id)
+
+            vm.status = VMStatus.RUNNING
+            db.commit()
+            db.refresh(vm)
+
+            # Set up VNC if needed
+            existing_mappings = range_obj.vnc_proxy_mappings or {} if range_obj else {}
+            if use_dind and str(vm.id) not in existing_mappings:
+                # VNC setup needed - determine port from image
+                base_image_record = None
+                if vm.base_image_id:
+                    base_image_record = db.query(BaseImage).filter(BaseImage.id == vm.base_image_id).first()
+                image_ref = base_image_record.docker_image_tag if base_image_record else ""
+                vnc_port = 8006  # Default for QEMU VMs
+                base_vm_type = base_image_record.vm_type if base_image_record else None
+                if base_vm_type == VMType.CONTAINER:
+                    if "kasmweb" in (image_ref or ""):
+                        vnc_port = 6901
+                    else:
+                        vnc_port = 3000
+                try:
+                    from cyroid.services.dind_service import get_dind_service
+                    from cyroid.services.traefik_route_service import get_traefik_route_service
+                    dind_service = get_dind_service()
+                    traefik_service = get_traefik_route_service()
+                    vm_ports = [{"vm_id": str(vm.id), "hostname": vm.hostname, "vnc_port": vnc_port, "ip_address": vm.ip_address}]
+                    port_mappings = asyncio.run(dind_service.setup_vnc_port_forwarding(
+                        range_id=str(vm.range_id), vm_ports=vm_ports, existing_mappings=existing_mappings))
+                    if port_mappings and str(vm.id) in port_mappings:
+                        updated_mappings = dict(existing_mappings)
+                        updated_mappings.update(port_mappings)
+                        range_obj.vnc_proxy_mappings = updated_mappings
+                        flag_modified(range_obj, "vnc_proxy_mappings")
+                        db.commit()
+                        traefik_service.generate_vnc_routes(str(vm.range_id), updated_mappings)
+                except Exception as e:
+                    logger.error(f"VNC setup failed during fast-start for {vm.hostname}: {e}")
+
+            # Update range status
+            if range_obj and range_obj.status in (RangeStatus.STOPPED, RangeStatus.DRAFT):
+                range_obj.status = RangeStatus.RUNNING
+                db.commit()
+
+            event_service = EventService(db)
+            event_service.log_event(range_id=vm.range_id, vm_id=vm.id,
+                event_type=EventType.VM_STARTED, message=f"VM {vm.hostname} started")
+            return vm_to_response(vm, db)
 
         # Validate network is provisioned
         if not use_dind and not network.docker_network_id:
@@ -892,7 +970,12 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
             else:
                 docker.start_container(vm.container_id)
         else:
-            # Create new container
+            # Create new container — log progress for WebSocket
+            _event_svc.log_event(
+                range_id=vm.range_id, vm_id=vm.id,
+                event_type=EventType.VM_CREATED,
+                message=f"Pulling image {image_ref} and creating container for {vm.hostname}..."
+            )
             vm_id_short = str(vm.id)[:8]
             labels = {
                 "cyroid.range_id": str(vm.range_id),
@@ -1461,6 +1544,22 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
                     )
 
             vm.container_id = container_id
+
+            # Provision-only: save container_id and set STOPPED without starting
+            if provision_only:
+                vm.status = VMStatus.STOPPED
+                db.commit()
+                db.refresh(vm)
+                logger.info(f"VM {vm.hostname} provisioned (container {container_id[:12]}), status=STOPPED")
+                event_service = EventService(db)
+                event_service.log_event(
+                    range_id=vm.range_id,
+                    vm_id=vm.id,
+                    event_type=EventType.VM_CREATED,
+                    message=f"VM {vm.hostname} provisioned and ready to start"
+                )
+                return vm_to_response(vm, db, base_image_record, golden_image_record, snapshot)
+
             if use_dind:
                 asyncio.run(docker.start_range_container_dind(
                     range_id=str(vm.range_id),

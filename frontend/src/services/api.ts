@@ -553,6 +553,7 @@ export const vmsApi = {
   create: (data: VMCreate) => api.post<VM>('/vms', data),
   update: (id: string, data: Partial<VMCreate>) => api.put<VM>(`/vms/${id}`, data),
   delete: (id: string) => api.delete(`/vms/${id}`),
+  provision: (id: string) => api.post<VM>(`/vms/${id}/provision`),
   start: (id: string) => api.post<VM>(`/vms/${id}/start`),
   stop: (id: string) => api.post<VM>(`/vms/${id}/stop`),
   restart: (id: string) => api.post<VM>(`/vms/${id}/restart`),

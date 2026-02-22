@@ -888,19 +888,21 @@ export default function RangeDetail() {
       setShowLinuxISOOptions(false)
       setShowLinuxContainerOptions(false)
       setLinuxContainerType(null)
+
+      // Show VM in list immediately
       fetchData()
 
-      // Auto-start VM if range is already running
+      // Auto-provision VM in background if range is already deployed
       if (range.status === 'running' || range.status === 'stopped') {
-        toast.info(`Starting VM ${vmData.hostname}...`)
-        try {
-          await vmsApi.start(newVm.id)
-          toast.success(`VM ${vmData.hostname} started`)
+        toast.info(`Provisioning ${vmData.hostname} — pulling image and creating container...`)
+        // Fire-and-forget: don't block UI, progress shows via WebSocket events
+        vmsApi.provision(newVm.id).then(() => {
+          toast.success(`${vmData.hostname} ready — click play to start`)
           fetchData()
-        } catch (startErr: any) {
-          toast.error(startErr.response?.data?.detail || `VM created but failed to start: ${vmData.hostname}`)
+        }).catch((provisionErr: any) => {
+          toast.error(provisionErr.response?.data?.detail || `Failed to provision ${vmData.hostname}`)
           fetchData()
-        }
+        })
       }
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to create VM')
