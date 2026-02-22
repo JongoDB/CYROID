@@ -92,19 +92,49 @@ class EventService:
                     data=data
                 ))
             except RuntimeError:
-                # No running loop - create a new one for sync context
-                asyncio.run(broadcast_event(
-                    event_type=event.event_type.value,
-                    message=event.message,
-                    range_id=event.range_id,
-                    vm_id=event.vm_id,
-                    network_id=event.network_id,
-                    data=data
-                ))
+                # No running event loop (sync endpoint in thread pool).
+                # Use a fresh Redis connection to avoid stale event loop issues
+                # with the singleton broadcaster's async Redis client.
+                self._broadcast_sync(event, data)
 
         except Exception as e:
             # Don't fail the event logging if broadcast fails
             logger.warning(f"Failed to broadcast event: {e}")
+
+    def _broadcast_sync(self, event: EventLog, data: dict) -> None:
+        """Broadcast event using synchronous Redis (for sync endpoint contexts)."""
+        try:
+            import redis as sync_redis
+            from cyroid.services.event_broadcaster import (
+                EVENTS_CHANNEL, RANGE_CHANNEL_PREFIX, VM_CHANNEL_PREFIX, RealtimeEvent
+            )
+            from cyroid.config import get_settings
+            from datetime import datetime
+
+            settings = get_settings()
+            rt_event = RealtimeEvent(
+                event_type=event.event_type.value,
+                range_id=str(event.range_id) if event.range_id else None,
+                vm_id=str(event.vm_id) if event.vm_id else None,
+                network_id=str(event.network_id) if event.network_id else None,
+                message=event.message,
+                data=data,
+                timestamp=datetime.utcnow().isoformat()
+            )
+            payload = rt_event.model_dump_json()
+
+            # Use a short-lived sync Redis connection
+            r = sync_redis.from_url(settings.redis_url, decode_responses=True)
+            try:
+                r.publish(EVENTS_CHANNEL, payload)
+                if event.range_id:
+                    r.publish(f"{RANGE_CHANNEL_PREFIX}{event.range_id}", payload)
+                if event.vm_id:
+                    r.publish(f"{VM_CHANNEL_PREFIX}{event.vm_id}", payload)
+            finally:
+                r.close()
+        except Exception as e:
+            logger.warning(f"Failed to broadcast event (sync): {e}")
 
     def get_events(
         self,
