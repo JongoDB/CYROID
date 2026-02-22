@@ -95,6 +95,10 @@ def build_config_from_yaml(blueprint_data: dict) -> dict:
         elif vm.get("template_name"):
             vm_config["base_image_tag"] = vm.get("template_name")
 
+        # Pass through Windows version for dockurr VMs
+        if vm.get("windows_version"):
+            vm_config["windows_version"] = vm.get("windows_version")
+
         # Pass through environment variables (used by dockurr VMs, service configs, etc.)
         if vm.get("environment"):
             vm_config["environment"] = vm.get("environment")
