@@ -1661,7 +1661,11 @@ def start_vm(vm_id: UUID, db: DBSession, current_user: CurrentUser):
             db.commit()
             logger.info(f"Range {range_obj.id} status updated to RUNNING")
 
-    except HTTPException:
+    except HTTPException as he:
+        # Reset status so the VM doesn't get stuck in CREATING
+        vm.status = VMStatus.ERROR
+        vm.error_message = str(he.detail)[:1000]
+        db.commit()
         raise
     except Exception as e:
         logger.error(f"Failed to start VM {vm_id}: {e}")

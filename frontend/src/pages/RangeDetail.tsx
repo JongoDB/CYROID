@@ -858,7 +858,7 @@ export default function RangeDetail() {
         vmData.linux_user_sudo = vmForm.linux_user_sudo ?? true
       }
 
-      await vmsApi.create(vmData)
+      const { data: newVm } = await vmsApi.create(vmData)
       setShowVmModal(false)
       setVmSourceType('base')
       setVmForm({
@@ -889,6 +889,19 @@ export default function RangeDetail() {
       setShowLinuxContainerOptions(false)
       setLinuxContainerType(null)
       fetchData()
+
+      // Auto-start VM if range is already running
+      if (range.status === 'running' || range.status === 'stopped') {
+        toast.info(`Starting VM ${vmData.hostname}...`)
+        try {
+          await vmsApi.start(newVm.id)
+          toast.success(`VM ${vmData.hostname} started`)
+          fetchData()
+        } catch (startErr: any) {
+          toast.error(startErr.response?.data?.detail || `VM created but failed to start: ${vmData.hostname}`)
+          fetchData()
+        }
+      }
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to create VM')
     } finally {
