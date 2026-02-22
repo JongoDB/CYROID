@@ -507,8 +507,8 @@ class RangeDeploymentService:
                         devices = config["devices"]
                         logger.info(f"VM {vm.hostname}: devices={devices} from base_image.container_config")
 
-                # macOS VM (dockur/macos) - requires VERSION env and privileged mode for KVM
-                if "dockur/macos" in container_image.lower():
+                # macOS VM (dockur/macos or dockurr/macos) - requires VERSION env and privileged mode for KVM
+                if "dockur/macos" in container_image.lower() or "dockurr/macos" in container_image.lower():
                     # Map version number to dockur version name
                     macos_version_map = {
                         "15": "sequoia",
@@ -522,10 +522,11 @@ class RangeDeploymentService:
                     privileged = True  # Required for KVM access
                     labels["cyroid.vm_type"] = "macos"
 
-                # Windows VM (dockur/windows) - set VERSION if specified
-                elif "dockur/windows" in container_image.lower():
+                # Windows VM (dockur/windows or dockurr/windows) - set VERSION if specified
+                elif "dockur/windows" in container_image.lower() or "dockurr/windows" in container_image.lower():
                     if vm.windows_version:
                         environment["VERSION"] = vm.windows_version
+                    environment["KVM"] = "N"
                     privileged = True  # Required for KVM access
                     labels["cyroid.vm_type"] = "windows"
 
@@ -708,7 +709,11 @@ class RangeDeploymentService:
 
             # Check if it's a container type for VNC port detection
             if vm_type == "container" or vm_type == VMType.CONTAINER:
-                if "kasmweb" in base_image:
+                if "dockur/windows" in base_image.lower() or "dockurr/windows" in base_image.lower():
+                    vnc_port = 8006  # dockur/windows uses QEMU VNC port
+                elif "dockur/macos" in base_image.lower() or "dockurr/macos" in base_image.lower():
+                    vnc_port = 8006  # dockur/macos uses QEMU VNC port
+                elif "kasmweb" in base_image:
                     vnc_port = 6901
                 elif "linuxserver/" in base_image or "lscr.io/linuxserver" in base_image:
                     vnc_port = 3000

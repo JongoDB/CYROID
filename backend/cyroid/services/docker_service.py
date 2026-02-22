@@ -3084,9 +3084,15 @@ local-hostname: {name}
                     try:
                         range_client.images.pull(registry_tag)
 
-                        # Retag to original name
-                        pulled_image = range_client.images.get(registry_tag)
-                        pulled_image.tag(img_repo, img_tag)
+                        # Retag to original name — use api.tag for reliability
+                        # (images.get can fail for multi-platform manifests)
+                        try:
+                            pulled_image = range_client.images.get(registry_tag)
+                            pulled_image.tag(img_repo, img_tag)
+                        except docker.errors.ImageNotFound:
+                            # Pull succeeded but get-by-tag fails (multi-platform manifest)
+                            # Try tagging via API directly
+                            range_client.api.tag(registry_tag, img_repo, img_tag)
 
                         logger.info(f"Successfully pulled '{image}' from registry into DinD")
                         report_progress(0, 0, 'complete')
@@ -3152,12 +3158,15 @@ local-hostname: {name}
                             range_client.images.pull(registry_tag)
 
                             # Retag to original name
-                            pulled_image = range_client.images.get(registry_tag)
                             if ':' in image:
                                 repo, tag = image.rsplit(':', 1)
                             else:
                                 repo, tag = image, 'latest'
-                            pulled_image.tag(repo, tag)
+                            try:
+                                pulled_image = range_client.images.get(registry_tag)
+                                pulled_image.tag(repo, tag)
+                            except docker.errors.ImageNotFound:
+                                range_client.api.tag(registry_tag, repo, tag)
 
                             logger.info(f"Successfully transferred '{image}' via registry")
                             report_progress(image_size, image_size, 'complete')
@@ -3232,6 +3241,23 @@ local-hostname: {name}
             if result:
                 loaded_images = [img.tags[0] if img.tags else img.id for img in result]
                 logger.info(f"Successfully transferred to DinD: {loaded_images}")
+
+                # Retag images inside DinD to bare name (without registry prefix)
+                # The tar export preserves all host tags like "127.0.0.1:5000/cyroid/foo:latest"
+                # but the VM creation code expects "cyroid/foo:latest"
+                if ':' in image:
+                    bare_repo, bare_tag = image.rsplit(':', 1)
+                else:
+                    bare_repo, bare_tag = image, 'latest'
+
+                for loaded_img in result:
+                    if loaded_img.tags:
+                        try:
+                            loaded_img.tag(bare_repo, bare_tag)
+                            logger.info(f"Retagged to '{bare_repo}:{bare_tag}' inside DinD")
+                            break
+                        except Exception as tag_err:
+                            logger.warning(f"Failed to retag image in DinD: {tag_err}")
             else:
                 logger.info(f"Successfully transferred '{image}' to DinD (no result metadata)")
 
