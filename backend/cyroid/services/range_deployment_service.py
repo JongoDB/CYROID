@@ -677,37 +677,31 @@ class RangeDeploymentService:
                 message=f"Warning: {len(failed_vms)} VM(s) failed to create: {', '.join(failed_vms)}",
             )
 
-        # 4b. Set up inter-network routing for multi-homed VMs (firewalls/routers)
-        # Detect VMs connected to multiple networks and enable DinD-level routing
-        # between those networks so the VM can forward traffic between them.
-        multi_homed_pairs: set[tuple[str, str]] = set()
-        for vm in vms:
-            if not vm.container_id:
-                continue
-            vm_interfaces = db.query(VMNetwork).filter(VMNetwork.vm_id == vm.id).all()
-            if len(vm_interfaces) < 2:
-                continue
-            vm_networks = []
-            for iface in vm_interfaces:
-                net = db.query(Network).filter(Network.id == iface.network_id).first()
-                if net:
-                    vm_networks.append(net.name)
-            for i, net_a in enumerate(vm_networks):
-                for net_b in vm_networks[i + 1:]:
-                    pair = tuple(sorted([net_a, net_b]))
-                    multi_homed_pairs.add(pair)
+        # 4b. Set up inter-network routing between all range networks
+        # Enable routing between all network pairs so VMs on different subnets
+        # can communicate. Internet isolation is controlled separately by the
+        # internet_enabled flag on each network.
+        all_network_names = [n.name for n in networks]
+        routing_pairs: set[tuple[str, str]] = set()
 
-        if multi_homed_pairs:
+        # Add all network pairs for full inter-network routing
+        if len(all_network_names) > 1:
+            for i, net_a in enumerate(all_network_names):
+                for net_b in all_network_names[i + 1:]:
+                    pair = tuple(sorted([net_a, net_b]))
+                    routing_pairs.add(pair)
+
+        if routing_pairs:
             event_service.log_event(
                 range_id=range_uuid,
                 event_type=EventType.DEPLOYMENT_STEP,
-                message=f"Enabling inter-network routing for {len(multi_homed_pairs)} network pair(s)...",
+                message=f"Enabling inter-network routing for {len(routing_pairs)} network pair(s)...",
             )
             try:
                 await self.dind_service.setup_inter_network_routing(
                     range_id=range_id,
                     docker_url=docker_url,
-                    network_pairs=list(multi_homed_pairs),
+                    network_pairs=list(routing_pairs),
                 )
             except Exception as e:
                 logger.warning(f"Failed to set up inter-network routing: {e}")
