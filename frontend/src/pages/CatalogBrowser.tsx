@@ -128,7 +128,7 @@ export default function CatalogBrowser() {
     try {
       await catalogApi.installItem(item.id, {
         source_id: sourceId,
-        build_images: false,
+        build_images: true,
       })
       toast.success(`Installed "${item.name}" successfully`)
       // Refresh items to update install status

@@ -75,7 +75,7 @@ export default function CatalogItemDetail() {
     try {
       await catalogApi.installItem(item.id, {
         source_id: sourceId,
-        build_images: false,
+        build_images: true,
       })
       toast.success(`Installed "${item.name}" successfully`)
       // Refresh detail to update install status

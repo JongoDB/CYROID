@@ -269,6 +269,19 @@ class RangeDeploymentService:
                             logger.warning(f"Stage 3: VM {vm.hostname} uses dockurr/windows but vm.arch is None")
                     if image_tag:
                         unique_images[image_tag] = vm.arch
+                elif base_img and base_img.image_type == "iso":
+                    # ISO-based VMs use QEMU/dockurr images based on vm_type
+                    target_arch = vm.arch or base_img.native_arch
+                    if base_img.vm_type == VMType.WINDOWS_VM:
+                        image_tag = "dockurr/windows-arm:latest" if target_arch == "arm64" else "dockurr/windows:latest"
+                    elif base_img.vm_type == VMType.LINUX_VM:
+                        image_tag = "qemux/qemu:latest"
+                    elif base_img.vm_type == VMType.MACOS_VM:
+                        image_tag = "dockurr/macos:latest"
+                    else:
+                        image_tag = "qemux/qemu:latest"
+                    logger.info(f"Stage 3: VM {vm.hostname} uses ISO base image, resolved to {image_tag}")
+                    unique_images[image_tag] = vm.arch
             elif vm.golden_image_id:
                 golden_img = db.query(GoldenImage).filter(GoldenImage.id == vm.golden_image_id).first()
                 if golden_img:
@@ -438,18 +451,17 @@ class RangeDeploymentService:
                             elif not vm.arch:
                                 logger.warning(f"VM {vm.hostname}: dockurr/windows image detected but vm.arch is None — using base_image tag as-is: {container_image}")
                     else:
-                        error_msg = f"VM {vm.hostname} uses ISO-based base image, not supported in DinD yet"
-                        logger.warning(error_msg)
-                        vm.status = VMStatus.ERROR
-                        vm.error_message = error_msg
-                        event_service.log_event(
-                            range_id=range_uuid,
-                            event_type=EventType.VM_ERROR,
-                            message=error_msg,
-                            vm_id=vm.id,
-                        )
-                        failed_vms.append(vm.hostname)
-                        continue
+                        # ISO-based VMs: derive the QEMU/dockurr container image from vm_type
+                        target_arch = vm.arch or vm.base_image.native_arch
+                        if vm.base_image.vm_type == VMType.WINDOWS_VM:
+                            container_image = "dockurr/windows-arm:latest" if target_arch == "arm64" else "dockurr/windows:latest"
+                        elif vm.base_image.vm_type == VMType.LINUX_VM:
+                            container_image = "qemux/qemu:latest"
+                        elif vm.base_image.vm_type == VMType.MACOS_VM:
+                            container_image = "dockurr/macos:latest"
+                        else:
+                            container_image = "qemux/qemu:latest"
+                        logger.info(f"VM {vm.hostname}: ISO base image resolved to {container_image}")
                 elif vm.golden_image_id and vm.golden_image:
                     # New Image Library: Golden Image
                     container_image = vm.golden_image.docker_image_tag or vm.golden_image.docker_image_id
@@ -750,6 +762,7 @@ class RangeDeploymentService:
                 "hostname": vm.hostname,
                 "vnc_port": vnc_port,
                 "ip_address": vnc_ip,
+                "image": base_image,
             })
 
         if vm_ports:
@@ -763,6 +776,13 @@ class RangeDeploymentService:
                     range_id=range_id,
                     vm_ports=vm_ports,
                 )
+                # Enrich port_mappings with VNC auth credentials from VM environment
+                for vm in vms:
+                    vm_id_str = str(vm.id)
+                    if vm_id_str in port_mappings and vm.environment:
+                        port_mappings[vm_id_str]["vnc_user"] = vm.environment.get("CUSTOM_USER")
+                        port_mappings[vm_id_str]["vnc_password"] = vm.environment.get("PASSWORD")
+
                 range_obj.vnc_proxy_mappings = port_mappings
                 db.commit()
                 logger.info(f"Set up VNC port forwarding for range {range_id} with {len(vm_ports)} ports")
@@ -1195,6 +1215,7 @@ class RangeDeploymentService:
                     "vnc_port": vnc_port,
                     "ip_address": primary_ip,  # Use primary IP for VNC
                     "container_id": container_id,
+                    "image": image_tag,
                 })
 
                 result["vms_created"] += 1
@@ -1223,6 +1244,13 @@ class RangeDeploymentService:
                     vm_ports=created_vms,
                     existing_mappings=existing_mappings,
                 )
+                # Enrich port_mappings with VNC auth credentials from VM environment
+                for vm in vms:
+                    vm_id_str2 = str(vm.id)
+                    if vm_id_str2 in port_mappings and vm.environment:
+                        port_mappings[vm_id_str2]["vnc_user"] = vm.environment.get("CUSTOM_USER")
+                        port_mappings[vm_id_str2]["vnc_password"] = vm.environment.get("PASSWORD")
+
                 # Merge new port mappings with existing ones
                 existing_mappings.update(port_mappings)
                 range_obj.vnc_proxy_mappings = existing_mappings

@@ -3466,6 +3466,48 @@ local-hostname: {name}
         ) and "." not in image.split("/")[0]
 
         if is_local_only:
+            # Before failing, check if we can auto-build from a Dockerfile project
+            # Images like "cyroid/<project>:latest" may have Dockerfiles in /data/images/<project>/
+            built = False
+            if image.startswith("cyroid/"):
+                import os
+                project_name = image.split("/", 1)[1].split(":")[0]
+                dockerfile_path = f"/data/images/{project_name}/Dockerfile"
+                if os.path.isfile(dockerfile_path):
+                    logger.info(
+                        f"Image '{image}' not found, but Dockerfile exists at "
+                        f"/data/images/{project_name}/ — attempting auto-build"
+                    )
+                    if progress_callback:
+                        progress_callback(0, 0, "building_from_dockerfile")
+                    try:
+                        host_client = docker.from_env()
+                        _img, build_logs = host_client.images.build(
+                            path=f"/data/images/{project_name}",
+                            tag=image,
+                            rm=True,
+                            forcerm=True,
+                        )
+                        for log_line in build_logs:
+                            if "stream" in log_line:
+                                logger.debug(log_line["stream"].strip())
+                        logger.info(f"Auto-built image '{image}' from Dockerfile")
+                        built = True
+                    except Exception as build_err:
+                        logger.warning(
+                            f"Auto-build of '{image}' from Dockerfile failed: {build_err}"
+                        )
+
+            if built:
+                # Retry transfer now that image exists on host
+                if await self.transfer_image_to_dind(
+                    range_id, docker_url, image,
+                    progress_callback=progress_callback, arch=arch,
+                ):
+                    result["success"] = True
+                    result["source"] = "registry"
+                    return result
+
             # Don't try to pull local-only images - they need to be transferred
             raise RuntimeError(
                 f"Image '{image}' appears to be a local image that could not be transferred to DinD. "

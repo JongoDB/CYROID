@@ -892,6 +892,7 @@ class DinDService:
                 "proxy_port": external_port,
                 "proxy_host": dind_mgmt_ip,
                 "original_port": vnc_port,
+                "image": vm_info.get("image", ""),
             }
 
             # Kill any existing socat on this port

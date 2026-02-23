@@ -90,6 +90,8 @@ class TraefikRouteService:
             # linuxserver/webtop on port 3000 uses HTTP
             # dockur/windows on port 8006 uses HTTP
             requires_ssl = original_port == 6901
+            image = proxy_info.get("image", "")
+            is_webtop = "linuxserver/" in image or "lscr.io/linuxserver" in image
 
             # Service pointing to DinD proxy port
             if requires_ssl:
@@ -133,6 +135,23 @@ class TraefikRouteService:
                 }
                 route_middlewares.append(auth_middleware_name)
                 logger.debug(f"Added KasmVNC auto-auth middleware for VM {vm_id}")
+
+            # For linuxserver/webtop containers, inject Basic auth header for auto-login
+            elif is_webtop:
+                vnc_user = proxy_info.get("vnc_user") or "abc"
+                vnc_password = proxy_info.get("vnc_password") or ""
+                if vnc_password:
+                    webtop_auth = f"Basic {base64.b64encode(f'{vnc_user}:{vnc_password}'.encode()).decode()}"
+                    auth_middleware_name = f"vnc-auth-{vm_id_short}"
+                    middlewares[auth_middleware_name] = {
+                        "headers": {
+                            "customRequestHeaders": {
+                                "Authorization": webtop_auth
+                            }
+                        }
+                    }
+                    route_middlewares.append(auth_middleware_name)
+                    logger.debug(f"Added webtop auto-auth middleware for VM {vm_id} (user={vnc_user})")
 
             # HTTP router (priority=100 to take precedence over frontend catch-all)
             routers[router_name] = {

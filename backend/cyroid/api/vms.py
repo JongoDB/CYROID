@@ -1480,23 +1480,24 @@ def _start_or_provision_vm(vm_id: UUID, db: Session, current_user, provision_onl
             else:
                 # Container (standard Docker container) or snapshot-based VM
                 if use_dind:
-                    # Build environment for LinuxServer/KasmVNC containers
-                    environment = {}
+                    # Build environment: start with VM's stored env vars (from blueprint/UI)
+                    environment = dict(vm.environment) if vm.environment else {}
 
                     # KasmVNC containers use VNC_PW for auto-auth
                     if "kasmweb/" in (image_ref or ""):
-                        environment["VNC_PW"] = "vncpassword"
+                        environment.setdefault("VNC_PW", "vncpassword")
 
                     # LinuxServer containers use CUSTOM_USER, PASSWORD, SUDO_ACCESS
                     if "linuxserver/" in (image_ref or "") or "lscr.io/linuxserver" in (image_ref or ""):
                         if vm.linux_username:
                             environment["CUSTOM_USER"] = vm.linux_username
-                            environment["PUID"] = "1000"
-                            environment["PGID"] = "1000"
                         if vm.linux_password:
                             environment["PASSWORD"] = vm.linux_password
                         if vm.linux_user_sudo:
                             environment["SUDO_ACCESS"] = "true"
+                        # Ensure PUID/PGID are set for LinuxServer containers
+                        environment.setdefault("PUID", "1000")
+                        environment.setdefault("PGID", "1000")
 
                     # Extract container_config from base image (privileged, cap_add, etc.)
                     container_config = {}

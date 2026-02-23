@@ -291,7 +291,38 @@ def create_range_from_blueprint(
                 pass
 
         if not base_image_id and not golden_image_id and not snapshot_id:
-            continue  # Skip VMs with no resolvable image source
+            # Last resort: auto-create BaseImage for known docker image tags
+            if hasattr(vm_config, 'base_image_tag') and vm_config.base_image_tag:
+                tag = vm_config.base_image_tag
+                # Determine image type from vm_config fields
+                vm_type = getattr(vm_config, 'vm_type', None) or 'container'
+                os_type = getattr(vm_config, 'os_type', None) or 'linux'
+                image_type = 'container'
+                if vm_type in ('windows_vm', 'linux_vm', 'macos_vm'):
+                    image_type = 'iso'
+                auto_name = tag.split('/')[-1].split(':')[0]
+                logger.info(
+                    f"Auto-creating BaseImage for unresolved tag '{tag}' "
+                    f"(VM '{vm_config.hostname}')"
+                )
+                auto_image = BaseImage(
+                    name=auto_name,
+                    description=f"Auto-created from blueprint for {vm_config.hostname}",
+                    image_type=image_type,
+                    docker_image_tag=tag,
+                    os_type=os_type,
+                    vm_type=vm_type,
+                    native_arch=getattr(vm_config, 'arch', None) or 'x86_64',
+                    is_global=True,
+                    created_by=created_by,
+                )
+                db.add(auto_image)
+                db.flush()
+                base_image_id = auto_image.id
+                logger.info(f"Created BaseImage '{auto_name}' (id={base_image_id}, tag={tag})")
+            else:
+                logger.warning(f"Skipping VM '{vm_config.hostname}': no resolvable image source")
+                continue
 
         logger.info(f"Creating VM '{vm_config.hostname}' from blueprint: arch={vm_config.arch}, base_image_id={base_image_id}")
         vm = VM(

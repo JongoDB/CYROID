@@ -100,7 +100,7 @@ class CatalogInstalledItemResponse(BaseModel):
 
 class CatalogInstallRequest(BaseModel):
     source_id: UUID
-    build_images: bool = False
+    build_images: bool = True
 
 
 # ============ Catalog Index (from index.json) ============
