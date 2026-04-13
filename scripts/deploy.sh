@@ -640,7 +640,7 @@ check_gum() {
     # All install methods failed - fall back to non-TUI mode
     echo -e "${YELLOW}Could not install gum. Continuing without TUI...${NC}"
     USE_TUI=false
-    return 1
+    return 0
 }
 
 tui_clear() {
@@ -676,8 +676,8 @@ tui_choose() {
     shift
     if [ "$USE_TUI" = true ]; then
         tui_suspend_scroll_region
-        gum choose --header "$prompt" "$@"
-        local result=$?
+        local result=0
+        gum choose --header "$prompt" "$@" || result=$?
         tui_restore_scroll_region
         return $result
     else
@@ -696,7 +696,7 @@ tui_input() {
     if [ "$USE_TUI" = true ]; then
         tui_suspend_scroll_region
         local value
-        value=$(gum input --placeholder "$placeholder" --value "$default" --header "$prompt")
+        value=$(gum input --placeholder "$placeholder" --value "$default" --header "$prompt") || true
         tui_restore_scroll_region
         echo "$value"
     else
@@ -709,8 +709,8 @@ tui_confirm() {
     local prompt="$1"
     if [ "$USE_TUI" = true ]; then
         tui_suspend_scroll_region
-        gum confirm "$prompt"
-        local result=$?
+        local result=0
+        gum confirm "$prompt" || result=$?
         tui_restore_scroll_region
         return $result
     else
@@ -800,7 +800,7 @@ tui_summary_box() {
 }
 
 # =============================================================================
-# Full-Screen TUI Framework (K9s-style)
+# Full-Screen TUI Framework (Deployment Dashboard)
 # =============================================================================
 
 # Terminal state
@@ -811,11 +811,45 @@ STATUS_TYPE="info"  # info, success, warn, error, progress
 DEPLOYMENT_PHASE=""
 DEPLOYMENT_PROGRESS=0
 TUI_FULLSCREEN=false
-TUI_SCROLL_REGION_SET=false
+TUI_SCROLL_REGION_SET=false  # Kept for compatibility (no longer used)
 TUI_LAST_HEIGHT=0
 
 # Save terminal state for cleanup
 ORIGINAL_STTY=""
+
+# Deployment step tracking
+DEPLOYMENT_STEPS=(
+    "Pre-flight checks"
+    "Creating data directories"
+    "Generating configuration"
+    "Setting up SSL certificates"
+    "Initializing Docker networks"
+    "Pulling Docker images"
+    "Starting services"
+    "Waiting for health"
+)
+DEPLOYMENT_STEP_STATUS=()    # "pending", "active", "done", "error"
+DEPLOYMENT_STEP_DETAIL=()   # Optional detail text for active step
+DEPLOY_ACTIVITY_LOG=()      # Activity log entries (newest first)
+MAX_ACTIVITY_LINES=0        # Calculated from terminal height
+CURRENT_STEP_INDEX=-1       # Index of current active step
+
+# Map phase names from do_deploy() to step indices
+_tui_phase_to_step_index() {
+    local phase="$1"
+    case "$phase" in
+        *"pre-flight"*|*"Pre-flight"*)           echo 0 ;;
+        *"data directories"*|*"Creating data"*)  echo 1 ;;
+        *"configuration"*|*"Generating"*)        echo 2 ;;
+        *"SSL"*|*"certificates"*)                echo 3 ;;
+        *"networks"*|*"Docker networks"*)        echo 4 ;;
+        *"Pulling"*|*"images"*)                  echo 5 ;;
+        *"Starting"*|*"services..."*)            echo 6 ;;
+        *"health"*|*"Waiting"*)                  echo 7 ;;
+        *"admin"*|*"Creating admin"*)            echo 7 ;;  # Map admin step to last
+        *)                                       echo -1 ;;
+    esac
+}
 
 tui_init_fullscreen() {
     if [ "$USE_TUI" != true ]; then
@@ -828,40 +862,39 @@ tui_init_fullscreen() {
     # Get terminal dimensions
     tui_update_dimensions
 
+    # Initialize step states to pending
+    DEPLOYMENT_STEP_STATUS=()
+    DEPLOYMENT_STEP_DETAIL=()
+    for ((i=0; i<${#DEPLOYMENT_STEPS[@]}; i++)); do
+        DEPLOYMENT_STEP_STATUS+=("pending")
+        DEPLOYMENT_STEP_DETAIL+=("")
+    done
+    DEPLOY_ACTIVITY_LOG=()
+    CURRENT_STEP_INDEX=-1
+
+    # Calculate max activity log lines from terminal height
+    # Layout: header(1) + blank(1) + title(1) + blank(1) + progressbar(1) + blank(1)
+    #       + steps(8) + blank(1) + log_header(1) + ... log lines ... + blank(1)
+    #       + separator(1) + statusbar(1) = 18 fixed lines
+    MAX_ACTIVITY_LINES=$((TERM_LINES - 18))
+    [ "$MAX_ACTIVITY_LINES" -lt 2 ] && MAX_ACTIVITY_LINES=2
+
     # Set up cleanup trap with error reporting
     trap 'exit_code=$?; tui_cleanup_fullscreen; if [ $exit_code -ne 0 ]; then echo -e "\033[31m[ERROR]\033[0m Script exited with code $exit_code"; fi' EXIT
     trap 'tui_cleanup_fullscreen' INT TERM
 
-    # Hide cursor during redraws (ANSI: ESC[?25l)
+    # Hide cursor
     printf "\033[?25l" 2>/dev/null || true
-
-    # Set up scroll region to protect the bottom status bar line
-    # ANSI: ESC[top;bottomr - sets scroll region from line 1 to TERM_LINES-1
-    # This prevents normal output from overwriting the status bar
-    printf "\033[1;%dr" "$((TERM_LINES - 1))" 2>/dev/null || true
-    TUI_SCROLL_REGION_SET=true
-    TUI_LAST_HEIGHT=$TERM_LINES
 
     TUI_FULLSCREEN=true
 
     # Initial draw
     tui_draw_screen
-
-    # Position cursor at line 3 (after header) for subsequent output
-    # ANSI: ESC[row;colH
-    printf "\033[3;1H" 2>/dev/null || true
 }
 
 tui_cleanup_fullscreen() {
     if [ "$TUI_FULLSCREEN" = true ]; then
-        # Reset scroll region to full terminal before cleanup
-        # ANSI: ESC[r resets scroll region to full screen
-        if [ "$TUI_SCROLL_REGION_SET" = true ]; then
-            printf "\033[r" 2>/dev/null || true
-            TUI_SCROLL_REGION_SET=false
-        fi
-
-        # Show cursor (ANSI: ESC[?25h)
+        # Show cursor
         printf "\033[?25h" 2>/dev/null || true
 
         # Restore terminal settings
@@ -870,41 +903,33 @@ tui_cleanup_fullscreen() {
         fi
 
         # Move cursor to bottom and reset
-        # ANSI: ESC[row;colH
-        printf "\033[%d;1H\n" "$TERM_LINES" 2>/dev/null || true
+        printf "\033[%d;1H\033[0m\n" "$TERM_LINES" 2>/dev/null || true
 
         TUI_FULLSCREEN=false
     fi
 }
 
 tui_update_dimensions() {
-    TERM_LINES=$(tput lines 2>/dev/null || echo 24)
-    TERM_COLS=$(tput cols 2>/dev/null || echo 80)
+    # Prefer $LINES/$COLUMNS (bash updates via SIGWINCH), fall back to tput, then stty
+    TERM_LINES=${LINES:-$(tput lines 2>/dev/null || stty size 2>/dev/null | awk '{print $1}' || echo 24)}
+    TERM_COLS=${COLUMNS:-$(tput cols 2>/dev/null || stty size 2>/dev/null | awk '{print $2}' || echo 80)}
+    # Ensure numeric
+    [[ "$TERM_LINES" =~ ^[0-9]+$ ]] || TERM_LINES=24
+    [[ "$TERM_COLS" =~ ^[0-9]+$ ]] || TERM_COLS=80
 }
 
-# Temporarily suspend scroll region for interactive gum commands
-# Call this before gum input/choose/etc that take over the terminal
+# Temporarily show cursor for interactive gum commands
 tui_suspend_scroll_region() {
-    if [ "$TUI_SCROLL_REGION_SET" = true ]; then
-        # Reset scroll region to full terminal (ANSI: ESC[r)
-        printf "\033[r" 2>/dev/null || true
-        # Show cursor for interactive input (ANSI: ESC[?25h)
-        printf "\033[?25h" 2>/dev/null || true
+    if [ "$TUI_FULLSCREEN" = true ]; then
+        printf "\033[?25h" 2>/dev/null || true  # Show cursor
     fi
 }
 
-# Restore scroll region after interactive gum commands
+# Hide cursor and redraw after interactive input
 tui_restore_scroll_region() {
-    if [ "$TUI_SCROLL_REGION_SET" = true ]; then
-        # Update dimensions in case terminal was resized during input
-        tui_update_dimensions
-        TUI_LAST_HEIGHT=$TERM_LINES
-        # Restore scroll region (ANSI: ESC[top;bottomr)
-        printf "\033[1;%dr" "$((TERM_LINES - 1))" 2>/dev/null || true
-        # Hide cursor again (ANSI: ESC[?25l)
-        printf "\033[?25l" 2>/dev/null || true
-        # Redraw status bar
-        tui_draw_status_bar
+    if [ "$TUI_FULLSCREEN" = true ]; then
+        printf "\033[?25l" 2>/dev/null || true  # Hide cursor
+        tui_draw_screen  # Redraw after interactive input
     fi
 }
 
@@ -916,22 +941,48 @@ tui_set_status() {
     STATUS_MESSAGE="$message"
     STATUS_TYPE="$type"
 
-    # If sub_progress is provided, calculate and update DEPLOYMENT_PROGRESS
+    # If sub_progress is provided, update detail on the active step
     if [ -n "$sub_progress" ] && [[ "$sub_progress" =~ ^([0-9]+)/([0-9]+)$ ]]; then
         local current="${BASH_REMATCH[1]}"
         local total="${BASH_REMATCH[2]}"
-        if [ "$total" -gt 0 ]; then
+        if [ "$total" -gt 0 ] && [ "$CURRENT_STEP_INDEX" -ge 0 ]; then
+            DEPLOYMENT_STEP_DETAIL[$CURRENT_STEP_INDEX]="($current/$total)"
             # Calculate sub-progress within current deployment step
-            # Each major step is ~14% (100/7), interpolate within that
-            local base_progress=$((DEPLOYMENT_PROGRESS / 14 * 14))  # Round down to step
+            local base_progress=$((DEPLOYMENT_PROGRESS / 14 * 14))
             local step_progress=$((current * 14 / total))
             DEPLOYMENT_PROGRESS=$((base_progress + step_progress))
         fi
     fi
 
-    # Immediately update status bar if in fullscreen mode
+    # Add to activity log (strip "Pulling (X/Y): " prefix for cleaner log)
+    local log_entry="$message"
+    if [[ "$message" =~ ^Pulling\ \([0-9]+/[0-9]+\):\ (.+)$ ]]; then
+        log_entry="Pulling ${BASH_REMATCH[1]}..."
+    fi
+    tui_log "$log_entry"
+
+    # Handle pre-flight check mapping (called before tui_set_progress)
+    if [[ "$message" == *"pre-flight"* ]] || [[ "$message" == *"Pre-flight"* ]]; then
+        if [ "$CURRENT_STEP_INDEX" -lt 0 ]; then
+            CURRENT_STEP_INDEX=0
+            DEPLOYMENT_STEP_STATUS[0]="active"
+        fi
+    fi
+
+    # On success/complete, mark all steps as done
+    if [ "$type" = "success" ] && [ ${#DEPLOYMENT_STEP_STATUS[@]} -gt 0 ]; then
+        for ((i=0; i<${#DEPLOYMENT_STEP_STATUS[@]}; i++)); do
+            if [ "${DEPLOYMENT_STEP_STATUS[$i]}" != "error" ]; then
+                DEPLOYMENT_STEP_STATUS[$i]="done"
+                DEPLOYMENT_STEP_DETAIL[$i]=""
+            fi
+        done
+        DEPLOYMENT_PROGRESS=100
+    fi
+
+    # Trigger full redraw in fullscreen mode
     if [ "$TUI_FULLSCREEN" = true ]; then
-        tui_draw_status_bar
+        tui_draw_screen
     fi
 }
 
@@ -943,12 +994,36 @@ tui_set_progress() {
     DEPLOYMENT_PHASE="$phase"
     DEPLOYMENT_PROGRESS="$progress"
 
-    # Update fullscreen status bar if active
+    # Update fullscreen step tracking
     if [ "$TUI_FULLSCREEN" = true ]; then
-        tui_set_status "$phase" "progress"
+        local step_idx
+        step_idx=$(_tui_phase_to_step_index "$phase")
+
+        if [ "$step_idx" -ge 0 ]; then
+            # Mark all previous steps as done
+            for ((i=0; i<step_idx; i++)); do
+                if [ "${DEPLOYMENT_STEP_STATUS[$i]}" != "error" ]; then
+                    DEPLOYMENT_STEP_STATUS[$i]="done"
+                    DEPLOYMENT_STEP_DETAIL[$i]=""
+                fi
+            done
+            # Mark current step as active
+            DEPLOYMENT_STEP_STATUS[$step_idx]="active"
+            CURRENT_STEP_INDEX=$step_idx
+            if [ -n "$detail" ]; then
+                DEPLOYMENT_STEP_DETAIL[$step_idx]="$detail"
+            fi
+        fi
+
+        # Add to activity log
+        local clean_phase="${phase%...}"
+        tui_log "$clean_phase"
+
+        STATUS_MESSAGE="$phase"
+        STATUS_TYPE="progress"
+        tui_draw_screen
     else
         # Use bottom progress bar for non-fullscreen mode
-        # Convert percentage to step/total format (assume 7 major steps)
         local step=$((progress / 14))
         [ "$step" -lt 1 ] && step=1
         [ "$step" -gt 7 ] && step=7
@@ -956,29 +1031,60 @@ tui_set_progress() {
     fi
 }
 
+tui_log() {
+    local message="$1"
+    [ -z "$message" ] && return
+
+    # Skip consecutive duplicates (e.g. repeated health check polls)
+    if [ ${#DEPLOY_ACTIVITY_LOG[@]} -gt 0 ] && [ "${DEPLOY_ACTIVITY_LOG[0]}" = "$message" ]; then
+        return
+    fi
+
+    # Prepend to activity log (newest first)
+    DEPLOY_ACTIVITY_LOG=("$message" "${DEPLOY_ACTIVITY_LOG[@]}")
+
+    # Trim to max size
+    if [ "${#DEPLOY_ACTIVITY_LOG[@]}" -gt 50 ]; then
+        DEPLOY_ACTIVITY_LOG=("${DEPLOY_ACTIVITY_LOG[@]:0:50}")
+    fi
+}
+
+tui_draw_header_bar() {
+    if [ "$USE_TUI" != true ]; then
+        return
+    fi
+
+    # Format version properly
+    local version="${VERSION:-latest}"
+    version="${version#v}"  # Strip leading "v" if present
+    local right_content="v${version}"
+    if [ "$version" = "latest" ]; then
+        right_content="latest"
+    fi
+
+    local title=" CYROID"
+    local left_len=${#title}
+    local right_len=${#right_content}
+    local padding=$((TERM_COLS - left_len - right_len - 2))
+    [ $padding -lt 0 ] && padding=0
+
+    # Dark blue background (48;5;24), white text (38;5;255)
+    printf "\033[%d;1H" 1 2>/dev/null || true
+    printf "\033[48;5;24m\033[38;5;255m\033[2K"
+    printf "%s" "$title"
+    printf "%*s" "$padding" ""
+    printf "%s \033[0m" "$right_content"
+}
+
 tui_draw_status_bar() {
     if [ "$USE_TUI" != true ]; then
         return
     fi
 
-    # Update dimensions in case terminal was resized
     tui_update_dimensions
 
-    # Handle terminal resize - update scroll region if height changed
-    if [ "$TUI_SCROLL_REGION_SET" = true ] && [ "$TERM_LINES" != "$TUI_LAST_HEIGHT" ]; then
-        TUI_LAST_HEIGHT=$TERM_LINES
-        # Use ANSI escape for scroll region: ESC[top;bottomr
-        printf "\033[1;%dr" "$((TERM_LINES - 1))" 2>/dev/null || true
-    fi
-
-    # Save cursor position using ANSI escape (more reliable than tput)
-    printf "\0337" 2>/dev/null || true
-
-    # Move to bottom line using ANSI escape: ESC[row;colH
-    printf "\033[%d;1H" "$TERM_LINES" 2>/dev/null || true
-
-    # Build status bar content
-    local timestamp=$(date '+%H:%M:%S')
+    local timestamp
+    timestamp=$(date '+%H:%M:%S')
     local status_icon=""
     local status_color=""
 
@@ -990,76 +1096,44 @@ tui_draw_status_bar() {
         *)        status_icon="→"; status_color="245" ;;
     esac
 
-    # Create progress bar if in progress mode
-    local progress_bar=""
+    # Build progress indicator for status bar
+    local progress_part=""
     if [ "$STATUS_TYPE" = "progress" ] && [ "$DEPLOYMENT_PROGRESS" -gt 0 ]; then
-        local bar_width=20
-        local filled=$((DEPLOYMENT_PROGRESS * bar_width / 100))
-        local empty=$((bar_width - filled))
-        progress_bar=" ["
-        for ((i=0; i<filled; i++)); do progress_bar+="█"; done
-        for ((i=0; i<empty; i++)); do progress_bar+="░"; done
-        progress_bar+="] ${DEPLOYMENT_PROGRESS}%"
+        progress_part="  ${DEPLOYMENT_PROGRESS}%"
     fi
 
-    # Build the full status line - truncate message if too long
-    local max_msg_len=$((TERM_COLS - 40))  # Leave room for progress bar and timestamp
+    # Truncate message if needed
+    local max_msg_len=$((TERM_COLS - 30))
     local display_msg="$STATUS_MESSAGE"
     if [ ${#display_msg} -gt $max_msg_len ] && [ $max_msg_len -gt 3 ]; then
         display_msg="${display_msg:0:$((max_msg_len - 3))}..."
     fi
 
-    local left_content="$status_icon $display_msg$progress_bar"
-    local right_content="$timestamp"
-
-    # Calculate padding
+    local left_content=" $status_icon $display_msg$progress_part"
+    local right_content="$timestamp "
     local left_len=${#left_content}
     local right_len=${#right_content}
-    local padding=$((TERM_COLS - left_len - right_len - 4))
-    if [ $padding -lt 0 ]; then padding=0; fi
+    local padding=$((TERM_COLS - left_len - right_len))
+    [ $padding -lt 0 ] && padding=0
 
-    # Clear the line and draw status bar with dark background
-    printf "\033[48;5;236m\033[2K"  # Dark gray background, clear entire line
+    # Separator line above status bar
+    printf "\033[%d;1H" "$((TERM_LINES - 1))" 2>/dev/null || true
+    printf "\033[38;5;240m\033[2K"
+    printf " "
+    local sep_width=$((TERM_COLS - 2))
+    for ((i=0; i<sep_width; i++)); do printf "─"; done
+    printf "\033[0m"
 
-    # Draw with colors
-    printf "\033[38;5;${status_color}m %s\033[38;5;255m" "$status_icon"
-    printf " %s" "$display_msg"
-    if [ -n "$progress_bar" ]; then
-        printf "\033[38;5;39m%s" "$progress_bar"
+    # Status bar on last line - dark gray bg (48;5;236)
+    printf "\033[%d;1H" "$TERM_LINES" 2>/dev/null || true
+    printf "\033[48;5;236m\033[2K"
+    printf "\033[38;5;%sm %s" "$status_color" "$status_icon"
+    printf "\033[38;5;255m %s" "$display_msg"
+    if [ -n "$progress_part" ]; then
+        printf "\033[38;5;39m%s" "$progress_part"
     fi
-
-    # Right-align timestamp
     printf "%*s" "$padding" ""
-    printf "\033[38;5;245m%s \033[0m" "$right_content"
-
-    # Restore cursor position using ANSI escape
-    printf "\0338" 2>/dev/null || true
-}
-
-tui_draw_header_bar() {
-    if [ "$USE_TUI" != true ]; then
-        return
-    fi
-
-    # Move to top (ANSI: ESC[1;1H)
-    printf "\033[1;1H" 2>/dev/null || true
-
-    # Build header bar
-    local title="CYROID"
-    local version="${VERSION:-latest}"
-    local right_content="v$version"
-
-    # Calculate padding
-    local left_len=${#title}
-    local right_len=${#right_content}
-    local padding=$((TERM_COLS - left_len - right_len - 4))
-    if [ $padding -lt 0 ]; then padding=0; fi
-
-    # Draw header bar with cyan background
-    printf "\033[48;5;24m\033[38;5;255m\033[2K"  # Dark blue background, white text, clear line
-    printf " %s" "$title"
-    printf "%*s" "$padding" ""
-    printf "%s \033[0m\n" "$right_content"
+    printf "\033[38;5;245m%s\033[0m" "$right_content"
 }
 
 tui_draw_screen() {
@@ -1067,18 +1141,119 @@ tui_draw_screen() {
         return
     fi
 
-    # Clear screen (ANSI: ESC[2J ESC[H)
+    tui_update_dimensions
+
+    # Hide cursor and clear screen
+    printf "\033[?25l" 2>/dev/null || true
     printf "\033[2J\033[H" 2>/dev/null || true
 
-    # Draw header bar
+    # Layout calculations — everything adapts to TERM_LINES / TERM_COLS
+    # Fixed rows: header(1) + blank(1) + title(1) + blank(1) + progress(1)
+    #           + blank(1) + steps(8) + blank(1) + log_header(1) + separator(1) + statusbar(1)
+    # = 18 fixed rows; remaining rows go to activity log
+    local log_header_row=16
+    local log_start_row=17
+    local log_end_row=$((TERM_LINES - 2))
+    local available_log_lines=$((log_end_row - log_start_row + 1))
+    [ $available_log_lines -lt 1 ] && available_log_lines=1
+
+    # === Row 1: Header bar ===
     tui_draw_header_bar
 
-    # Draw status bar at bottom
-    tui_draw_status_bar
+    # === Row 3: Title ===
+    printf "\033[3;1H\033[2K" 2>/dev/null || true
+    printf "  \033[38;5;255m\033[1mDeploying CYROID\033[0m"
 
-    # Position cursor for main content (line 3, after header)
-    # ANSI: ESC[row;colH
-    printf "\033[3;1H" 2>/dev/null || true
+    # === Row 5: Progress bar (scales to terminal width) ===
+    printf "\033[5;1H\033[2K" 2>/dev/null || true
+    local bar_width=$((TERM_COLS - 14))
+    [ $bar_width -lt 10 ] && bar_width=10
+    local filled=$((DEPLOYMENT_PROGRESS * bar_width / 100))
+    local empty=$((bar_width - filled))
+    printf "  \033[38;5;82m"
+    for ((i=0; i<filled; i++)); do printf "█"; done
+    printf "\033[38;5;240m"
+    for ((i=0; i<empty; i++)); do printf "░"; done
+    printf " \033[38;5;255m\033[1m%3d%%\033[0m" "$DEPLOYMENT_PROGRESS"
+
+    # === Rows 7-14: Step checklist (8 steps) ===
+    local row=7
+    for ((i=0; i<${#DEPLOYMENT_STEPS[@]}; i++)); do
+        printf "\033[%d;1H\033[2K" "$row" 2>/dev/null || true
+        local step_name="${DEPLOYMENT_STEPS[$i]}"
+        local step_status="${DEPLOYMENT_STEP_STATUS[$i]:-pending}"
+        local step_detail="${DEPLOYMENT_STEP_DETAIL[$i]:-}"
+
+        case "$step_status" in
+            done)
+                printf "  \033[38;5;82m✓ %s\033[0m" "$step_name"
+                ;;
+            active)
+                printf "  \033[38;5;39m\033[1m◐ %s\033[0m" "$step_name"
+                if [ -n "$step_detail" ]; then
+                    printf " \033[38;5;39m%s\033[0m" "$step_detail"
+                fi
+                ;;
+            error)
+                printf "  \033[38;5;196m✗ %s\033[0m" "$step_name"
+                ;;
+            *)
+                printf "  \033[38;5;242m· %s\033[0m" "$step_name"
+                ;;
+        esac
+
+        row=$((row + 1))
+    done
+
+    # === Activity log header ===
+    printf "\033[%d;1H\033[2K" "$log_header_row" 2>/dev/null || true
+    local log_label=" Recent Activity "
+    local dash_total=$((TERM_COLS - ${#log_label} - 4))
+    local dash_left=2
+    local dash_right=$((dash_total - dash_left))
+    [ $dash_right -lt 0 ] && dash_right=0
+    printf "  \033[38;5;240m"
+    for ((i=0; i<dash_left; i++)); do printf "─"; done
+    printf "\033[38;5;245m%s\033[38;5;240m" "$log_label"
+    for ((i=0; i<dash_right; i++)); do printf "─"; done
+    printf "\033[0m"
+
+    # === Activity log entries (bottom-aligned: newest at bottom) ===
+    # DEPLOY_ACTIVITY_LOG is stored newest-first (index 0 = newest).
+    local show_count=${#DEPLOY_ACTIVITY_LOG[@]}
+    [ $show_count -gt $available_log_lines ] && show_count=$available_log_lines
+
+    # Calculate where entries start (bottom-aligned)
+    local entries_start_row=$((log_end_row - show_count + 1))
+
+    local log_row=$log_start_row
+    for ((j=0; j<available_log_lines; j++)); do
+        printf "\033[%d;1H\033[2K" "$log_row" 2>/dev/null || true
+        if [ $log_row -ge $entries_start_row ] && [ $show_count -gt 0 ]; then
+            # Which entry to show? Reverse order: oldest visible at top
+            local offset=$((log_row - entries_start_row))
+            local entry_idx=$((show_count - 1 - offset))
+            if [ $entry_idx -ge 0 ] && [ $entry_idx -lt ${#DEPLOY_ACTIVITY_LOG[@]} ]; then
+                local entry="${DEPLOY_ACTIVITY_LOG[$entry_idx]}"
+                local max_entry_len=$((TERM_COLS - 8))
+                if [ ${#entry} -gt $max_entry_len ] && [ $max_entry_len -gt 3 ]; then
+                    entry="${entry:0:$((max_entry_len - 3))}..."
+                fi
+                # Color based on content
+                if [[ "$entry" == "✓"* ]]; then
+                    printf "    \033[38;5;82m%s\033[0m" "$entry"
+                elif [[ "$entry" == "⚠"* ]] || [[ "$entry" == "✗"* ]]; then
+                    printf "    \033[38;5;214m%s\033[0m" "$entry"
+                else
+                    printf "    \033[38;5;250m%s\033[0m" "$entry"
+                fi
+            fi
+        fi
+        log_row=$((log_row + 1))
+    done
+
+    # === Bottom: Separator + Status bar ===
+    tui_draw_status_bar
 }
 
 tui_main_area() {
@@ -1088,7 +1263,7 @@ tui_main_area() {
     fi
 }
 
-# Deployment progress helper
+# Deployment progress helper (legacy, kept for compatibility)
 tui_deployment_step() {
     local step_name="$1"
     local step_num="$2"
@@ -1170,133 +1345,278 @@ tui_stop_status_updater() {
     fi
 }
 
-# Live Dashboard (K9s-style)
+# Live Dashboard (K9s-style) — fully integrated TUI with cursor-positioned updates
 tui_live_dashboard() {
     local compose_cmd="${1:-docker compose}"
 
     # Hide cursor
-    tput civis 2>/dev/null || true
+    printf "\033[?25l" 2>/dev/null || true
 
-    # Trap to restore cursor on exit
-    trap 'tput cnorm 2>/dev/null; return' INT TERM
+    # Save existing traps so we can restore after dashboard exits
+    local _saved_int_trap _saved_term_trap
+    _saved_int_trap=$(trap -p INT) || true
+    _saved_term_trap=$(trap -p TERM) || true
+
+    # Trap to restore cursor on exit from dashboard
+    trap 'printf "\033[?25h\033[0m" 2>/dev/null; return' INT TERM
 
     local refresh_interval=5
-    local last_key=""
+    local first_draw=true
 
     while true; do
         # Get terminal dimensions
-        local lines=$(tput lines 2>/dev/null || echo 24)
-        local cols=$(tput cols 2>/dev/null || echo 80)
+        local lines=${LINES:-$(tput lines 2>/dev/null || echo 24)}
+        local cols=${COLUMNS:-$(tput cols 2>/dev/null || echo 80)}
+        [[ "$lines" =~ ^[0-9]+$ ]] || lines=24
+        [[ "$cols" =~ ^[0-9]+$ ]] || cols=80
 
-        # Clear screen
-        clear
-
-        # Draw header with prominent exit instructions
-        printf "\033[48;5;24m\033[38;5;255m\033[K"
-        printf " CYROID Live Dashboard"
-        printf "%*s" $((cols - 60)) ""
-        printf "\033[48;5;214m\033[38;5;0m q=quit \033[48;5;24m\033[38;5;255m r=refresh \033[0m\n"
-
-        echo ""
-
-        # Get service status
-        local services=$($compose_cmd -f docker-compose.yml -f docker-compose.prod.yml ps 2>/dev/null) || true
-        local healthy=$($compose_cmd -f docker-compose.yml -f docker-compose.prod.yml ps 2>/dev/null | grep -c "(healthy)" || echo "0")
-        local running=$($compose_cmd -f docker-compose.yml -f docker-compose.prod.yml ps 2>/dev/null | grep -c "Up" || echo "0")
-        local total=$($compose_cmd -f docker-compose.yml -f docker-compose.prod.yml ps 2>/dev/null | grep -v "NAME" | grep -c "" || echo "0")
-
-        # Summary bar
-        local status_color="82"  # green
-        local status_text="HEALTHY"
-        if [ "$healthy" -lt 3 ]; then
-            status_color="214"  # yellow
-            status_text="DEGRADED"
+        # Only full-clear on first draw; after that use cursor positioning
+        if [ "$first_draw" = true ]; then
+            printf "\033[2J" 2>/dev/null || true
+            first_draw=false
         fi
+
+        # ── Collect all data first (minimizes time between clear and draw) ──
+        local svc_data=""
+        svc_data=$($compose_cmd -f docker-compose.yml -f docker-compose.prod.yml ps --format "table {{.Name}}\t{{.Service}}\t{{.Status}}" 2>/dev/null) || true
+
+        local healthy=0 running=0 total=0 svc_lines=()
+        if [ -n "$svc_data" ]; then
+            while IFS= read -r line; do
+                # Skip header
+                [[ "$line" == NAME* ]] && continue
+                [ -z "$line" ] && continue
+                total=$((total + 1))
+                if echo "$line" | grep -q "Up"; then
+                    running=$((running + 1))
+                    echo "$line" | grep -q "(healthy)" && healthy=$((healthy + 1))
+                fi
+                svc_lines+=("$line")
+            done <<< "$svc_data"
+        fi
+
+        local range_containers=""
+        range_containers=$(docker ps --filter "label=cyroid.type=dind" --format "{{.Names}}\t{{.Status}}" 2>/dev/null) || true
+        local range_count=0 range_lines=()
+        if [ -n "$range_containers" ]; then
+            while IFS= read -r line; do
+                [ -z "$line" ] && continue
+                range_count=$((range_count + 1))
+                range_lines+=("$line")
+            done <<< "$range_containers"
+        fi
+
+        local stats_data=""
+        stats_data=$(docker stats --no-stream --format "{{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}" 2>/dev/null) || true
+        local stats_lines=()
+        if [ -n "$stats_data" ]; then
+            while IFS= read -r line; do
+                [ -z "$line" ] && continue
+                stats_lines+=("$line")
+            done <<< "$stats_data"
+        fi
+
+        local timestamp
+        timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+
+        # ── Draw ──
+        local row=1
+
+        # === Row 1: Header bar (dark blue bg) ===
+        printf "\033[%d;1H\033[48;5;24m\033[38;5;255m\033[2K" "$row"
+        printf " ◆ CYROID Live Dashboard"
+        local hdr_right="q quit · r refresh"
+        local hdr_pad=$((cols - 25 - ${#hdr_right} - 1))
+        [ $hdr_pad -lt 0 ] && hdr_pad=0
+        printf "%*s" "$hdr_pad" ""
+        printf "\033[38;5;153m%s \033[0m" "$hdr_right"
+        row=$((row + 1))
+
+        # === Row 2: blank ===
+        printf "\033[%d;1H\033[2K" "$row"
+        row=$((row + 1))
+
+        # === Status summary ===
+        local status_color="82" status_text="HEALTHY" status_icon="●"
         if [ "$running" -eq 0 ]; then
-            status_color="196"  # red
-            status_text="DOWN"
+            status_color="196"; status_text="DOWN"; status_icon="✗"
+        elif [ "$healthy" -lt "$running" ]; then
+            status_color="214"; status_text="DEGRADED"; status_icon="◐"
         fi
 
-        gum style --foreground "$status_color" --bold "  Status: $status_text  |  Services: $running running, $healthy healthy"
-        echo ""
+        printf "\033[%d;1H\033[2K" "$row"
+        printf "  \033[38;5;${status_color}m\033[1m%s %s\033[0m" "$status_icon" "$status_text"
+        printf "  \033[38;5;245m│\033[0m  \033[38;5;255m%d\033[38;5;245m services running  \033[38;5;255m%d\033[38;5;245m healthy\033[0m" "$running" "$healthy"
+        row=$((row + 1))
 
-        # Services table
-        gum style --foreground 212 --bold "  Services"
-        echo ""
+        # === Row: blank ===
+        printf "\033[%d;1H\033[2K" "$row"
+        row=$((row + 1))
 
-        if [ -n "$services" ]; then
-            echo "$services" | while IFS= read -r line; do
-                if echo "$line" | grep -q "(healthy)"; then
-                    printf "    \033[38;5;82m●\033[0m %s\n" "$line"
-                elif echo "$line" | grep -q "Up"; then
-                    printf "    \033[38;5;214m●\033[0m %s\n" "$line"
-                elif echo "$line" | grep -q "NAME"; then
-                    printf "    \033[38;5;245m  %s\033[0m\n" "$line"
-                else
-                    printf "    \033[38;5;196m●\033[0m %s\n" "$line"
+        # === Services section header ===
+        printf "\033[%d;1H\033[2K" "$row"
+        local sec_label="Services"
+        printf "  \033[38;5;212m\033[1m%s\033[0m" "$sec_label"
+        local dash_start=$((3 + ${#sec_label} + 1))
+        local dash_count=$((cols - dash_start - 2))
+        [ $dash_count -gt 0 ] && { printf " \033[38;5;240m"; for ((i=0; i<dash_count; i++)); do printf "─"; done; printf "\033[0m"; }
+        row=$((row + 1))
+
+        # === Services table header ===
+        printf "\033[%d;1H\033[2K" "$row"
+        printf "    \033[38;5;245m%-22s %-12s %-30s\033[0m" "CONTAINER" "SERVICE" "STATUS"
+        row=$((row + 1))
+
+        # === Service rows ===
+        if [ ${#svc_lines[@]} -gt 0 ]; then
+            for svc_line in "${svc_lines[@]}"; do
+                printf "\033[%d;1H\033[2K" "$row"
+                # Parse: Name\tService\tStatus
+                local svc_name svc_service svc_status
+                svc_name=$(echo "$svc_line" | awk -F'\t' '{print $1}' | xargs)
+                svc_service=$(echo "$svc_line" | awk -F'\t' '{print $2}' | xargs)
+                svc_status=$(echo "$svc_line" | awk -F'\t' '{$1=""; $2=""; print}' | sed 's/^ *//')
+                # Fallback: if tab-separated didn't work, split by whitespace
+                if [ -z "$svc_service" ]; then
+                    svc_name=$(echo "$svc_line" | awk '{print $1}')
+                    svc_service=$(echo "$svc_line" | awk '{print $2}')
+                    svc_status=$(echo "$svc_line" | awk '{for(i=3;i<=NF;i++) printf "%s ", $i; print ""}' | sed 's/ *$//')
                 fi
-            done
-        else
-            gum style --foreground 196 "    No services found"
-        fi
 
-        echo ""
-
-        # Ranges section
-        local range_containers=$(docker ps --filter "label=cyroid.type=dind" --format "{{.Names}}\t{{.Status}}" 2>/dev/null) || true
-        local range_count=$(echo "$range_containers" | grep -c "" 2>/dev/null || echo "0")
-        if [ -z "$range_containers" ]; then range_count=0; fi
-
-        gum style --foreground 212 --bold "  Deployed Ranges ($range_count)"
-        echo ""
-
-        if [ -n "$range_containers" ] && [ "$range_count" -gt 0 ]; then
-            echo "$range_containers" | while IFS=$'\t' read -r name status; do
-                if [ -n "$name" ]; then
-                    if echo "$status" | grep -q "Up"; then
-                        printf "    \033[38;5;82m●\033[0m %-30s %s\n" "$name" "$status"
-                    else
-                        printf "    \033[38;5;196m●\033[0m %-30s %s\n" "$name" "$status"
-                    fi
+                local dot_color="196"
+                if echo "$svc_status" | grep -q "(healthy)"; then
+                    dot_color="82"
+                elif echo "$svc_status" | grep -q "Up"; then
+                    dot_color="214"
                 fi
+                printf "    \033[38;5;${dot_color}m●\033[0m %-21s \033[38;5;39m%-12s\033[0m \033[38;5;250m%s\033[0m" "$svc_name" "$svc_service" "$svc_status"
+                row=$((row + 1))
             done
         else
-            gum style --foreground 245 "    No ranges deployed"
+            printf "\033[%d;1H\033[2K" "$row"
+            printf "    \033[38;5;196mNo services found\033[0m"
+            row=$((row + 1))
         fi
 
-        echo ""
+        # === Blank ===
+        printf "\033[%d;1H\033[2K" "$row"
+        row=$((row + 1))
 
-        # Resource usage (if docker stats available)
-        gum style --foreground 212 --bold "  Resource Usage"
-        echo ""
+        # === Deployed Ranges section ===
+        printf "\033[%d;1H\033[2K" "$row"
+        local range_label="Deployed Ranges ($range_count)"
+        printf "  \033[38;5;212m\033[1m%s\033[0m" "$range_label"
+        dash_start=$((3 + ${#range_label} + 1))
+        dash_count=$((cols - dash_start - 2))
+        [ $dash_count -gt 0 ] && { printf " \033[38;5;240m"; for ((i=0; i<dash_count; i++)); do printf "─"; done; printf "\033[0m"; }
+        row=$((row + 1))
 
-        local stats=$(docker stats --no-stream --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}" 2>/dev/null | head -8) || true
-        if [ -n "$stats" ]; then
-            echo "$stats" | while IFS= read -r line; do
-                printf "    %s\n" "$line"
+        if [ ${#range_lines[@]} -gt 0 ]; then
+            for range_line in "${range_lines[@]}"; do
+                printf "\033[%d;1H\033[2K" "$row"
+                local rname rstatus
+                rname=$(echo "$range_line" | cut -f1)
+                rstatus=$(echo "$range_line" | cut -f2-)
+                local rdot="196"
+                echo "$rstatus" | grep -q "Up" && rdot="82"
+                printf "    \033[38;5;${rdot}m●\033[0m %-30s \033[38;5;250m%s\033[0m" "$rname" "$rstatus"
+                row=$((row + 1))
             done
         else
-            gum style --foreground 245 "    Stats unavailable"
+            printf "\033[%d;1H\033[2K" "$row"
+            printf "    \033[38;5;242mNo ranges deployed\033[0m"
+            row=$((row + 1))
         fi
 
-        # Draw status bar at bottom
-        tput cup $((lines - 1)) 0 2>/dev/null || true
-        local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-        printf "\033[48;5;236m\033[38;5;245m\033[K"
-        printf " Auto-refresh: ${refresh_interval}s"
-        printf "%*s" $((cols - 35)) ""
-        printf "Last update: %s \033[0m" "$timestamp"
+        # === Blank ===
+        printf "\033[%d;1H\033[2K" "$row"
+        row=$((row + 1))
+
+        # === Resource Usage section ===
+        printf "\033[%d;1H\033[2K" "$row"
+        local res_label="Resource Usage"
+        printf "  \033[38;5;212m\033[1m%s\033[0m" "$res_label"
+        dash_start=$((3 + ${#res_label} + 1))
+        dash_count=$((cols - dash_start - 2))
+        [ $dash_count -gt 0 ] && { printf " \033[38;5;240m"; for ((i=0; i<dash_count; i++)); do printf "─"; done; printf "\033[0m"; }
+        row=$((row + 1))
+
+        # Table header
+        printf "\033[%d;1H\033[2K" "$row"
+        printf "    \033[38;5;245m%-24s %8s  %-24s\033[0m" "CONTAINER" "CPU" "MEMORY"
+        row=$((row + 1))
+
+        if [ ${#stats_lines[@]} -gt 0 ]; then
+            local stats_shown=0
+            for stat_line in "${stats_lines[@]}"; do
+                [ $stats_shown -ge 10 ] && break
+                printf "\033[%d;1H\033[2K" "$row"
+                local st_name st_cpu st_mem
+                st_name=$(echo "$stat_line" | cut -f1)
+                st_cpu=$(echo "$stat_line" | cut -f2)
+                st_mem=$(echo "$stat_line" | cut -f3)
+
+                # CPU color: green < 25%, yellow < 75%, red >= 75%
+                local cpu_val cpu_color="82"
+                cpu_val=$(echo "$st_cpu" | tr -d '%' | cut -d. -f1)
+                [[ "$cpu_val" =~ ^[0-9]+$ ]] || cpu_val=0
+                [ "$cpu_val" -ge 25 ] && cpu_color="214"
+                [ "$cpu_val" -ge 75 ] && cpu_color="196"
+
+                # Build a mini CPU bar (8 chars wide)
+                local bar_len=8
+                local bar_filled=$((cpu_val * bar_len / 100))
+                [ $bar_filled -gt $bar_len ] && bar_filled=$bar_len
+                local bar_empty=$((bar_len - bar_filled))
+                local cpu_bar=""
+                for ((i=0; i<bar_filled; i++)); do cpu_bar+="█"; done
+                for ((i=0; i<bar_empty; i++)); do cpu_bar+="░"; done
+
+                printf "    %-24s \033[38;5;${cpu_color}m%s\033[0m %5s  \033[38;5;250m%s\033[0m" \
+                    "$st_name" "$cpu_bar" "$st_cpu" "$st_mem"
+                row=$((row + 1))
+                stats_shown=$((stats_shown + 1))
+            done
+        else
+            printf "\033[%d;1H\033[2K" "$row"
+            printf "    \033[38;5;242mStats unavailable\033[0m"
+            row=$((row + 1))
+        fi
+
+        # === Clear any leftover lines from previous draws ===
+        while [ $row -lt $((lines - 1)) ]; do
+            printf "\033[%d;1H\033[2K" "$row"
+            row=$((row + 1))
+        done
+
+        # === Separator line ===
+        printf "\033[%d;1H\033[38;5;240m\033[2K " "$((lines - 1))"
+        local sep_w=$((cols - 2))
+        for ((i=0; i<sep_w; i++)); do printf "─"; done
+        printf "\033[0m"
+
+        # === Status bar (last line) ===
+        printf "\033[%d;1H\033[48;5;236m\033[2K" "$lines"
+        printf " \033[38;5;82m●\033[38;5;245m Auto-refresh: %ds" "$refresh_interval"
+        local bar_right="Last update: $timestamp "
+        local bar_pad=$((cols - 22 - ${#bar_right}))
+        [ $bar_pad -lt 0 ] && bar_pad=0
+        printf "%*s" "$bar_pad" ""
+        printf "\033[38;5;255m%s\033[0m" "$bar_right"
 
         # Wait for key or timeout
         if read -t "$refresh_interval" -n 1 key 2>/dev/null; then
             case "$key" in
                 q|Q)
-                    tput cnorm 2>/dev/null || true
-                    clear
+                    printf "\033[?25h\033[0m" 2>/dev/null || true
+                    printf "\033[2J\033[H" 2>/dev/null || true
+                    eval "$_saved_int_trap" 2>/dev/null || trap - INT
+                    eval "$_saved_term_trap" 2>/dev/null || trap - TERM
                     return
                     ;;
                 r|R)
-                    continue  # Immediate refresh
+                    first_draw=true  # Force full redraw on manual refresh
+                    continue
                     ;;
             esac
         fi
@@ -1556,7 +1876,7 @@ backup_images() {
     # Get backup name if not provided
     if [ -z "$backup_name" ]; then
         if [ "$USE_TUI" = true ] && command -v gum &> /dev/null; then
-            backup_name=$(gum input --placeholder "Enter backup name" --value "$(date +%Y%m%d_%H%M%S)")
+            backup_name=$(gum input --placeholder "Enter backup name" --value "$(date +%Y%m%d_%H%M%S)") || true
         else
             read -p "Backup name [$(date +%Y%m%d_%H%M%S)]: " backup_name
             [ -z "$backup_name" ] && backup_name="$(date +%Y%m%d_%H%M%S)"
@@ -1694,7 +2014,7 @@ restore_images() {
         echo ""
 
         if [ "$USE_TUI" = true ] && command -v gum &> /dev/null; then
-            backup_name=$(echo "$backups" | gum choose --header "Select backup to restore:")
+            backup_name=$(echo "$backups" | gum choose --header "Select backup to restore:") || true
         else
             read -p "Enter backup name: " backup_name
         fi
@@ -2011,7 +2331,7 @@ delete_backup() {
         fi
 
         if [ "$USE_TUI" = true ] && command -v gum &> /dev/null; then
-            backup_name=$(echo "$backups" | gum choose --header "Select backup to delete:")
+            backup_name=$(echo "$backups" | gum choose --header "Select backup to delete:") || true
         else
             list_backups
             read -p "Enter backup name to delete: " backup_name
@@ -2459,7 +2779,7 @@ factory_reset() {
         # Type to confirm
         echo ""
         local confirm_text
-        confirm_text=$(gum input --placeholder "FACTORY RESET" --header "Type 'FACTORY RESET' to confirm:")
+        confirm_text=$(gum input --placeholder "FACTORY RESET" --header "Type 'FACTORY RESET' to confirm:") || true
 
         if [ "$confirm_text" != "FACTORY RESET" ]; then
             tui_error "Confirmation text did not match. Factory reset cancelled."
@@ -2626,7 +2946,7 @@ factory_reset() {
         local next_action
         next_action=$(gum choose --header "What would you like to do next?" \
             "Run fresh deployment" \
-            "Exit")
+            "Exit") || true
 
         case "$next_action" in
             "Run fresh deployment")
@@ -2803,7 +3123,7 @@ check_docker() {
                 choice=$(gum choose --header "Docker is not running. What would you like to do?" \
                     "Start Docker now (requires sudo)" \
                     "Show manual fix steps" \
-                    "Cancel")
+                    "Cancel") || true
 
                 case "$choice" in
                     "Start Docker"*)
@@ -2931,7 +3251,7 @@ check_ports() {
                     choice=$(gum choose --header "What would you like to do?" \
                         "Continue anyway (may fail)" \
                         "Show how to stop the service" \
-                        "Cancel deployment")
+                        "Cancel deployment") || true
 
                     case "$choice" in
                         "Continue"*)
@@ -3520,7 +3840,7 @@ init_networks() {
             --driver bridge \
             --subnet 172.30.0.0/24 \
             --gateway 172.30.0.1 \
-            cyroid-mgmt
+            cyroid-mgmt >/dev/null 2>&1
         log_info "Created cyroid-mgmt (172.30.0.0/24)"
     else
         log_info "cyroid-mgmt network already exists"
@@ -3533,7 +3853,7 @@ init_networks() {
             --driver bridge \
             --subnet 172.30.1.0/24 \
             --gateway 172.30.1.1 \
-            cyroid-ranges
+            cyroid-ranges >/dev/null 2>&1
         log_info "Created cyroid-ranges (172.30.1.0/24)"
     else
         log_info "cyroid-ranges network already exists"
@@ -3599,9 +3919,26 @@ pull_images() {
 
             # Pull individual image with explicit platform to avoid multi-arch issues
             if docker pull --platform "$DOCKER_PLATFORM" "$img" >/dev/null 2>&1; then
-                [ "$TUI_FULLSCREEN" != true ] && printf "    \033[32m✓\033[0m Pulled\n" || true
+                if [ "$TUI_FULLSCREEN" = true ]; then
+                    tui_log "✓ Pulled $name"
+                else
+                    printf "    \033[32m✓\033[0m Pulled\n"
+                fi
             else
-                [ "$TUI_FULLSCREEN" != true ] && printf "    \033[33m⚠\033[0m May already exist locally\n" || true
+                # Check if image exists locally
+                if docker image inspect "$img" &>/dev/null; then
+                    if [ "$TUI_FULLSCREEN" = true ]; then
+                        tui_log "✓ $name (cached locally)"
+                    else
+                        printf "    \033[33m⚠\033[0m Using cached local image\n"
+                    fi
+                else
+                    if [ "$TUI_FULLSCREEN" = true ]; then
+                        tui_log "✗ $name (pull failed, not found locally)"
+                    else
+                        printf "    \033[31m✗\033[0m Pull failed and image not found locally!\n"
+                    fi
+                fi
             fi
         done < "$temp_images"
 
@@ -3632,8 +3969,17 @@ start_services() {
 
     # Start services (don't use gum spin - it can fail silently)
     if [ "$TUI_FULLSCREEN" = true ]; then
-        # Suppress output in fullscreen mode - status bar shows progress
-        $compose_cmd -f docker-compose.yml -f docker-compose.prod.yml up -d >/dev/null 2>&1 || true
+        # Capture output and errors, log them to TUI activity log
+        local compose_output
+        compose_output=$($compose_cmd -f docker-compose.yml -f docker-compose.prod.yml up -d 2>&1) || true
+        # Log any errors to TUI activity log
+        if [ -n "$compose_output" ]; then
+            while IFS= read -r line; do
+                if [[ "$line" == *"Error"* ]] || [[ "$line" == *"error"* ]] || [[ "$line" == *"not found"* ]]; then
+                    tui_log "✗ $line"
+                fi
+            done <<< "$compose_output"
+        fi
     else
         $compose_cmd -f docker-compose.yml -f docker-compose.prod.yml up -d 2>&1 | while read -r line; do
             if [ -n "$line" ]; then
@@ -3642,14 +3988,35 @@ start_services() {
         done || true
     fi
 
-    # Verify all containers started (retry any stuck in "Created" state)
-    sleep 2
+    # Verify containers actually started
+    sleep 3
+    local running_count
+    running_count=$($compose_cmd -f docker-compose.yml -f docker-compose.prod.yml ps 2>/dev/null | grep -c "Up") || running_count=0
+
+    if [ "$running_count" -eq 0 ]; then
+        tui_log "✗ No containers started - checking for errors..."
+        # Show compose logs for diagnosis
+        local error_logs
+        error_logs=$($compose_cmd -f docker-compose.yml -f docker-compose.prod.yml logs --tail=5 2>&1 | grep -iE "error|fatal|fail|not found" | head -5) || true
+        if [ -n "$error_logs" ]; then
+            while IFS= read -r line; do
+                [ -n "$line" ] && tui_log "✗ $line"
+            done <<< "$error_logs"
+        fi
+        SERVICES_STARTED=false
+        return 1
+    fi
+
+    tui_log "$running_count containers running"
+
+    # Retry any stuck in "Created" state
     local created_containers=$($compose_cmd -f docker-compose.yml -f docker-compose.prod.yml ps --filter "status=created" -q 2>/dev/null) || true
     if [ -n "$created_containers" ]; then
         log_warn "Some containers didn't start, retrying..."
         echo "$created_containers" | xargs -r docker start 2>/dev/null || true
         sleep 2
     fi
+    SERVICES_STARTED=true
 }
 
 wait_for_health() {
@@ -3657,6 +4024,7 @@ wait_for_health() {
     local attempt=0
     local target_healthy=8  # All 8 services should be healthy
 
+    local last_healthy=-1
     while [ $attempt -lt $max_attempts ]; do
         local healthy_count
         healthy_count=$(docker_compose_cmd -f docker-compose.yml -f docker-compose.prod.yml ps 2>/dev/null | grep -c "(healthy)") || healthy_count=0
@@ -3666,6 +4034,13 @@ wait_for_health() {
         # Update progress bar
         if [ "$TUI_FULLSCREEN" = true ]; then
             tui_set_status "Waiting for services... ($healthy_count/$target_healthy healthy)" "progress" "$healthy_count/$target_healthy"
+            # Log when healthy count changes
+            if [ "$healthy_count" -ne "$last_healthy" ]; then
+                last_healthy=$healthy_count
+                if [ "$healthy_count" -gt 0 ]; then
+                    tui_log "$healthy_count/$target_healthy services healthy"
+                fi
+            fi
         else
             progress_bar_update "$healthy_count" "$target_healthy" "Health Check" "$healthy_count/$target_healthy healthy, $running_count running"
         fi
@@ -3678,6 +4053,17 @@ wait_for_health() {
 
         attempt=$((attempt + 1))
 
+        # After 15 attempts (30s), log which services are not healthy
+        if [ "$attempt" -eq 15 ] && [ "$TUI_FULLSCREEN" = true ] && [ "$running_count" -lt "$target_healthy" ]; then
+            local not_running
+            not_running=$(docker_compose_cmd -f docker-compose.yml -f docker-compose.prod.yml ps 2>/dev/null | grep -v "Up" | grep -v "NAME" | awk '{print $1}' | head -5) || true
+            if [ -n "$not_running" ]; then
+                while IFS= read -r svc; do
+                    [ -n "$svc" ] && tui_log "⚠ Not running: $svc"
+                done <<< "$not_running"
+            fi
+        fi
+
         # Show dots in non-TUI mode without progress bar
         if [ "$USE_TUI" != true ]; then
             echo -n "."
@@ -3686,7 +4072,7 @@ wait_for_health() {
         sleep 2
     done
 
-    echo ""
+    [ "$TUI_FULLSCREEN" != true ] && echo "" || true
     tui_set_status "Some services may not be healthy" "warn"
     tui_warn "Some services may not be fully healthy yet"
     tui_info "Check status with: $0 --status"
@@ -3704,9 +4090,11 @@ create_initial_admin() {
     local default_email="admin@example.com"
     local default_password="admin123"
 
-    echo ""
-    tui_title "Step 5: Initial Admin User"
-    echo ""
+    if [ "$TUI_FULLSCREEN" != true ]; then
+        echo ""
+        tui_title "Step 5: Initial Admin User"
+        echo ""
+    fi
 
     # TUI input with defaults pre-filled
     local admin_username admin_email admin_password
@@ -3721,9 +4109,9 @@ create_initial_admin() {
     elif [ "$USE_TUI" = true ] && command -v gum &> /dev/null; then
         # Suspend scroll region for interactive gum input
         tui_suspend_scroll_region
-        admin_username=$(gum input --placeholder "admin" --value "$default_username" --header "Admin username:")
-        admin_email=$(gum input --placeholder "admin@example.com" --value "$default_email" --header "Admin email:")
-        admin_password=$(gum input --placeholder "admin123" --value "$default_password" --password --header "Admin password:")
+        admin_username=$(gum input --placeholder "admin" --value "$default_username" --header "Admin username:") || true
+        admin_email=$(gum input --placeholder "admin@example.com" --value "$default_email" --header "Admin email:") || true
+        admin_password=$(gum input --placeholder "admin123" --value "$default_password" --password --header "Admin password:") || true
         # Restore scroll region after input
         tui_restore_scroll_region
     else
@@ -3809,7 +4197,7 @@ seed_students() {
             "student (Recommended)" \
             "engineer" \
             "evaluator" \
-            "admin")
+            "admin") || true
         tui_restore_scroll_region
         # Extract just the role name (remove " (Recommended)" suffix if present)
         role=$(echo "$role" | awk '{print $1}')
@@ -3831,7 +4219,7 @@ seed_students() {
     local num_users
     if [ "$USE_TUI" = true ] && command -v gum &> /dev/null; then
         tui_suspend_scroll_region
-        num_users=$(gum input --placeholder "10" --header "How many ${role} accounts to create?")
+        num_users=$(gum input --placeholder "10" --header "How many ${role} accounts to create?") || true
         tui_restore_scroll_region
     else
         read -p "How many ${role} accounts to create? [10]: " num_users
@@ -3854,8 +4242,8 @@ seed_students() {
     local admin_user admin_pass
     if [ "$USE_TUI" = true ] && command -v gum &> /dev/null; then
         tui_suspend_scroll_region
-        admin_user=$(gum input --placeholder "admin" --header "Admin username:")
-        admin_pass=$(gum input --password --header "Admin password:")
+        admin_user=$(gum input --placeholder "admin" --header "Admin username:") || true
+        admin_pass=$(gum input --password --header "Admin password:") || true
         tui_restore_scroll_region
     else
         read -p "Admin username: " admin_user
@@ -4119,7 +4507,25 @@ do_deploy() {
 
     # Start services (Step 6/7)
     tui_set_progress "Starting services..." 85
-    start_services
+    SERVICES_STARTED=false
+    start_services || true
+
+    if [ "$SERVICES_STARTED" != true ]; then
+        tui_set_status "Services failed to start!" "error"
+        if [ "$TUI_FULLSCREEN" = true ]; then
+            # Show error state for a moment, then clean up
+            sleep 3
+            tui_cleanup_fullscreen
+        fi
+        tui_error "Services failed to start. Check logs with:"
+        tui_info "  docker compose --env-file .env.prod -f docker-compose.yml -f docker-compose.prod.yml logs"
+        echo ""
+        # Still show management menu for recovery options
+        if [ -t 0 ]; then
+            management_menu
+        fi
+        return 1
+    fi
 
     # Wait for health (Step 7/7)
     tui_set_progress "Waiting for services to be healthy..." 92
@@ -4171,7 +4577,12 @@ management_menu() {
                 "Image Backup/Restore" \
                 "Clean up (stop + remove data)" \
                 "Factory Reset (complete reset)" \
-                "Exit")
+                "Exit") || true
+
+            # Handle Ctrl+C / Escape — treat as Exit
+            if [ -z "$choice" ]; then
+                break
+            fi
 
             case "$choice" in
                 "Live Dashboard"*)
@@ -4205,7 +4616,7 @@ management_menu() {
                     ;;
                 "Stop services")
                     echo ""
-                    if gum confirm "Stop all CYROID services?"; then
+                    if gum confirm "Stop all CYROID services?" 2>/dev/null; then
                         tui_info "Stopping services..."
                         $compose_cmd -f docker-compose.yml -f docker-compose.prod.yml down
                         tui_success "Services stopped"
@@ -4225,13 +4636,15 @@ management_menu() {
                         "Restore images (load from backup)" \
                         "List backups" \
                         "Delete backup" \
-                        "← Back")
+                        "← Back") || true
+
+                    if [ -z "$backup_choice" ]; then continue; fi
 
                     case "$backup_choice" in
                         "Backup"*)
                             echo ""
                             local backup_name
-                            backup_name=$(gum input --placeholder "$(date +%Y%m%d_%H%M%S)" --header "Backup name (or press Enter for timestamp):")
+                            backup_name=$(gum input --placeholder "$(date +%Y%m%d_%H%M%S)" --header "Backup name (or press Enter for timestamp):") || true
                             backup_images "$backup_name"
                             ;;
                         "Restore"*)
@@ -4747,7 +5160,7 @@ select_version_interactive() {
                 "$latest_label" \
                 "Choose from tags (all versions)" \
                 "Choose from releases only" \
-                "Enter version manually")
+                "Enter version manually") || true
 
             case "$version_choice" in
                 "Latest"*)
@@ -4758,7 +5171,7 @@ select_version_interactive() {
                     if [ -n "$tags" ]; then
                         echo ""
                         tui_info "Available versions (from tags):"
-                        VERSION=$(echo "$tags" | gum choose --header "Select a version:")
+                        VERSION=$(echo "$tags" | gum choose --header "Select a version:") || true
                         if [ -n "$VERSION" ]; then
                             tui_success "Selected: $VERSION"
                         else
@@ -4775,7 +5188,7 @@ select_version_interactive() {
                         # Show releases with gum choose
                         echo ""
                         tui_info "Available releases:"
-                        VERSION=$(echo "$releases" | gum choose --header "Select a release:")
+                        VERSION=$(echo "$releases" | gum choose --header "Select a release:") || true
                         if [ -n "$VERSION" ]; then
                             tui_success "Selected: $VERSION"
                         else
@@ -4788,7 +5201,7 @@ select_version_interactive() {
                     fi
                     ;;
                 "Enter"*)
-                    VERSION=$(gum input --placeholder "v0.32.0" --header "Enter version (e.g., v0.32.0):")
+                    VERSION=$(gum input --placeholder "v0.32.0" --header "Enter version (e.g., v0.32.0):") || true
                     if [ -z "$VERSION" ]; then
                         VERSION="latest"
                         tui_warn "No version entered, using latest"
@@ -4897,7 +5310,7 @@ do_update() {
                     "Latest (newest release)" \
                     "Choose from releases" \
                     "Choose from tags" \
-                    "Enter version manually")
+                    "Enter version manually") || true
 
                 case "$version_choice" in
                     "Latest"*)
@@ -4905,7 +5318,7 @@ do_update() {
                         ;;
                     "Choose from releases"*)
                         if [ -n "$releases" ]; then
-                            target_version=$(echo "$releases" | gum choose --header "Select release:")
+                            target_version=$(echo "$releases" | gum choose --header "Select release:") || true
                         else
                             tui_warn "No releases found, using latest"
                             target_version="latest"
@@ -4913,14 +5326,14 @@ do_update() {
                         ;;
                     "Choose from tags"*)
                         if [ -n "$tags" ]; then
-                            target_version=$(echo "$tags" | gum choose --header "Select tag:")
+                            target_version=$(echo "$tags" | gum choose --header "Select tag:") || true
                         else
                             tui_warn "No tags found, using latest"
                             target_version="latest"
                         fi
                         ;;
                     "Enter"*)
-                        target_version=$(gum input --placeholder "v0.30.0" --header "Enter version:")
+                        target_version=$(gum input --placeholder "v0.30.0" --header "Enter version:") || true
                         ;;
                     *)
                         target_version="latest"
@@ -5166,7 +5579,8 @@ interactive_setup() {
                 if [ "$USE_TUI" = true ] && command -v gum &> /dev/null; then
                     access_choice=$(gum choose --header "How will users access CYROID?" \
                         "IP address (e.g., 0.0.0.0)" \
-                        "Domain name (e.g., cyroid.example.com)")
+                        "Domain name (e.g., cyroid.example.com)") || true
+                    if [ -z "$access_choice" ]; then continue; fi
                 else
                     access_choice=$(tui_choose "How will users access CYROID?" \
                         "IP address (e.g., 0.0.0.0)" \
@@ -5221,7 +5635,8 @@ interactive_setup() {
                     ssl_choice=$(gum choose --header "Choose SSL certificate type:" \
                         "Let's Encrypt (automatic, free, requires public domain)" \
                         "Self-signed (works immediately, browser warning)" \
-                        "← Back")
+                        "← Back") || true
+                    if [ -z "$ssl_choice" ]; then continue; fi
                 else
                     ssl_choice=$(tui_choose "Choose SSL certificate type:" \
                         "Let's Encrypt (automatic, free, requires public domain)" \
@@ -5266,7 +5681,8 @@ interactive_setup() {
                     data_choice=$(gum choose --header "Configure data storage location:" \
                         "Use default: $DATA_DIR" \
                         "Enter custom path" \
-                        "← Back")
+                        "← Back") || true
+                    if [ -z "$data_choice" ]; then continue; fi
 
                     case "$data_choice" in
                         "← Back"*)
@@ -5283,7 +5699,7 @@ interactive_setup() {
                             ;;
                         "Enter custom"*)
                             local input_data_dir
-                            input_data_dir=$(gum input --placeholder "$DATA_DIR" --value "$DATA_DIR" --header "Data directory for CYROID storage:")
+                            input_data_dir=$(gum input --placeholder "$DATA_DIR" --value "$DATA_DIR" --header "Data directory for CYROID storage:") || true
                             if [ -n "$input_data_dir" ]; then
                                 DATA_DIR="$input_data_dir"
                             fi
@@ -5334,7 +5750,8 @@ interactive_setup() {
                         "Choose from releases" \
                         "Choose from all tags" \
                         "Enter version manually" \
-                        "← Back")
+                        "← Back") || true
+                    if [ -z "$version_choice" ]; then continue; fi
 
                     case "$version_choice" in
                         "← Back"*)
@@ -5352,7 +5769,7 @@ interactive_setup() {
                                 echo ""
                                 # Add back option to releases list
                                 local release_choice
-                                release_choice=$(echo -e "← Back\n$releases" | gum choose --header "Select a release:")
+                                release_choice=$(echo -e "← Back\n$releases" | gum choose --header "Select a release:") || true
                                 if [ "$release_choice" = "← Back" ]; then
                                     continue
                                 elif [ -n "$release_choice" ]; then
@@ -5373,7 +5790,7 @@ interactive_setup() {
                             if [ -n "$tags" ]; then
                                 echo ""
                                 local tag_choice
-                                tag_choice=$(echo -e "← Back\n$tags" | gum choose --header "Select a tag:")
+                                tag_choice=$(echo -e "← Back\n$tags" | gum choose --header "Select a tag:") || true
                                 if [ "$tag_choice" = "← Back" ]; then
                                     continue
                                 elif [ -n "$tag_choice" ]; then
@@ -5391,7 +5808,7 @@ interactive_setup() {
                             fi
                             ;;
                         "Enter"*)
-                            VERSION=$(gum input --placeholder "v0.32.0" --header "Enter version (e.g., v0.32.0):")
+                            VERSION=$(gum input --placeholder "v0.32.0" --header "Enter version (e.g., v0.32.0):") || true
                             if [ -z "$VERSION" ]; then
                                 VERSION="latest"
                             fi
@@ -5458,7 +5875,8 @@ Email:       $EMAIL"
                     confirm_choice=$(gum choose --header "Ready to deploy?" \
                         "Yes, proceed with deployment" \
                         "← Back to version selection" \
-                        "Cancel deployment")
+                        "Cancel deployment") || true
+                    if [ -z "$confirm_choice" ]; then continue; fi
 
                     case "$confirm_choice" in
                         "Yes"*)
