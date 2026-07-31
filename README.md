@@ -2,7 +2,7 @@
   <img src="https://img.shields.io/badge/Status-Active%20Development-brightgreen" alt="Status">
   <img src="https://img.shields.io/badge/Phase-5%20of%207-blue" alt="Phase">
   <img src="https://img.shields.io/badge/Version-0.35.35-orange" alt="Version">
-  <img src="https://img.shields.io/badge/License-Proprietary-red" alt="License">
+  <img src="https://img.shields.io/badge/License-AGPL%20v3-blue" alt="License">
   <img src="https://github.com/JongoDB/CYROID/actions/workflows/docker-publish.yml/badge.svg" alt="Docker Build">
 </p>
 
@@ -1067,7 +1067,13 @@ docker compose logs -f api
 
 ## License
 
-Proprietary - All Rights Reserved
+Licensed under the **GNU Affero General Public License v3.0** — see
+[LICENSE](LICENSE) for the full text.
+
+AGPL-3.0 is a network copyleft license: if you modify this software and make it
+available to users over a network, you must also offer those users the
+corresponding source. For alternative licensing terms, open an issue to start a
+conversation.
 
 ---
 
