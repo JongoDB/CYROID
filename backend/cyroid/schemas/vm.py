@@ -218,6 +218,11 @@ class VMUpdate(BaseModel):
 
 
 class VMResponse(VMBase):
+    # Read model: echo stored sizes without re-imposing the interactive-create
+    # minimums — blueprint-deployed VMs may be smaller (e.g. a 256 MB redis).
+    cpu: int
+    ram_mb: int
+    disk_gb: int
     id: UUID
     range_id: UUID
     network_id: UUID  # Primary network ID (for backwards compatibility)
