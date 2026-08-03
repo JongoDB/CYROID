@@ -9,8 +9,12 @@
 - **Name**: CYROID (Cyber Range Orchestrator In Docker)
 - **Type**: Web-based cyber range orchestration platform
 - **Domain**: Military/government cyber training, educational institutions
-- **Current Version**: 0.27.6
+- **Current Version**: 0.38.4
+- **License**: AGPL-3.0 (see `LICENSE`)
 - **Repository**: /Users/JonWFH/jondev/CYROID
+
+> **Version note**: `VERSION` at the repo root is the source of truth and is bumped
+> automatically on PR merge by CI. Read it rather than trusting this file.
 
 ---
 
@@ -18,16 +22,22 @@
 
 CYROID automates Docker-based cyber training environments with:
 - Multi-OS VM support (Linux containers, Linux VMs via QEMU, Windows VMs via dockur, macOS)
+- Multi-architecture support (x86_64 + ARM64 native, per-VM `arch` selection, multi-platform digest resolution)
 - DinD (Docker-in-Docker) isolation for range deployments (no IP conflicts between ranges)
 - VM Library with snapshot-based VM creation
 - Network isolation with custom Docker networks and iptables rules
+- Multi-NIC VMs with a visual blueprint editor
 - VNC console access through Traefik (with DinD proxy routing)
 - MSEL (Master Scenario Events List) for scenario execution
 - Pre-deployment validation for ranges
-- Content Library with Student Lab walkthroughs
-- Blueprint export/import with Dockerfiles for reproducible environments
-- Global notifications system (toast + bell dropdown)
-- Training Events for scheduling exercises
+- Content Library with Student Lab walkthroughs (markdown + PDF export)
+- Blueprint export/import with Dockerfiles, async progress tracking, and offline image tarballs
+- Catalog for browsing and installing shared blueprints/content from remote sources
+- Local Docker Registry with pull-through cache for fast, offline-capable image distribution
+- Global notifications system (user-scoped, toast + bell dropdown)
+- Training Events with per-student range deployment and console visibility controls
+- ABAC + RBAC access control
+- `deploy.sh` full-screen TUI for production install, backup/restore, and factory reset
 - Evidence collection and scoring (in development)
 
 ---
@@ -40,14 +50,18 @@ Frontend (React/TypeScript) → Traefik → FastAPI Backend → Docker Engine
                     PostgreSQL + Redis + MinIO
 ```
 
-**Key Services**:
+**Key Services** (see `docker-compose.yml`):
 - `api`: FastAPI backend (port 8000)
 - `frontend`: React app (port 3000/80)
 - `db`: PostgreSQL 16 (port 5432)
 - `redis`: Redis 7 (port 6379)
 - `minio`: Object storage (ports 9000/9001)
 - `worker`: Dramatiq task processor
+- `registry`: Local Docker registry with pull-through cache
 - `traefik`: Reverse proxy (ports 80/443/8080)
+
+**Scale reference** (as of 0.38.4): 23 SQLAlchemy models, 26 API modules with ~285 routes,
+21 services, 4 Dramatiq task modules.
 
 ---
 
@@ -106,12 +120,24 @@ Current overall progress: **Phase 4 of 7 Complete (57%)**
 | 2 | Network & Deployment | ✅ Complete | 100% |
 | 3 | Templates & Artifacts | ✅ Complete | 100% |
 | 4 | Execution & Monitoring | ✅ Complete | 100% |
-| 5 | Evidence & Scoring | 🟡 In Progress | 40% |
-| 6 | Automation & Intelligence | 🟡 In Progress | 17% |
+| 5 | Evidence & Scoring | 🟡 In Progress | see note |
+| 6 | Automation & Intelligence | 🟡 In Progress | ~30% |
 | 7 | Advanced Features | ⏳ Planned | 0% |
+
+> **Phase 5 accuracy note (verified 2026-08-03)**: the *content/delivery* half of Phase 5
+> shipped (Content Library, walkthroughs, PDF export, Training Events, per-student
+> deployment, ABAC). The *evidence & scoring* half has *no implementation at all* —
+> there is no evidence or scoring model, API module, or UI component in the tree.
+> Treat every unchecked box below as genuinely not started, not partially done.
 
 ### Phase 5 Checklist (Current Focus)
 
+Delivered:
+- [x] Content Library + Student Lab walkthroughs (markdown, PDF export)
+- [x] Training Events with per-student range deployment
+- [x] ABAC resource tagging (`models/resource_tag.py`, enforced in `api/deps.py`)
+
+Not started — no code exists for any of these:
 - [ ] Evidence submission portal UI
 - [ ] Manifest.csv parser
 - [ ] Chain of custody form
@@ -123,12 +149,14 @@ Current overall progress: **Phase 4 of 7 Complete (57%)**
 
 ### Phase 6 Planned Items
 
-- [ ] MSEL time-based scheduling
-- [ ] Automated inject execution
+- [ ] MSEL time-based scheduling *(not started — no scheduler code)*
+- [ ] Automated inject execution *(manual trigger only)*
 - [ ] Attack scenario automation (scripts)
 - [ ] Advanced scoring (timeline reconstruction)
-- [ ] CAC/PKI authentication
-- [x] Offline/air-gap deployment mode (via comprehensive export with Docker images)
+- [ ] CAC/PKI authentication *(not started — no x509/PKCS#11 code)*
+- [x] Offline/air-gap deployment mode (comprehensive export + local registry pull-through cache)
+- [x] Local Docker Registry distribution with push-on-demand
+- [x] `deploy.sh` self-update and TUI-driven install/backup/restore
 
 ### Phase 7 Planned Items
 
@@ -151,7 +179,7 @@ Current overall progress: **Phase 4 of 7 Complete (57%)**
 | JWT Authentication | ✅ | Fully working |
 | User Registration | ✅ | With approval workflow |
 | RBAC (4 roles) | ✅ | Admin, Range Engineer, White Cell, Evaluator |
-| ABAC (resource tags) | 🟡 | Fine-grained visibility control (in progress) |
+| ABAC (resource tags) | ✅ | `models/resource_tag.py`, enforced in `api/deps.py` + `api/ranges.py` |
 | VM Template CRUD | ✅ | 27+ OS templates |
 | Range CRUD | ✅ | Full lifecycle |
 | Network Management | ✅ | Custom subnets, multi-homed VMs |
@@ -181,15 +209,24 @@ Current overall progress: **Phase 4 of 7 Complete (57%)**
 | Deployment Progress | ✅ | Real-time progress tracking during range deployment |
 | Clipboard Sync | ✅ | Copy from walkthrough to VNC console |
 | macOS VM Support | ✅ | macOS ISOs and container creation |
-| Evidence Submission | 🟡 | In development |
-| Evidence Validation | 🟡 | In development |
-| Scoring Engine | 🟡 | In development |
+| Multi-NIC VMs | ✅ | Range builder + visual blueprint editor |
+| Catalog | ✅ | Browse/install blueprints + content from remote sources |
+| Local Docker Registry | ✅ | Pull-through cache, push-on-demand, admin tab |
+| Async Blueprint Import/Export | ✅ | Real-time progress, parallel image export |
+| VM Provisioning Progress | ✅ | Live status, provision/start split, auto-start on running ranges |
+| Cross-Arch VM Pulls | ✅ | Per-VM `arch`, multi-platform digest resolution |
+| Per-Student Range Deployment | ✅ | Training Events, console visibility controls |
+| Content PDF Export | ✅ | Content Library → PDF |
+| deploy.sh TUI | ✅ | Full-screen dashboard, backup/restore, factory reset, self-update |
 | Network Visualization | 🟡 | Framework in place |
+| Evidence Submission | ⏳ | Phase 5 — not started, no code in tree |
+| Evidence Validation | ⏳ | Phase 5 — not started, no code in tree |
+| Scoring Engine | ⏳ | Phase 5 — not started, no code in tree |
 | MSEL Automation | ⏳ | Phase 6 |
 | Attack Automation | ⏳ | Phase 6 |
 | CAC/PKI Auth | ⏳ | Phase 6 |
 | Purple Team Integration | ⏳ | Phase 7 |
-| Multi-Architecture Support | ✅ | x86_64 + ARM64 native, emulation warnings |
+| Multi-Architecture Support | ✅ | x86_64 + ARM64 native CI builds, emulation warnings |
 
 ---
 
@@ -235,25 +272,43 @@ Use semantic prefixes:
 - `backend/cyroid/api/ranges.py` - Range endpoints
 - `backend/cyroid/api/vms.py` - VM endpoints
 - `backend/cyroid/api/cache.py` - Image cache and promote-to-library
+- `backend/cyroid/api/blueprints.py` - Blueprint export/import
+- `backend/cyroid/api/catalog.py` - Catalog sources, browse, install
+- `backend/cyroid/api/registry.py` - Local registry management
+- `backend/cyroid/api/deps.py` - Auth dependencies + ABAC enforcement
 - `backend/cyroid/services/docker_service.py` - Docker orchestration
 - `backend/cyroid/services/dind_service.py` - DinD container management
-- `backend/cyroid/services/vnc_proxy_service.py` - VNC proxy for DinD console access
 - `backend/cyroid/services/deployment_validator.py` - Pre-deployment validation
 - `backend/cyroid/services/range_deployment_service.py` - Range lifecycle
-- `backend/cyroid/models/` - SQLAlchemy models
+- `backend/cyroid/services/blueprint_service.py` - Blueprint import/build
+- `backend/cyroid/services/blueprint_export_service.py` - Blueprint export + image tarballs
+- `backend/cyroid/services/catalog_service.py` - Catalog sync/browse/install
+- `backend/cyroid/services/registry_service.py` - Registry push/pull, pull-through cache
+- `backend/cyroid/services/traefik_route_service.py` - Generates `traefik/dynamic/range-*.yml`
+- `backend/cyroid/tasks/` - Dramatiq tasks (`blueprint_import`, `blueprint_export`, `deployment`, `vm_tasks`)
+- `backend/cyroid/models/` - SQLAlchemy models (23)
 
 ### Frontend
 - `frontend/src/App.tsx` - Route configuration
-- `frontend/src/pages/RangeDetail.tsx` - Range builder (with snapshot selection)
+- `frontend/src/pages/RangeDetail.tsx` - Range builder (snapshot selection, multi-NIC)
 - `frontend/src/pages/VMLibrary.tsx` - VM Library (snapshots + base images)
 - `frontend/src/pages/ImageCache.tsx` - Docker image cache with promote feature
 - `frontend/src/pages/ExecutionConsole.tsx` - Live console
+- `frontend/src/pages/CatalogBrowser.tsx` - Catalog browse/install UI
+- `frontend/src/components/blueprints/VisualBlueprintEditor.tsx` - Visual blueprint editor (multi-NIC, arch selector)
+- `frontend/src/components/blueprints/ImportBlueprintModal.tsx` - Async import with progress
 - `frontend/src/services/api.ts` - API client
 
 ### Configuration
+- `VERSION` - Source of truth for version (auto-bumped by CI on PR merge)
+- `LICENSE` - AGPL-3.0
 - `docker-compose.yml` - Service definitions
+- `docker-compose.dev.yml` - Local source build overlay (see dev commands above)
 - `traefik-dynamic.yml` - Routing rules
-- `.env` - Environment variables
+- `traefik/dynamic/range-*.yml` - Per-range VNC routes, generated at runtime (gitignored)
+- `scripts/dev-setup.sh` - Creates gitignored local dev files (certs, overrides, data dirs)
+- `scripts/deploy.sh` - Standalone production installer + TUI dashboard
+- `.env` - Environment variables (gitignored; contains JWT + MinIO secrets)
 
 ---
 
@@ -313,6 +368,15 @@ At bottom of README, update:
 | 0.23.1 | 2026-01-24 | 5 | Blueprint export/import v3.0 with Dockerfiles |
 | 0.23.3 | 2026-01-25 | 5 | Moved docker-images to data/images |
 | 0.23.5 | 2026-01-25 | 5 | Notification dropdown positioning fix |
+| 0.24-0.29 | 2026-01-25 | 5 | ABAC, user-scoped notifications, Training Events (per-student deployment, console visibility), Content PDF export, production deployment system |
+| 0.30.0 | 2026-01-28 | 5 | **Catalog**: sources, browse, install; CatalogService + models + UI |
+| 0.31.0 | 2026-01-28 | 5 | Blueprint export consolidated with Docker image tarballs (#131) |
+| 0.32-0.33 | 2026-01-29 | 5 | **Multi-NIC** blueprints + visual editor; **local Docker Registry** with pull-through cache, push-on-demand, admin tab |
+| 0.34-0.35 | 2026-01-30 | 6 | `deploy.sh` full-screen TUI (dashboard, backup/restore, factory reset, seed students, self-update); native ARM64 CI builds; auto version bump on merge |
+| 0.36.x | 2026-02-13 | 6 | Concurrent user scalability fixes (login failures at scale) |
+| 0.37.x | 2026-02-21 | 6 | **Cross-architecture** VM support: per-VM `arch` through blueprint pipeline, multi-platform digest resolution, arch selector |
+| 0.38.0 | 2026-02-22 | 6 | Async blueprint import with progress; VM provisioning progress; provision/start split; auto-start VMs on running ranges |
+| 0.38.4 | 2026-02-22 | 6 | AGPL-3.0 license; DinD inter-network routing; VM size revalidation fix |
 | 1.0.0 | TBD | 7 | Production release |
 
 ---
@@ -364,18 +428,30 @@ Before marking a feature complete:
 ## Notes for Future Sessions
 
 ### Current Priority
-Phase 5: Evidence & Scoring system
+Phase 5: Evidence & Scoring — this is the **largest remaining gap**. Nothing has been
+built yet (no models, API, or UI), so it starts from a blank slate rather than
+continuing partial work.
 
 ### Known Issues
 - (Add issues here as discovered)
 
 ### Technical Debt
-- (Add items here as identified)
+- **Never commit VM disk images or ISOs.** An installer ISO was `git add`-ed at some
+  point; it was later removed from history but left a **4.5 GB unreachable blob** in
+  `.git`, pinned by the reflog and therefore immune to routine `git gc`. Repo size was
+  4.4 GB when the real packed history is ~2.5 MB. Cleaned 2026-08-03 with:
+  `git reflog expire --expire=now --expire-unreachable=now --all && git gc --prune=now`.
+  `.gitignore` now blocks `*.iso`, `*.img`, `*.qcow2`, `*.vmdk`, `*.vhd*`, `*.raw`, and
+  `*.tar*`. If `.git` ever looks oversized again, diagnose with:
+  `git count-objects -vH` then `git fsck --unreachable | awk '$2=="blob"{print $3}' | git cat-file --batch-check='%(objectsize) %(objectname)' | sort -rn | head`
+- This file drifted ~11 minor versions behind reality (claimed 0.27.6 at actual 0.38.4)
+  and referenced a deleted `services/vnc_proxy_service.py`. Prefer reading `VERSION` and
+  the tree over trusting prose here.
 
 ### User Feedback
 - (Add feedback here as received)
 
 ---
 
-*Last Updated: 2026-01-25*
+*Last Updated: 2026-08-03 (verified against tree at v0.38.4)*
 *Update this file whenever significant progress is made or context changes*
