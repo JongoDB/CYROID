@@ -965,8 +965,11 @@ export default function RangeDetail() {
       // Show VM in list immediately
       fetchData()
 
-      // Auto-provision VM in background if range is already deployed
-      if (range.status === 'running' || range.status === 'stopped') {
+      // Auto-provision VM in background if range is already deployed.
+      // `range` is null until fetchData() resolves; guard so a null range skips
+      // auto-provision rather than throwing into the catch below, which would
+      // report "Failed to create VM" for a VM that was in fact created.
+      if (range && (range.status === 'running' || range.status === 'stopped')) {
         // Fire-and-forget: progress shows inline via WebSocket events
         vmsApi.provision(newVm.id).then(() => {
           fetchData()
