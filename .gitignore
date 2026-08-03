@@ -66,5 +66,24 @@ traefik/dynamic/range-*.yml
 # Runtime data (local development cache)
 data/
 
+# VM disk images, installer ISOs, and Docker image tarballs.
+# These are multi-GB binaries that must never enter git history: a single
+# committed ISO left 4.5 GB of unreachable objects in .git that survived
+# every routine `git gc` because the reflog kept pinning it.
+*.iso
+*.img
+*.qcow2
+*.qcow
+*.vmdk
+*.vdi
+*.vhd
+*.vhdx
+*.raw
+
+# Exported Docker image tarballs (blueprint export / offline bundles)
+*.tar
+*.tar.gz
+*.tar.zst
+
 # Git worktrees
 .worktrees/
